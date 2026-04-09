@@ -1,8 +1,10 @@
 #include "security/json/serde_json/serde_json_bridge.h"
 
+#include <cstddef>
 #include <cstdint>
 #include <string>
 #include <utility>
+#include <vector>
 
 #include "security/json/serde_json/rust/serde_json_bridge_rs.h"
 #include "third_party/absl/status/status.h"
@@ -13,6 +15,18 @@ namespace security::json::serde_json_bridge {
 
 SerdeJson::SerdeJson(serde_json_bridge_rs::json::SerdeJson sj)
     : json_obj_(std::move(sj)) {}
+
+// This function has to be a member of `SerdeJson` class as it uses
+// private constructor `SerdeJson(serde_json_bridge_rs::json::SerdeJson)`.
+std::vector<SerdeJson> SerdeJson::ConvertVecSerdeJsonToVector(
+    const serde_json_bridge_rs::json::VecSerdeJson& rs_vec_serde_json) {
+  std::vector<SerdeJson> ret_vec;
+  ret_vec.reserve(rs_vec_serde_json.len());
+  for (size_t i = 0; i < rs_vec_serde_json.len(); ++i) {
+    ret_vec.push_back(SerdeJson(rs_vec_serde_json.as_ptr()[i]));
+  }
+  return ret_vec;
+}
 
 absl::StatusOr<SerdeJson> SerdeJson::Parse(absl::string_view data) {
   serde_json_bridge_rs::json::ResultSerdeJson rs_result =
@@ -87,6 +101,17 @@ absl::StatusOr<double> SerdeJson::GetDouble() const {
   return std::move(rs_result).unwrap();
 }
 
+absl::StatusOr<std::vector<SerdeJson>> SerdeJson::GetArray() const {
+  serde_json_bridge_rs::json::ResultVecSerdeJson rs_result =
+      json_obj_.get_array();
+
+  if (rs_result.is_err()) {
+    return absl::InvalidArgumentError(std::move(rs_result).unwrap_err());
+  }
+
+  return ConvertVecSerdeJsonToVector(std::move(rs_result).unwrap());
+}
+
 absl::StatusOr<std::string> SerdeJson::GetFieldString(
     absl::string_view key) const {
   serde_json_bridge_rs::json::ResultString rs_result =
@@ -130,6 +155,18 @@ absl::StatusOr<double> SerdeJson::GetFieldDouble(absl::string_view key) const {
   }
 
   return std::move(rs_result).unwrap();
+}
+
+absl::StatusOr<std::vector<SerdeJson>> SerdeJson::GetFieldArray(
+    absl::string_view key) const {
+  serde_json_bridge_rs::json::ResultVecSerdeJson rs_result =
+      json_obj_.get_field_array(key);
+
+  if (rs_result.is_err()) {
+    return absl::InvalidArgumentError(std::move(rs_result).unwrap_err());
+  }
+
+  return ConvertVecSerdeJsonToVector(std::move(rs_result).unwrap());
 }
 
 bool SerdeJson::IsNull() const { return json_obj_.is_null(); }

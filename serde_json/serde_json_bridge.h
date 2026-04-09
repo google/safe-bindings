@@ -3,6 +3,7 @@
 
 #include <cstdint>
 #include <string>
+#include <vector>
 
 #include "security/json/serde_json/rust/serde_json_bridge_rs.h"
 #include "third_party/absl/status/statusor.h"
@@ -21,6 +22,7 @@ class SerdeJson final {
   absl::StatusOr<bool> GetBool() const;
   absl::StatusOr<std::string> GetString() const;
   absl::StatusOr<double> GetDouble() const;
+  absl::StatusOr<std::vector<SerdeJson>> GetArray() const;
 
   // Returns a node of the corresponding `key` field of this json object.
   // Used when we don't know the type or for objects.
@@ -32,6 +34,8 @@ class SerdeJson final {
   absl::StatusOr<int64_t> GetFieldInt(absl::string_view key) const;
   absl::StatusOr<double> GetFieldDouble(absl::string_view key) const;
   absl::StatusOr<SerdeJson> GetFieldObject(absl::string_view key) const;
+  absl::StatusOr<std::vector<SerdeJson>> GetFieldArray(
+      absl::string_view key) const;
 
   // Methods for checking the type of this json node.
   bool IsNull() const;
@@ -45,6 +49,9 @@ class SerdeJson final {
 
  private:
   explicit SerdeJson(serde_json_bridge_rs::json::SerdeJson);
+
+  static std::vector<SerdeJson> ConvertVecSerdeJsonToVector(
+      const serde_json_bridge_rs::json::VecSerdeJson& rs_vec_serde_json);
 
   serde_json_bridge_rs::json::SerdeJson json_obj_;
 };

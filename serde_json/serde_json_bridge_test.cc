@@ -1,6 +1,7 @@
 #include "security/json/serde_json/serde_json_bridge.h"
 
 #include <string>
+#include <vector>
 
 #include "testing/base/public/gmock.h"
 #include "testing/base/public/gunit.h"
@@ -85,6 +86,38 @@ TEST(SerdeJsonBridge, CheckGetDouble) {
   ASSERT_THAT(json.GetDouble(), IsOkAndHolds(1337.1234));
 }
 
+TEST(SerdeJsonBridge, CheckGetArray) {
+  static constexpr absl::string_view json_string =
+      "[\n"
+      "  \"first\",\n"
+      "  2,\n"
+      "  \"third\",\n"
+      "  4\n"
+      "]";
+
+  ASSERT_OK_AND_ASSIGN(
+      security::json::serde_json_bridge::SerdeJson json,
+      security::json::serde_json_bridge::SerdeJson::Parse(json_string));
+  ASSERT_OK_AND_ASSIGN(
+      std::vector<security::json::serde_json_bridge::SerdeJson> array,
+      json.GetArray());
+
+  ASSERT_THAT(array[0].GetString(), IsOkAndHolds("first"));
+  ASSERT_THAT(array[1].GetInt(), IsOkAndHolds(2));
+  ASSERT_THAT(array[2].GetString(), IsOkAndHolds("third"));
+  ASSERT_THAT(array[3].GetInt(), IsOkAndHolds(4));
+}
+
+TEST(SerdeJsonBridge, CheckGetArrayNotFromArray) {
+  static constexpr absl::string_view json_string = "\"first\"";
+
+  ASSERT_OK_AND_ASSIGN(
+      security::json::serde_json_bridge::SerdeJson json,
+      security::json::serde_json_bridge::SerdeJson::Parse(json_string));
+  ASSERT_THAT(json.GetArray(),
+              absl_testing::StatusIs(absl::StatusCode::kInvalidArgument));
+}
+
 TEST(SerdeJsonBridge, GetFieldString) {
   static constexpr absl::string_view json_string =
       "{\n"
@@ -157,6 +190,43 @@ TEST(SerdeJsonBridge, GetFieldObject) {
   ASSERT_THAT(obj.GetFieldDouble("value1"), IsOkAndHolds(1.0));
 }
 
+TEST(SerdeJsonBridge, GetFieldArray) {
+  static constexpr absl::string_view json_string =
+      "{\n"
+      "  \"value\": [\n"
+      "    \"first\",\n"
+      "    2,\n"
+      "    \"third\",\n"
+      "    4\n"
+      " ]\n"
+      "}";
+
+  ASSERT_OK_AND_ASSIGN(
+      security::json::serde_json_bridge::SerdeJson json,
+      security::json::serde_json_bridge::SerdeJson::Parse(json_string));
+  ASSERT_OK_AND_ASSIGN(
+      std::vector<security::json::serde_json_bridge::SerdeJson> array,
+      json.GetFieldArray("value"));
+
+  ASSERT_THAT(array[0].GetString(), IsOkAndHolds("first"));
+  ASSERT_THAT(array[1].GetInt(), IsOkAndHolds(2));
+  ASSERT_THAT(array[2].GetString(), IsOkAndHolds("third"));
+  ASSERT_THAT(array[3].GetInt(), IsOkAndHolds(4));
+}
+
+TEST(SerdeJsonBridge, GetFieldArrayNotFromArray) {
+  static constexpr absl::string_view json_string =
+      "{\n"
+      "  \"value\": 1.0\n"
+      "}";
+
+  ASSERT_OK_AND_ASSIGN(
+      security::json::serde_json_bridge::SerdeJson json,
+      security::json::serde_json_bridge::SerdeJson::Parse(json_string));
+  ASSERT_THAT(json.GetFieldArray("value"),
+              absl_testing::StatusIs(absl::StatusCode::kInvalidArgument));
+}
+
 TEST(SerdeJsonBridge, GetFieldNotFromObject) {
   static constexpr absl::string_view json_string = "1337.1234";
 
@@ -172,6 +242,8 @@ TEST(SerdeJsonBridge, GetFieldNotFromObject) {
   ASSERT_THAT(json.GetFieldInt("test"),
               absl_testing::StatusIs(absl::StatusCode::kInvalidArgument));
   ASSERT_THAT(json.GetFieldObject("test"),
+              absl_testing::StatusIs(absl::StatusCode::kInvalidArgument));
+  ASSERT_THAT(json.GetFieldArray("test"),
               absl_testing::StatusIs(absl::StatusCode::kInvalidArgument));
   ASSERT_THAT(json.GetDouble(), IsOkAndHolds(1337.1234));
 }

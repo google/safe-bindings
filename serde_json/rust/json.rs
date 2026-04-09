@@ -5,6 +5,7 @@ google3::import! {
 }
 
 use crate::make_result_type;
+use crate::make_vec_type;
 use anyhow::anyhow;
 
 #[derive(Default, PartialEq, Clone)]
@@ -15,6 +16,12 @@ pub struct SerdeJson {
 impl std::fmt::Debug for SerdeJson {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
         write!(f, "SerdeJson")
+    }
+}
+
+impl From<&Vec<serde_json::Value>> for VecSerdeJson {
+    fn from(value: &Vec<serde_json::Value>) -> Self {
+        value.iter().map(|v| SerdeJson { value: v.clone() }).collect::<Vec<SerdeJson>>().into()
     }
 }
 
@@ -108,6 +115,18 @@ impl SerdeJson {
         }
     }
 
+    /// Returns an array of [SerdeJson] for a given field name in the JSON.
+    pub fn get_field_array(&self, raw_field_name: cc_std::std::string_view) -> ResultVecSerdeJson {
+        let field_name = match raw_field_name.to_str() {
+            Ok(field_name) => field_name,
+            Err(err) => return Err(anyhow::Error::new(err)).into(),
+        };
+        match self.value[field_name].as_array() {
+            Some(a) => std::convert::Into::<VecSerdeJson>::into(a).into(),
+            None => Err(anyhow::anyhow!("Field '{}' is not array", field_name)).into(),
+        }
+    }
+
     /// Returns the boolean value of this [SerdeJson] if it is a boolean.
     pub fn get_bool(&self) -> ResultBool {
         match self.value.as_bool() {
@@ -137,6 +156,14 @@ impl SerdeJson {
         match self.value.as_str() {
             Some(s) => cc_std::std::string::from(s.to_string()).into(),
             None => Err(anyhow::anyhow!("This object is not string")).into(),
+        }
+    }
+
+    /// Returns the array of [SerdeJson] if the object is an array.
+    pub fn get_array(&self) -> ResultVecSerdeJson {
+        match self.value.as_array() {
+            Some(a) => std::convert::Into::<VecSerdeJson>::into(a).into(),
+            None => Err(anyhow::anyhow!("This object is not array")).into(),
         }
     }
 
@@ -187,3 +214,6 @@ make_result_type!(cc_std::std::string, ResultString);
 make_result_type!(bool, ResultBool);
 make_result_type!(i64, Resulti64);
 make_result_type!(f64, ResultDouble);
+
+make_vec_type!(SerdeJson, VecSerdeJson);
+make_result_type!(VecSerdeJson, ResultVecSerdeJson);
