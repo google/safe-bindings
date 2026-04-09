@@ -47,7 +47,7 @@ TEST(SerdeJsonBridge, CheckFieldGetter) {
   ASSERT_OK(json.GetField("firstName"));
   ASSERT_OK(json.GetField("lastName"));
   ASSERT_THAT(json.GetField("phone"),
-              absl_testing::StatusIs(absl::StatusCode::kInvalidArgument));
+              absl_testing::StatusIs(absl::StatusCode::kFailedPrecondition));
 }
 
 TEST(SerdeJsonBridge, CheckGetBool) {
@@ -115,7 +115,7 @@ TEST(SerdeJsonBridge, CheckGetArrayNotFromArray) {
       security::json::serde_json_bridge::SerdeJson json,
       security::json::serde_json_bridge::SerdeJson::Parse(json_string));
   ASSERT_THAT(json.GetArray(),
-              absl_testing::StatusIs(absl::StatusCode::kInvalidArgument));
+              absl_testing::StatusIs(absl::StatusCode::kFailedPrecondition));
 }
 
 TEST(SerdeJsonBridge, GetFieldString) {
@@ -224,7 +224,7 @@ TEST(SerdeJsonBridge, GetFieldArrayNotFromArray) {
       security::json::serde_json_bridge::SerdeJson json,
       security::json::serde_json_bridge::SerdeJson::Parse(json_string));
   ASSERT_THAT(json.GetFieldArray("value"),
-              absl_testing::StatusIs(absl::StatusCode::kInvalidArgument));
+              absl_testing::StatusIs(absl::StatusCode::kFailedPrecondition));
 }
 
 TEST(SerdeJsonBridge, GetFieldNotFromObject) {
@@ -234,17 +234,17 @@ TEST(SerdeJsonBridge, GetFieldNotFromObject) {
       security::json::serde_json_bridge::SerdeJson json,
       security::json::serde_json_bridge::SerdeJson::Parse(json_string));
   ASSERT_THAT(json.GetFieldString("test"),
-              absl_testing::StatusIs(absl::StatusCode::kInvalidArgument));
+              absl_testing::StatusIs(absl::StatusCode::kFailedPrecondition));
   ASSERT_THAT(json.GetFieldBool("test"),
-              absl_testing::StatusIs(absl::StatusCode::kInvalidArgument));
+              absl_testing::StatusIs(absl::StatusCode::kFailedPrecondition));
   ASSERT_THAT(json.GetFieldDouble("test"),
-              absl_testing::StatusIs(absl::StatusCode::kInvalidArgument));
+              absl_testing::StatusIs(absl::StatusCode::kFailedPrecondition));
   ASSERT_THAT(json.GetFieldInt("test"),
-              absl_testing::StatusIs(absl::StatusCode::kInvalidArgument));
+              absl_testing::StatusIs(absl::StatusCode::kFailedPrecondition));
   ASSERT_THAT(json.GetFieldObject("test"),
-              absl_testing::StatusIs(absl::StatusCode::kInvalidArgument));
+              absl_testing::StatusIs(absl::StatusCode::kFailedPrecondition));
   ASSERT_THAT(json.GetFieldArray("test"),
-              absl_testing::StatusIs(absl::StatusCode::kInvalidArgument));
+              absl_testing::StatusIs(absl::StatusCode::kFailedPrecondition));
   ASSERT_THAT(json.GetDouble(), IsOkAndHolds(1337.1234));
 }
 

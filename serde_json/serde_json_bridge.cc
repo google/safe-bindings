@@ -43,7 +43,7 @@ absl::StatusOr<SerdeJson> SerdeJson::GetField(absl::string_view key) const {
       json_obj_.get_field(key);
 
   if (rs_result.is_err()) {
-    return absl::InvalidArgumentError(std::move(rs_result).unwrap_err());
+    return absl::FailedPreconditionError(std::move(rs_result).unwrap_err());
   }
 
   return SerdeJson(std::move(rs_result).unwrap());
@@ -55,7 +55,7 @@ absl::StatusOr<SerdeJson> SerdeJson::GetFieldObject(
       json_obj_.get_field_object(key);
 
   if (rs_result.is_err()) {
-    return absl::InvalidArgumentError(std::move(rs_result).unwrap_err());
+    return absl::FailedPreconditionError(std::move(rs_result).unwrap_err());
   }
 
   return SerdeJson(std::move(rs_result).unwrap());
@@ -65,7 +65,7 @@ absl::StatusOr<bool> SerdeJson::GetBool() const {
   serde_json_bridge_rs::json::ResultBool rs_result = json_obj_.get_bool();
 
   if (rs_result.is_err()) {
-    return absl::InvalidArgumentError(std::move(rs_result).unwrap_err());
+    return absl::FailedPreconditionError(std::move(rs_result).unwrap_err());
   }
 
   return std::move(rs_result).unwrap();
@@ -75,7 +75,7 @@ absl::StatusOr<std::string> SerdeJson::GetString() const {
   serde_json_bridge_rs::json::ResultString rs_result = json_obj_.get_string();
 
   if (rs_result.is_err()) {
-    return absl::InvalidArgumentError(std::move(rs_result).unwrap_err());
+    return absl::FailedPreconditionError(std::move(rs_result).unwrap_err());
   }
 
   return std::move(rs_result).unwrap();
@@ -85,7 +85,7 @@ absl::StatusOr<int64_t> SerdeJson::GetInt() const {
   serde_json_bridge_rs::json::Resulti64 rs_result = json_obj_.get_int();
 
   if (rs_result.is_err()) {
-    return absl::InvalidArgumentError(std::move(rs_result).unwrap_err());
+    return absl::FailedPreconditionError(std::move(rs_result).unwrap_err());
   }
 
   return std::move(rs_result).unwrap();
@@ -95,7 +95,7 @@ absl::StatusOr<double> SerdeJson::GetDouble() const {
   serde_json_bridge_rs::json::ResultDouble rs_result = json_obj_.get_double();
 
   if (rs_result.is_err()) {
-    return absl::InvalidArgumentError(std::move(rs_result).unwrap_err());
+    return absl::FailedPreconditionError(std::move(rs_result).unwrap_err());
   }
 
   return std::move(rs_result).unwrap();
@@ -106,7 +106,7 @@ absl::StatusOr<std::vector<SerdeJson>> SerdeJson::GetArray() const {
       json_obj_.get_array();
 
   if (rs_result.is_err()) {
-    return absl::InvalidArgumentError(std::move(rs_result).unwrap_err());
+    return absl::FailedPreconditionError(std::move(rs_result).unwrap_err());
   }
 
   return ConvertVecSerdeJsonToVector(std::move(rs_result).unwrap());
@@ -118,7 +118,7 @@ absl::StatusOr<std::string> SerdeJson::GetFieldString(
       json_obj_.get_field_string(key);
 
   if (rs_result.is_err()) {
-    return absl::InvalidArgumentError(std::move(rs_result).unwrap_err());
+    return absl::FailedPreconditionError(std::move(rs_result).unwrap_err());
   }
 
   return std::move(rs_result).unwrap();
@@ -129,7 +129,7 @@ absl::StatusOr<bool> SerdeJson::GetFieldBool(absl::string_view key) const {
       json_obj_.get_field_bool(key);
 
   if (rs_result.is_err()) {
-    return absl::InvalidArgumentError(std::move(rs_result).unwrap_err());
+    return absl::FailedPreconditionError(std::move(rs_result).unwrap_err());
   }
 
   return std::move(rs_result).unwrap();
@@ -140,7 +140,7 @@ absl::StatusOr<int64_t> SerdeJson::GetFieldInt(absl::string_view key) const {
       json_obj_.get_field_int(key);
 
   if (rs_result.is_err()) {
-    return absl::InvalidArgumentError(std::move(rs_result).unwrap_err());
+    return absl::FailedPreconditionError(std::move(rs_result).unwrap_err());
   }
 
   return std::move(rs_result).unwrap();
@@ -151,7 +151,7 @@ absl::StatusOr<double> SerdeJson::GetFieldDouble(absl::string_view key) const {
       json_obj_.get_field_double(key);
 
   if (rs_result.is_err()) {
-    return absl::InvalidArgumentError(std::move(rs_result).unwrap_err());
+    return absl::FailedPreconditionError(std::move(rs_result).unwrap_err());
   }
 
   return std::move(rs_result).unwrap();
@@ -163,7 +163,7 @@ absl::StatusOr<std::vector<SerdeJson>> SerdeJson::GetFieldArray(
       json_obj_.get_field_array(key);
 
   if (rs_result.is_err()) {
-    return absl::InvalidArgumentError(std::move(rs_result).unwrap_err());
+    return absl::FailedPreconditionError(std::move(rs_result).unwrap_err());
   }
 
   return ConvertVecSerdeJsonToVector(std::move(rs_result).unwrap());
