@@ -206,6 +206,11 @@ impl SerdeJson {
     pub fn is_object(&self) -> bool {
         self.value.is_object()
     }
+
+    /// Converts a [SerdeJson] to a string.
+    pub fn to_string(&self) -> cc_std::std::string {
+        self.value.to_string().into()
+    }
 }
 
 // NOTE: b/367916605 - Remove make_result_type and make_vec_type macros.

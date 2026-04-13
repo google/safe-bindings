@@ -424,4 +424,21 @@ TEST(SerdeJsonBridge, IsInt) {
   EXPECT_FALSE(value.IsDouble());
 }
 
+TEST(SerdeJsonBridge, ToString) {
+  static constexpr absl::string_view json_string =
+      "{\n"
+      "  \"firstName\": \"John\",\n"
+      "  \"lastName\": \"Doe\",\n"
+      "  \"value1\": 1.0,\n"
+      "  \"value2\": 3.0\n"
+      "}";
+
+  ASSERT_OK_AND_ASSIGN(
+      security::json::serde_json_bridge::SerdeJson json,
+      security::json::serde_json_bridge::SerdeJson::Parse(json_string));
+  EXPECT_EQ(json.ToString(),
+            "{\"firstName\":\"John\",\"lastName\":\"Doe\",\"value1\":1.0,"
+            "\"value2\":3.0}");
+}
+
 }  // namespace

@@ -47,6 +47,9 @@ class SerdeJson final {
   bool IsBool() const;
   bool IsInt() const;
 
+  // Convert this object to string.
+  std::string ToString() const;
+
  private:
   explicit SerdeJson(serde_json_bridge_rs::json::SerdeJson);
 

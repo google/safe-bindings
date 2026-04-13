@@ -185,4 +185,6 @@ bool SerdeJson::IsDouble() const { return json_obj_.is_f64(); }
 
 bool SerdeJson::IsBool() const { return json_obj_.is_boolean(); }
 
+std::string SerdeJson::ToString() const { return json_obj_.to_string(); }
+
 }  // namespace security::json::serde_json_bridge
