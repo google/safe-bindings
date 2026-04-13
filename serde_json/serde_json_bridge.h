@@ -17,6 +17,14 @@ class SerdeJson final {
   // Returns an absl::Status if the input is malformed.
   static absl::StatusOr<SerdeJson> Parse(absl::string_view data);
 
+  // Creates a new SerdeJson of a given type.
+  static absl::StatusOr<SerdeJson> CreateObject();
+  static absl::StatusOr<SerdeJson> CreateInt(int64_t value);
+  static absl::StatusOr<SerdeJson> CreateBool(bool value);
+  static absl::StatusOr<SerdeJson> CreateDouble(double value);
+  static absl::StatusOr<SerdeJson> CreateNull();
+  static absl::StatusOr<SerdeJson> CreateString(absl::string_view value);
+
   // Returns the value of the current json node.
   absl::StatusOr<int64_t> GetInt() const;
   absl::StatusOr<bool> GetBool() const;

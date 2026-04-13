@@ -39,6 +39,44 @@ impl SerdeJson {
         }
     }
 
+    /// Creates a new [SerdeJson] of type object
+    pub fn create_object() -> Self {
+        SerdeJson { value: serde_json::json!({}) }
+    }
+
+    /// Creates a new [SerdeJson] of type i64
+    pub fn create_int(v: i64) -> Self {
+        SerdeJson { value: serde_json::json!(v) }
+    }
+
+    /// Creates a new [SerdeJson] of type double
+    /// Returns error if value is NaN or infinity.
+    pub fn create_double(v: f64) -> ResultSerdeJson {
+        match serde_json::Number::from_f64(v) {
+            Some(n) => Ok(SerdeJson { value: serde_json::Value::Number(n) }).into(),
+            None => Err(anyhow::anyhow!("Invalid JSON number: {}", v)).into(),
+        }
+    }
+
+    /// Creates a new [SerdeJson] of type bool
+    pub fn create_bool(v: bool) -> Self {
+        SerdeJson { value: serde_json::json!(v) }
+    }
+
+    /// Creates a new [SerdeJson] of type null
+    pub fn create_null() -> Self {
+        SerdeJson { value: serde_json::Value::Null }
+    }
+
+    /// Creates a new [SerdeJson] of type string
+    pub fn create_string(raw_value: cc_std::std::string_view) -> ResultSerdeJson {
+        let value = match raw_value.to_str() {
+            Ok(data) => data,
+            Err(err) => return Err(anyhow::Error::new(err)).into(),
+        };
+        SerdeJson { value: serde_json::json!(value) }.into()
+    }
+
     /// Returns a new [SerdeJson] for a given field name in the JSON.
     /// The type of the underlying data is unknown, and has to be tested using
     /// is_{bool,string,int,double} functions, and value can be obtained

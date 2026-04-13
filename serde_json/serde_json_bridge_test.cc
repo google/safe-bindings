@@ -1,5 +1,6 @@
 #include "security/json/serde_json/serde_json_bridge.h"
 
+#include <limits>
 #include <string>
 #include <vector>
 
@@ -439,6 +440,75 @@ TEST(SerdeJsonBridge, ToString) {
   EXPECT_EQ(json.ToString(),
             "{\"firstName\":\"John\",\"lastName\":\"Doe\",\"value1\":1.0,"
             "\"value2\":3.0}");
+}
+
+TEST(SerdeJsonBridge, CreateInt) {
+  ASSERT_OK_AND_ASSIGN(
+      security::json::serde_json_bridge::SerdeJson json,
+      security::json::serde_json_bridge::SerdeJson::CreateInt(123));
+
+  ASSERT_EQ(json.IsNumber(), true);
+  ASSERT_EQ(json.IsInt(), true);
+  ASSERT_THAT(json.GetInt(), IsOkAndHolds(123));
+  EXPECT_EQ(json.ToString(), "123");
+}
+
+TEST(SerdeJsonBridge, CreateBool) {
+  ASSERT_OK_AND_ASSIGN(
+      security::json::serde_json_bridge::SerdeJson json,
+      security::json::serde_json_bridge::SerdeJson::CreateBool(false));
+
+  ASSERT_EQ(json.IsBool(), true);
+  ASSERT_THAT(json.GetBool(), IsOkAndHolds(false));
+  EXPECT_EQ(json.ToString(), "false");
+}
+
+TEST(SerdeJsonBridge, CreateDouble) {
+  ASSERT_OK_AND_ASSIGN(
+      security::json::serde_json_bridge::SerdeJson json,
+      security::json::serde_json_bridge::SerdeJson::CreateDouble(1337.1337));
+
+  ASSERT_EQ(json.IsNumber(), true);
+  ASSERT_EQ(json.IsDouble(), true);
+  ASSERT_THAT(json.GetDouble(), IsOkAndHolds(1337.1337));
+  EXPECT_EQ(json.ToString(), "1337.1337");
+}
+
+TEST(SerdeJsonBridge, CreateDoubleWithNaN) {
+  ASSERT_THAT(security::json::serde_json_bridge::SerdeJson::CreateDouble(
+                  std::numeric_limits<double>::quiet_NaN()),
+              absl_testing::StatusIs(absl::StatusCode::kInvalidArgument));
+}
+
+TEST(SerdeJsonBridge, CreateDoubleWithInfinity) {
+  ASSERT_THAT(security::json::serde_json_bridge::SerdeJson::CreateDouble(
+                  std::numeric_limits<double>::infinity()),
+              absl_testing::StatusIs(absl::StatusCode::kInvalidArgument));
+}
+
+TEST(SerdeJsonBridge, CreateDoubleWithNegativeInfinity) {
+  ASSERT_THAT(security::json::serde_json_bridge::SerdeJson::CreateDouble(
+                  -std::numeric_limits<double>::infinity()),
+              absl_testing::StatusIs(absl::StatusCode::kInvalidArgument));
+}
+
+TEST(SerdeJsonBridge, CreateNull) {
+  ASSERT_OK_AND_ASSIGN(
+      security::json::serde_json_bridge::SerdeJson json,
+      security::json::serde_json_bridge::SerdeJson::CreateNull());
+
+  ASSERT_EQ(json.IsNull(), true);
+  EXPECT_EQ(json.ToString(), "null");
+}
+
+TEST(SerdeJsonBridge, CreateString) {
+  ASSERT_OK_AND_ASSIGN(
+      security::json::serde_json_bridge::SerdeJson json,
+      security::json::serde_json_bridge::SerdeJson::CreateString("text"));
+
+  ASSERT_EQ(json.IsString(), true);
+  ASSERT_THAT(json.GetString(), IsOkAndHolds("text"));
+  EXPECT_EQ(json.ToString(), "\"text\"");
 }
 
 }  // namespace

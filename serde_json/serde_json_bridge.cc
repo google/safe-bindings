@@ -28,6 +28,42 @@ std::vector<SerdeJson> SerdeJson::ConvertVecSerdeJsonToVector(
   return ret_vec;
 }
 
+absl::StatusOr<SerdeJson> SerdeJson::CreateObject() {
+  return SerdeJson(serde_json_bridge_rs::json::SerdeJson::create_object());
+}
+
+absl::StatusOr<SerdeJson> SerdeJson::CreateInt(int64_t value) {
+  return SerdeJson(serde_json_bridge_rs::json::SerdeJson::create_int(value));
+}
+
+absl::StatusOr<SerdeJson> SerdeJson::CreateDouble(double value) {
+  serde_json_bridge_rs::json::ResultSerdeJson rs_result =
+      serde_json_bridge_rs::json::SerdeJson::create_double(value);
+
+  if (rs_result.is_err()) {
+    return absl::InvalidArgumentError(std::move(rs_result).unwrap_err());
+  }
+  return SerdeJson(std::move(rs_result).unwrap());
+}
+
+absl::StatusOr<SerdeJson> SerdeJson::CreateBool(bool value) {
+  return SerdeJson(serde_json_bridge_rs::json::SerdeJson::create_bool(value));
+}
+
+absl::StatusOr<SerdeJson> SerdeJson::CreateNull() {
+  return SerdeJson(serde_json_bridge_rs::json::SerdeJson::create_null());
+}
+
+absl::StatusOr<SerdeJson> SerdeJson::CreateString(absl::string_view value) {
+  serde_json_bridge_rs::json::ResultSerdeJson rs_result =
+      serde_json_bridge_rs::json::SerdeJson::create_string(value);
+
+  if (rs_result.is_err()) {
+    return absl::InvalidArgumentError(std::move(rs_result).unwrap_err());
+  }
+  return SerdeJson(std::move(rs_result).unwrap());
+}
+
 absl::StatusOr<SerdeJson> SerdeJson::Parse(absl::string_view data) {
   serde_json_bridge_rs::json::ResultSerdeJson rs_result =
       serde_json_bridge_rs::json::SerdeJson::parse_string(data);
