@@ -15,28 +15,28 @@ namespace {
 using ::testing::status::IsOkAndHolds;
 
 TEST(SerdeJsonBridge, SimpleParse) {
-  static constexpr absl::string_view json_string =
+  constexpr absl::string_view kJsonString =
       "{\n"
       "  \"firstName\": \"John\",\n"
       "  \"lastName\": \"Doe\"\n"
       "}";
 
-  ASSERT_OK(security::json::serde_json_bridge::SerdeJson::Parse(json_string));
+  ASSERT_OK(security::json::serde_json_bridge::SerdeJson::Parse(kJsonString));
 }
 
 TEST(SerdeJsonBridge, FailParse) {
-  static constexpr absl::string_view invalid_json_string =
+  constexpr absl::string_view kInvalidJsonString =
       "{\n"
       "  \"firstName\": \"John\",\n"
       "}";
 
   ASSERT_THAT(
-      security::json::serde_json_bridge::SerdeJson::Parse(invalid_json_string),
+      security::json::serde_json_bridge::SerdeJson::Parse(kInvalidJsonString),
       absl_testing::StatusIs(absl::StatusCode::kInvalidArgument));
 }
 
 TEST(SerdeJsonBridge, CheckFieldGetter) {
-  static constexpr absl::string_view json_string =
+  constexpr absl::string_view kJsonString =
       "{\n"
       "  \"firstName\": \"John\",\n"
       "  \"lastName\": \"Doe\"\n"
@@ -44,7 +44,7 @@ TEST(SerdeJsonBridge, CheckFieldGetter) {
 
   ASSERT_OK_AND_ASSIGN(
       security::json::serde_json_bridge::SerdeJson json,
-      security::json::serde_json_bridge::SerdeJson::Parse(json_string));
+      security::json::serde_json_bridge::SerdeJson::Parse(kJsonString));
   ASSERT_OK(json.GetField("firstName"));
   ASSERT_OK(json.GetField("lastName"));
   ASSERT_THAT(json.GetField("phone"),
@@ -52,43 +52,43 @@ TEST(SerdeJsonBridge, CheckFieldGetter) {
 }
 
 TEST(SerdeJsonBridge, CheckGetBool) {
-  static constexpr absl::string_view json_string = "true";
+  constexpr absl::string_view kJsonString = "true";
 
   ASSERT_OK_AND_ASSIGN(
       security::json::serde_json_bridge::SerdeJson json,
-      security::json::serde_json_bridge::SerdeJson::Parse(json_string));
+      security::json::serde_json_bridge::SerdeJson::Parse(kJsonString));
   ASSERT_THAT(json.GetBool(), IsOkAndHolds(true));
 }
 
 TEST(SerdeJsonBridge, CheckGetString) {
-  static constexpr absl::string_view json_string = "\"string\"";
+  constexpr absl::string_view kJsonString = "\"string\"";
 
   ASSERT_OK_AND_ASSIGN(
       security::json::serde_json_bridge::SerdeJson json,
-      security::json::serde_json_bridge::SerdeJson::Parse(json_string));
+      security::json::serde_json_bridge::SerdeJson::Parse(kJsonString));
   ASSERT_THAT(json.GetString(), IsOkAndHolds("string"));
 }
 
 TEST(SerdeJsonBridge, CheckGetInt) {
-  static constexpr absl::string_view json_string = "1234";
+  constexpr absl::string_view kJsonString = "1234";
 
   ASSERT_OK_AND_ASSIGN(
       security::json::serde_json_bridge::SerdeJson json,
-      security::json::serde_json_bridge::SerdeJson::Parse(json_string));
+      security::json::serde_json_bridge::SerdeJson::Parse(kJsonString));
   ASSERT_THAT(json.GetInt(), IsOkAndHolds(1234));
 }
 
 TEST(SerdeJsonBridge, CheckGetDouble) {
-  static constexpr absl::string_view json_string = "1337.1234";
+  constexpr absl::string_view kJsonString = "1337.1234";
 
   ASSERT_OK_AND_ASSIGN(
       security::json::serde_json_bridge::SerdeJson json,
-      security::json::serde_json_bridge::SerdeJson::Parse(json_string));
+      security::json::serde_json_bridge::SerdeJson::Parse(kJsonString));
   ASSERT_THAT(json.GetDouble(), IsOkAndHolds(1337.1234));
 }
 
 TEST(SerdeJsonBridge, CheckGetArray) {
-  static constexpr absl::string_view json_string =
+  constexpr absl::string_view kJsonString =
       "[\n"
       "  \"first\",\n"
       "  2,\n"
@@ -98,7 +98,7 @@ TEST(SerdeJsonBridge, CheckGetArray) {
 
   ASSERT_OK_AND_ASSIGN(
       security::json::serde_json_bridge::SerdeJson json,
-      security::json::serde_json_bridge::SerdeJson::Parse(json_string));
+      security::json::serde_json_bridge::SerdeJson::Parse(kJsonString));
   ASSERT_OK_AND_ASSIGN(
       std::vector<security::json::serde_json_bridge::SerdeJson> array,
       json.GetArray());
@@ -110,17 +110,17 @@ TEST(SerdeJsonBridge, CheckGetArray) {
 }
 
 TEST(SerdeJsonBridge, CheckGetArrayNotFromArray) {
-  static constexpr absl::string_view json_string = "\"first\"";
+  constexpr absl::string_view kJsonString = "\"first\"";
 
   ASSERT_OK_AND_ASSIGN(
       security::json::serde_json_bridge::SerdeJson json,
-      security::json::serde_json_bridge::SerdeJson::Parse(json_string));
+      security::json::serde_json_bridge::SerdeJson::Parse(kJsonString));
   ASSERT_THAT(json.GetArray(),
               absl_testing::StatusIs(absl::StatusCode::kFailedPrecondition));
 }
 
 TEST(SerdeJsonBridge, GetFieldString) {
-  static constexpr absl::string_view json_string =
+  constexpr absl::string_view kJsonString =
       "{\n"
       "  \"firstName\": \"John\",\n"
       "  \"lastName\": \"Doe\"\n"
@@ -128,13 +128,13 @@ TEST(SerdeJsonBridge, GetFieldString) {
 
   ASSERT_OK_AND_ASSIGN(
       security::json::serde_json_bridge::SerdeJson json,
-      security::json::serde_json_bridge::SerdeJson::Parse(json_string));
+      security::json::serde_json_bridge::SerdeJson::Parse(kJsonString));
   ASSERT_THAT(json.GetFieldString("firstName"), IsOkAndHolds("John"));
   ASSERT_THAT(json.GetFieldString("lastName"), IsOkAndHolds("Doe"));
 }
 
 TEST(SerdeJsonBridge, GetFieldBool) {
-  static constexpr absl::string_view json_string =
+  constexpr absl::string_view kJsonString =
       "{\n"
       "  \"value1\": true,\n"
       "  \"value2\": false\n"
@@ -142,13 +142,13 @@ TEST(SerdeJsonBridge, GetFieldBool) {
 
   ASSERT_OK_AND_ASSIGN(
       security::json::serde_json_bridge::SerdeJson json,
-      security::json::serde_json_bridge::SerdeJson::Parse(json_string));
+      security::json::serde_json_bridge::SerdeJson::Parse(kJsonString));
   ASSERT_THAT(json.GetFieldBool("value1"), IsOkAndHolds(true));
   ASSERT_THAT(json.GetFieldBool("value2"), IsOkAndHolds(false));
 }
 
 TEST(SerdeJsonBridge, GetFieldInt) {
-  static constexpr absl::string_view json_string =
+  constexpr absl::string_view kJsonString =
       "{\n"
       "  \"value1\": 123,\n"
       "  \"value2\": -444\n"
@@ -156,13 +156,13 @@ TEST(SerdeJsonBridge, GetFieldInt) {
 
   ASSERT_OK_AND_ASSIGN(
       security::json::serde_json_bridge::SerdeJson json,
-      security::json::serde_json_bridge::SerdeJson::Parse(json_string));
+      security::json::serde_json_bridge::SerdeJson::Parse(kJsonString));
   ASSERT_THAT(json.GetFieldInt("value1"), IsOkAndHolds(123));
   ASSERT_THAT(json.GetFieldInt("value2"), IsOkAndHolds(-444));
 }
 
 TEST(SerdeJsonBridge, GetFieldDouble) {
-  static constexpr absl::string_view json_string =
+  constexpr absl::string_view kJsonString =
       "{\n"
       "  \"value1\": 1.0,\n"
       "  \"value2\": 3.0\n"
@@ -170,13 +170,13 @@ TEST(SerdeJsonBridge, GetFieldDouble) {
 
   ASSERT_OK_AND_ASSIGN(
       security::json::serde_json_bridge::SerdeJson json,
-      security::json::serde_json_bridge::SerdeJson::Parse(json_string));
+      security::json::serde_json_bridge::SerdeJson::Parse(kJsonString));
   ASSERT_THAT(json.GetFieldDouble("value1"), IsOkAndHolds(1.0));
   ASSERT_THAT(json.GetFieldDouble("value2"), IsOkAndHolds(3.0));
 }
 
 TEST(SerdeJsonBridge, GetFieldObject) {
-  static constexpr absl::string_view json_string =
+  constexpr absl::string_view kJsonString =
       "{\n"
       "  \"obj\": {"
       "    \"value1\": 1.0\n"
@@ -185,14 +185,14 @@ TEST(SerdeJsonBridge, GetFieldObject) {
 
   ASSERT_OK_AND_ASSIGN(
       security::json::serde_json_bridge::SerdeJson json,
-      security::json::serde_json_bridge::SerdeJson::Parse(json_string));
+      security::json::serde_json_bridge::SerdeJson::Parse(kJsonString));
   ASSERT_OK_AND_ASSIGN(security::json::serde_json_bridge::SerdeJson obj,
                        json.GetFieldObject("obj"));
   ASSERT_THAT(obj.GetFieldDouble("value1"), IsOkAndHolds(1.0));
 }
 
 TEST(SerdeJsonBridge, GetFieldArray) {
-  static constexpr absl::string_view json_string =
+  constexpr absl::string_view kJsonString =
       "{\n"
       "  \"value\": [\n"
       "    \"first\",\n"
@@ -204,7 +204,7 @@ TEST(SerdeJsonBridge, GetFieldArray) {
 
   ASSERT_OK_AND_ASSIGN(
       security::json::serde_json_bridge::SerdeJson json,
-      security::json::serde_json_bridge::SerdeJson::Parse(json_string));
+      security::json::serde_json_bridge::SerdeJson::Parse(kJsonString));
   ASSERT_OK_AND_ASSIGN(
       std::vector<security::json::serde_json_bridge::SerdeJson> array,
       json.GetFieldArray("value"));
@@ -216,24 +216,24 @@ TEST(SerdeJsonBridge, GetFieldArray) {
 }
 
 TEST(SerdeJsonBridge, GetFieldArrayNotFromArray) {
-  static constexpr absl::string_view json_string =
+  constexpr absl::string_view kJsonString =
       "{\n"
       "  \"value\": 1.0\n"
       "}";
 
   ASSERT_OK_AND_ASSIGN(
       security::json::serde_json_bridge::SerdeJson json,
-      security::json::serde_json_bridge::SerdeJson::Parse(json_string));
+      security::json::serde_json_bridge::SerdeJson::Parse(kJsonString));
   ASSERT_THAT(json.GetFieldArray("value"),
               absl_testing::StatusIs(absl::StatusCode::kFailedPrecondition));
 }
 
 TEST(SerdeJsonBridge, GetFieldNotFromObject) {
-  static constexpr absl::string_view json_string = "1337.1234";
+  constexpr absl::string_view kJsonString = "1337.1234";
 
   ASSERT_OK_AND_ASSIGN(
       security::json::serde_json_bridge::SerdeJson json,
-      security::json::serde_json_bridge::SerdeJson::Parse(json_string));
+      security::json::serde_json_bridge::SerdeJson::Parse(kJsonString));
   ASSERT_THAT(json.GetFieldString("test"),
               absl_testing::StatusIs(absl::StatusCode::kFailedPrecondition));
   ASSERT_THAT(json.GetFieldBool("test"),
@@ -250,14 +250,14 @@ TEST(SerdeJsonBridge, GetFieldNotFromObject) {
 }
 
 TEST(SerdeJsonBridge, IsNull) {
-  static constexpr absl::string_view json_string =
+  constexpr absl::string_view kJsonString =
       "{\n"
       "  \"value\": null\n"
       "}";
 
   ASSERT_OK_AND_ASSIGN(
       security::json::serde_json_bridge::SerdeJson json,
-      security::json::serde_json_bridge::SerdeJson::Parse(json_string));
+      security::json::serde_json_bridge::SerdeJson::Parse(kJsonString));
   ASSERT_OK_AND_ASSIGN(security::json::serde_json_bridge::SerdeJson value,
                        json.GetField("value"));
 
@@ -272,14 +272,14 @@ TEST(SerdeJsonBridge, IsNull) {
 }
 
 TEST(SerdeJsonBridge, IsObject) {
-  static constexpr absl::string_view json_string =
+  constexpr absl::string_view kJsonString =
       "{\n"
       "  \"value\": {}\n"
       "}";
 
   ASSERT_OK_AND_ASSIGN(
       security::json::serde_json_bridge::SerdeJson json,
-      security::json::serde_json_bridge::SerdeJson::Parse(json_string));
+      security::json::serde_json_bridge::SerdeJson::Parse(kJsonString));
   ASSERT_OK_AND_ASSIGN(security::json::serde_json_bridge::SerdeJson value,
                        json.GetField("value"));
 
@@ -294,14 +294,14 @@ TEST(SerdeJsonBridge, IsObject) {
 }
 
 TEST(SerdeJsonBridge, IsArray) {
-  static constexpr absl::string_view json_string =
+  constexpr absl::string_view kJsonString =
       "{\n"
       "  \"value\": []\n"
       "}";
 
   ASSERT_OK_AND_ASSIGN(
       security::json::serde_json_bridge::SerdeJson json,
-      security::json::serde_json_bridge::SerdeJson::Parse(json_string));
+      security::json::serde_json_bridge::SerdeJson::Parse(kJsonString));
   ASSERT_OK_AND_ASSIGN(security::json::serde_json_bridge::SerdeJson value,
                        json.GetField("value"));
 
@@ -316,14 +316,14 @@ TEST(SerdeJsonBridge, IsArray) {
 }
 
 TEST(SerdeJsonBridge, IsString) {
-  static constexpr absl::string_view json_string =
+  constexpr absl::string_view kJsonString =
       "{\n"
       "  \"value\": \"\"\n"
       "}";
 
   ASSERT_OK_AND_ASSIGN(
       security::json::serde_json_bridge::SerdeJson json,
-      security::json::serde_json_bridge::SerdeJson::Parse(json_string));
+      security::json::serde_json_bridge::SerdeJson::Parse(kJsonString));
   ASSERT_OK_AND_ASSIGN(security::json::serde_json_bridge::SerdeJson value,
                        json.GetField("value"));
 
@@ -338,14 +338,14 @@ TEST(SerdeJsonBridge, IsString) {
 }
 
 TEST(SerdeJsonBridge, IsNumber) {
-  static constexpr absl::string_view json_string =
+  constexpr absl::string_view kJsonString =
       "{\n"
       "  \"value\": 0\n"
       "}";
 
   ASSERT_OK_AND_ASSIGN(
       security::json::serde_json_bridge::SerdeJson json,
-      security::json::serde_json_bridge::SerdeJson::Parse(json_string));
+      security::json::serde_json_bridge::SerdeJson::Parse(kJsonString));
   ASSERT_OK_AND_ASSIGN(security::json::serde_json_bridge::SerdeJson value,
                        json.GetField("value"));
 
@@ -360,14 +360,14 @@ TEST(SerdeJsonBridge, IsNumber) {
 }
 
 TEST(SerdeJsonBridge, IsBool) {
-  static constexpr absl::string_view json_string =
+  constexpr absl::string_view kJsonString =
       "{\n"
       "  \"value\": true\n"
       "}";
 
   ASSERT_OK_AND_ASSIGN(
       security::json::serde_json_bridge::SerdeJson json,
-      security::json::serde_json_bridge::SerdeJson::Parse(json_string));
+      security::json::serde_json_bridge::SerdeJson::Parse(kJsonString));
   ASSERT_OK_AND_ASSIGN(security::json::serde_json_bridge::SerdeJson value,
                        json.GetField("value"));
 
@@ -382,14 +382,14 @@ TEST(SerdeJsonBridge, IsBool) {
 }
 
 TEST(SerdeJsonBridge, IsDouble) {
-  static constexpr absl::string_view json_string =
+  constexpr absl::string_view kJsonString =
       "{\n"
       "  \"value\": 10.0\n"
       "}";
 
   ASSERT_OK_AND_ASSIGN(
       security::json::serde_json_bridge::SerdeJson json,
-      security::json::serde_json_bridge::SerdeJson::Parse(json_string));
+      security::json::serde_json_bridge::SerdeJson::Parse(kJsonString));
   ASSERT_OK_AND_ASSIGN(security::json::serde_json_bridge::SerdeJson value,
                        json.GetField("value"));
 
@@ -404,14 +404,14 @@ TEST(SerdeJsonBridge, IsDouble) {
 }
 
 TEST(SerdeJsonBridge, IsInt) {
-  static constexpr absl::string_view json_string =
+  constexpr absl::string_view kJsonString =
       "{\n"
       "  \"value\": 10\n"
       "}";
 
   ASSERT_OK_AND_ASSIGN(
       security::json::serde_json_bridge::SerdeJson json,
-      security::json::serde_json_bridge::SerdeJson::Parse(json_string));
+      security::json::serde_json_bridge::SerdeJson::Parse(kJsonString));
   ASSERT_OK_AND_ASSIGN(security::json::serde_json_bridge::SerdeJson value,
                        json.GetField("value"));
 
@@ -426,7 +426,7 @@ TEST(SerdeJsonBridge, IsInt) {
 }
 
 TEST(SerdeJsonBridge, ToString) {
-  static constexpr absl::string_view json_string =
+  constexpr absl::string_view kJsonString =
       "{\n"
       "  \"firstName\": \"John\",\n"
       "  \"lastName\": \"Doe\",\n"
@@ -436,7 +436,7 @@ TEST(SerdeJsonBridge, ToString) {
 
   ASSERT_OK_AND_ASSIGN(
       security::json::serde_json_bridge::SerdeJson json,
-      security::json::serde_json_bridge::SerdeJson::Parse(json_string));
+      security::json::serde_json_bridge::SerdeJson::Parse(kJsonString));
   EXPECT_EQ(json.ToString(),
             "{\"firstName\":\"John\",\"lastName\":\"Doe\",\"value1\":1.0,"
             "\"value2\":3.0}");
