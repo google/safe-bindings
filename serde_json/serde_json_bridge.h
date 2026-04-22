@@ -55,6 +55,9 @@ class SerdeJson final {
   bool IsBool() const;
   bool IsInt() const;
 
+  // If the current node is an object, returns whether the field exists.
+  absl::StatusOr<bool> HasField(absl::string_view key) const;
+
   // Convert this object to string.
   std::string ToString() const;
 

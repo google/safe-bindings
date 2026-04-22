@@ -511,4 +511,28 @@ TEST(SerdeJsonBridge, CreateString) {
   EXPECT_EQ(json.ToString(), "\"text\"");
 }
 
+TEST(SerdeJsonBridge, HasField) {
+  constexpr absl::string_view kJsonString =
+      "{\n"
+      "  \"value\": 10\n"
+      "}";
+
+  ASSERT_OK_AND_ASSIGN(
+      security::json::serde_json_bridge::SerdeJson json,
+      security::json::serde_json_bridge::SerdeJson::Parse(kJsonString));
+
+  ASSERT_THAT(json.HasField("value"), IsOkAndHolds(true));
+  ASSERT_THAT(json.HasField("not_existing"), IsOkAndHolds(false));
+}
+
+TEST(SerdeJsonBridge, HasFieldNotObject) {
+  constexpr absl::string_view kJsonString = "10";
+
+  ASSERT_OK_AND_ASSIGN(
+      security::json::serde_json_bridge::SerdeJson json,
+      security::json::serde_json_bridge::SerdeJson::Parse(kJsonString));
+
+  ASSERT_THAT(json.HasField("value"), IsOkAndHolds(false));
+}
+
 }  // namespace

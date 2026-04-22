@@ -223,4 +223,14 @@ bool SerdeJson::IsBool() const { return json_obj_.is_boolean(); }
 
 std::string SerdeJson::ToString() const { return json_obj_.to_string(); }
 
+absl::StatusOr<bool> SerdeJson::HasField(absl::string_view key) const {
+  serde_json_bridge_rs::json::ResultBool rs_result = json_obj_.has_field(key);
+
+  if (rs_result.is_err()) {
+    return absl::InvalidArgumentError(std::move(rs_result).unwrap_err());
+  }
+
+  return std::move(rs_result).unwrap();
+}
+
 }  // namespace security::json::serde_json_bridge

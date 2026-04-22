@@ -249,6 +249,14 @@ impl SerdeJson {
     pub fn to_string(&self) -> cc_std::std::string {
         self.value.to_string().into()
     }
+
+    /// Returns true if the JSON object contains the given field.
+    pub fn has_field(&self, raw_field_name: cc_std::std::string_view) -> ResultBool {
+        raw_field_name.to_str().map_or_else(
+            |err| Err(anyhow::Error::new(err)).into(),
+            |field_name| Ok(self.value.get(field_name).is_some()).into(),
+        )
+    }
 }
 
 // NOTE: b/367916605 - Remove make_result_type and make_vec_type macros.
