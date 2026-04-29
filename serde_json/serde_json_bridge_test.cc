@@ -535,4 +535,100 @@ TEST(SerdeJsonBridge, HasFieldNotObject) {
   ASSERT_THAT(json.HasField("value"), IsOkAndHolds(false));
 }
 
+TEST(SerdeJsonBridge, AddInt) {
+  ASSERT_OK_AND_ASSIGN(
+      security::json::serde_json_bridge::SerdeJson json,
+      security::json::serde_json_bridge::SerdeJson::CreateObject());
+
+  ASSERT_OK(json.AddFieldInt("value", 123));
+  ASSERT_THAT(json.HasField("value"), IsOkAndHolds(true));
+  ASSERT_THAT(json.GetFieldInt("value"), IsOkAndHolds(123));
+  EXPECT_EQ(json.ToString(), "{\"value\":123}");
+}
+
+TEST(SerdeJsonBridge, AddBool) {
+  ASSERT_OK_AND_ASSIGN(
+      security::json::serde_json_bridge::SerdeJson json,
+      security::json::serde_json_bridge::SerdeJson::CreateObject());
+
+  ASSERT_OK(json.AddFieldBool("value", true));
+  ASSERT_THAT(json.HasField("value"), IsOkAndHolds(true));
+  ASSERT_THAT(json.GetFieldBool("value"), IsOkAndHolds(true));
+  EXPECT_EQ(json.ToString(), "{\"value\":true}");
+}
+
+TEST(SerdeJsonBridge, AddDouble) {
+  ASSERT_OK_AND_ASSIGN(
+      security::json::serde_json_bridge::SerdeJson json,
+      security::json::serde_json_bridge::SerdeJson::CreateObject());
+
+  ASSERT_OK(json.AddFieldDouble("value", 1337.1337));
+  ASSERT_THAT(json.HasField("value"), IsOkAndHolds(true));
+  ASSERT_THAT(json.GetFieldDouble("value"), IsOkAndHolds(1337.1337));
+  EXPECT_EQ(json.ToString(), "{\"value\":1337.1337}");
+}
+
+TEST(SerdeJsonBridge, AddNull) {
+  ASSERT_OK_AND_ASSIGN(
+      security::json::serde_json_bridge::SerdeJson json,
+      security::json::serde_json_bridge::SerdeJson::CreateObject());
+
+  ASSERT_OK(json.AddFieldNull("value"));
+  ASSERT_THAT(json.HasField("value"), IsOkAndHolds(true));
+  EXPECT_EQ(json.ToString(), "{\"value\":null}");
+}
+
+TEST(SerdeJsonBridge, AddString) {
+  ASSERT_OK_AND_ASSIGN(
+      security::json::serde_json_bridge::SerdeJson json,
+      security::json::serde_json_bridge::SerdeJson::CreateObject());
+
+  ASSERT_OK(json.AddFieldString("value", "text"));
+  ASSERT_THAT(json.HasField("value"), IsOkAndHolds(true));
+  ASSERT_THAT(json.GetFieldString("value"), IsOkAndHolds("text"));
+  EXPECT_EQ(json.ToString(), "{\"value\":\"text\"}");
+}
+
+TEST(SerdeJsonBridge, AddObject) {
+  ASSERT_OK_AND_ASSIGN(
+      security::json::serde_json_bridge::SerdeJson v1,
+      security::json::serde_json_bridge::SerdeJson::CreateObject());
+  ASSERT_OK(v1.AddFieldString("value", "text"));
+
+  ASSERT_OK_AND_ASSIGN(
+      security::json::serde_json_bridge::SerdeJson json,
+      security::json::serde_json_bridge::SerdeJson::CreateObject());
+
+  ASSERT_OK(json.AddFieldObject("obj", v1));
+  ASSERT_THAT(json.HasField("obj"), IsOkAndHolds(true));
+  EXPECT_EQ(json.ToString(), "{\"obj\":{\"value\":\"text\"}}");
+}
+
+TEST(SerdeJsonBridge, AddArray) {
+  ASSERT_OK_AND_ASSIGN(
+      security::json::serde_json_bridge::SerdeJson v1_text,
+      security::json::serde_json_bridge::SerdeJson::CreateString("text"));
+  ASSERT_OK_AND_ASSIGN(
+      security::json::serde_json_bridge::SerdeJson v2_int,
+      security::json::serde_json_bridge::SerdeJson::CreateInt(213));
+  ASSERT_OK_AND_ASSIGN(
+      security::json::serde_json_bridge::SerdeJson v3_double,
+      security::json::serde_json_bridge::SerdeJson::CreateDouble(1337.1337));
+  ASSERT_OK_AND_ASSIGN(
+      security::json::serde_json_bridge::SerdeJson json,
+      security::json::serde_json_bridge::SerdeJson::CreateObject());
+  ASSERT_OK(json.AddFieldArray(
+      "value", std::vector<security::json::serde_json_bridge::SerdeJson>{
+                   v1_text, v2_int, v3_double}));
+  ASSERT_THAT(json.HasField("value"), IsOkAndHolds(true));
+  ASSERT_OK_AND_ASSIGN(
+      std::vector<security::json::serde_json_bridge::SerdeJson> array,
+      json.GetFieldArray("value"));
+  ASSERT_THAT(array[0].GetString(), IsOkAndHolds("text"));
+  ASSERT_THAT(array[1].GetInt(), IsOkAndHolds(213));
+  ASSERT_THAT(array[2].GetDouble(), IsOkAndHolds(1337.1337));
+
+  EXPECT_EQ(json.ToString(), "{\"value\":[\"text\",213,1337.1337]}");
+}
+
 }  // namespace

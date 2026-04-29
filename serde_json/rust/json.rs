@@ -1,4 +1,6 @@
 google3::import! {
+  "//third_party/absl/status:status";
+  "//third_party/absl/status:status_wrapper";
   "//third_party/rust/anyhow/v1:anyhow";
   "//third_party/rust/serde/v1:serde";
   "//third_party/rust/serde_json/v1:serde_json";
@@ -7,6 +9,8 @@ google3::import! {
 use crate::make_result_type;
 use crate::make_vec_type;
 use anyhow::anyhow;
+use serde::Serialize;
+use status_wrapper::StatusWrapper;
 
 #[derive(Default, PartialEq, Clone)]
 pub struct SerdeJson {
@@ -255,6 +259,98 @@ impl SerdeJson {
         raw_field_name.to_str().map_or_else(
             |err| Err(anyhow::Error::new(err)).into(),
             |field_name| Ok(self.value.get(field_name).is_some()).into(),
+        )
+    }
+
+    /// Adds a field to the JSON object.
+    pub fn add_field<T: Serialize>(
+        &mut self,
+        raw_field_name: cc_std::std::string_view,
+        value: T,
+    ) -> StatusWrapper {
+        let field_name = match raw_field_name.to_str() {
+            Ok(field) => field,
+            Err(err) => return status::invalid_argument(err.to_string()).into(),
+        };
+
+        if let serde_json::Value::Object(map) = &mut self.value {
+            match serde_json::to_value(value) {
+                Ok(json_value) => {
+                    map.insert(field_name.to_string(), json_value);
+                    status::OkStatus().into()
+                }
+                Err(err) => {
+                    status::invalid_argument(format!("Failed to serialize value: {}", err)).into()
+                }
+            }
+        } else {
+            status::internal("JSON value is not an object").into()
+        }
+    }
+
+    /// Adds an integer field to the JSON object.
+    pub fn add_field_int(
+        &mut self,
+        raw_field_name: cc_std::std::string_view,
+        value: i64,
+    ) -> StatusWrapper {
+        self.add_field(raw_field_name, value)
+    }
+
+    /// Adds a boolean field to the JSON object.
+    pub fn add_field_bool(
+        &mut self,
+        raw_field_name: cc_std::std::string_view,
+        value: bool,
+    ) -> StatusWrapper {
+        self.add_field(raw_field_name, value)
+    }
+
+    /// Adds a double field to the JSON object.
+    pub fn add_field_double(
+        &mut self,
+        raw_field_name: cc_std::std::string_view,
+        value: f64,
+    ) -> StatusWrapper {
+        self.add_field(raw_field_name, value)
+    }
+
+    /// Adds a null field to the JSON object.
+    pub fn add_field_null(&mut self, raw_field_name: cc_std::std::string_view) -> StatusWrapper {
+        self.add_field(raw_field_name, serde_json::Value::Null)
+    }
+
+    /// Adds a string field to the JSON object.
+    pub fn add_field_string(
+        &mut self,
+        raw_field_name: cc_std::std::string_view,
+        value_raw: cc_std::std::string_view,
+    ) -> StatusWrapper {
+        let value = match value_raw.to_str() {
+            Ok(value) => value,
+            Err(err) => return status::invalid_argument(err.to_string()).into(),
+        };
+        self.add_field(raw_field_name, value)
+    }
+
+    /// Adds an object field to the JSON object.
+    pub fn add_field_object(
+        &mut self,
+        raw_field_name: cc_std::std::string_view,
+        obj: SerdeJson,
+    ) -> StatusWrapper {
+        self.add_field(raw_field_name, obj.value)
+    }
+
+    /// Adds an array field to the JSON object.
+    pub fn add_field_array(
+        &mut self,
+        raw_field_name: cc_std::std::string_view,
+        items: &[SerdeJson],
+    ) -> StatusWrapper {
+        self.add_field(
+            raw_field_name,
+            items.iter().map(|v| v.value.clone()).collect::<Vec<serde_json::Value>>(),
         )
     }
 }

@@ -6,8 +6,10 @@
 #include <vector>
 
 #include "security/json/serde_json/rust/serde_json_bridge_rs.h"
+#include "third_party/absl/status/status.h"
 #include "third_party/absl/status/statusor.h"
 #include "third_party/absl/strings/string_view.h"
+#include "third_party/absl/types/span.h"
 
 namespace security::json::serde_json_bridge {
 
@@ -60,6 +62,18 @@ class SerdeJson final {
 
   // Convert this object to string.
   std::string ToString() const;
+
+  // Methods for adding fields to the JSON object.
+  absl::Status AddFieldBool(absl::string_view key, bool value);
+  absl::Status AddFieldDouble(absl::string_view key, double value);
+  absl::Status AddFieldInt(absl::string_view key, int64_t value);
+  absl::Status AddFieldNull(absl::string_view key);
+  absl::Status AddFieldObject(absl::string_view key, const SerdeJson& value);
+  absl::Status AddFieldString(absl::string_view key, absl::string_view value);
+  absl::Status AddFieldArray(absl::string_view key,
+                             absl::Span<const SerdeJson> value);
+  absl::Status AddFieldArray(absl::string_view key,
+                             std::vector<SerdeJson> value);
 
  private:
   explicit SerdeJson(serde_json_bridge_rs::json::SerdeJson);

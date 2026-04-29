@@ -10,6 +10,7 @@
 #include "third_party/absl/status/status.h"
 #include "third_party/absl/status/statusor.h"
 #include "third_party/absl/strings/string_view.h"
+#include "third_party/absl/types/span.h"
 
 namespace security::json::serde_json_bridge {
 
@@ -231,6 +232,48 @@ absl::StatusOr<bool> SerdeJson::HasField(absl::string_view key) const {
   }
 
   return std::move(rs_result).unwrap();
+}
+
+absl::Status SerdeJson::AddFieldInt(absl::string_view key, int64_t value) {
+  return json_obj_.add_field_int(key, value).status();
+}
+
+absl::Status SerdeJson::AddFieldBool(absl::string_view key, bool value) {
+  return json_obj_.add_field_bool(key, value).status();
+}
+
+absl::Status SerdeJson::AddFieldString(absl::string_view key,
+                                       const absl::string_view value) {
+  return json_obj_.add_field_string(key, value).status();
+}
+
+absl::Status SerdeJson::AddFieldDouble(absl::string_view key, double value) {
+  return json_obj_.add_field_double(key, value).status();
+}
+
+absl::Status SerdeJson::AddFieldNull(absl::string_view key) {
+  return json_obj_.add_field_null(key).status();
+}
+
+absl::Status SerdeJson::AddFieldObject(absl::string_view key,
+                                       const SerdeJson& value) {
+  return json_obj_.add_field_object(key, value.json_obj_).status();
+}
+
+absl::Status SerdeJson::AddFieldArray(absl::string_view key,
+                                      absl::Span<const SerdeJson> value) {
+  std::vector<SerdeJson> arr(value.begin(), value.end());
+  return AddFieldArray(key, std::move(arr));
+}
+
+absl::Status SerdeJson::AddFieldArray(absl::string_view key,
+                                      std::vector<SerdeJson> value) {
+  std::vector<serde_json_bridge_rs::json::SerdeJson> arr;
+  arr.reserve(value.size());
+  for (auto& v : value) {
+    arr.push_back(std::move(v.json_obj_));
+  }
+  return json_obj_.add_field_array(key, arr).status();
 }
 
 }  // namespace security::json::serde_json_bridge
