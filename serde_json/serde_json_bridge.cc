@@ -8,11 +8,14 @@
 #include <utility>
 #include <vector>
 
+#include "google/protobuf/struct.proto.h"
 #include "security/json/serde_json/rust/serde_json_bridge_rs.h"
 #include "third_party/absl/status/status.h"
 #include "third_party/absl/status/statusor.h"
+#include "third_party/absl/strings/str_cat.h"
 #include "third_party/absl/strings/string_view.h"
 #include "third_party/absl/types/span.h"
+#include "third_party/gloop/util/status/status_macros.h"
 
 namespace security::json::serde_json_bridge {
 
@@ -258,6 +261,49 @@ absl::StatusOr<bool> SerdeJson::HasField(absl::string_view key) const {
   }
 
   return std::move(rs_result).unwrap();
+}
+
+absl::StatusOr<::google::protobuf::Struct> SerdeJson::ToProtoStruct() const {
+  google::protobuf::Struct result;
+  ASSIGN_OR_RETURN(const std::vector<std::string> keys, GetKeys());
+  for (absl::string_view key : keys) {
+    ASSIGN_OR_RETURN(const SerdeJson field, GetField(key));
+    ASSIGN_OR_RETURN(::google::protobuf::Value value, field.ToProtoValue());
+    result.mutable_fields()->insert({std::string(key), std::move(value)});
+  }
+  return result;
+}
+
+absl::StatusOr<::google::protobuf::Value> SerdeJson::ToProtoValue() const {
+  google::protobuf::Value result;
+
+  if (IsObject()) {
+    ASSIGN_OR_RETURN(*result.mutable_struct_value(), ToProtoStruct());
+  } else if (IsString()) {
+    ASSIGN_OR_RETURN(*result.mutable_string_value(), GetString());
+  } else if (IsInt()) {
+    ASSIGN_OR_RETURN(int64_t number_value, GetInt());
+    result.set_number_value(number_value);
+  } else if (IsDouble()) {
+    ASSIGN_OR_RETURN(double number_value, GetDouble());
+    result.set_number_value(number_value);
+  } else if (IsBool()) {
+    ASSIGN_OR_RETURN(bool bool_value, GetBool());
+    result.set_bool_value(bool_value);
+  } else if (IsArray()) {
+    ::google::protobuf::ListValue* list_value = result.mutable_list_value();
+    ASSIGN_OR_RETURN(std::vector<SerdeJson> array_value, GetArray());
+    for (const SerdeJson& element : array_value) {
+      ASSIGN_OR_RETURN(*list_value->add_values(), element.ToProtoValue());
+    }
+  } else if (IsNull()) {
+    result.set_null_value(::google::protobuf::NullValue::NULL_VALUE);
+  } else {
+    return absl::FailedPreconditionError(
+        absl::StrCat("Unexpected type in the object: ", ToString()));
+  }
+
+  return result;
 }
 
 absl::Status SerdeJson::AddFieldInt(absl::string_view key, int64_t value) {

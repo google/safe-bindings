@@ -5,6 +5,7 @@
 #include <string>
 #include <vector>
 
+#include "google/protobuf/struct.pb.h"
 #include "security/json/serde_json/rust/serde_json_bridge_rs.h"
 #include "third_party/absl/status/status.h"
 #include "third_party/absl/status/statusor.h"
@@ -66,6 +67,8 @@ class SerdeJson final {
 
   // Convert this object to string.
   std::string ToString() const;
+  absl::StatusOr<::google::protobuf::Struct> ToProtoStruct() const;
+  absl::StatusOr<::google::protobuf::Value> ToProtoValue() const;
 
   // Methods for adding fields to the JSON object.
   absl::Status AddFieldBool(absl::string_view key, bool value);

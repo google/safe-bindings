@@ -4,6 +4,7 @@
 #include <string>
 #include <vector>
 
+#include "net/proto2/contrib/parse_proto/parse_text_proto.h"
 #include "testing/base/public/gmock.h"
 #include "testing/base/public/gunit.h"
 #include "third_party/absl/status/status.h"
@@ -12,6 +13,8 @@
 
 namespace {
 
+using proto2::contrib::parse_proto::ParseTextProtoOrDie;
+using ::testing::EqualsProto;
 using ::testing::UnorderedElementsAre;
 using ::testing::status::IsOkAndHolds;
 
@@ -468,6 +471,155 @@ TEST(SerdeJsonBridge, ToString) {
   EXPECT_EQ(json.ToString(),
             "{\"firstName\":\"John\",\"lastName\":\"Doe\",\"value1\":1.0,"
             "\"value2\":3.0}");
+}
+
+TEST(SerdeJsonBridge, JsonBoolToProto) {
+  google::protobuf::Value expected_value =
+      ParseTextProtoOrDie(R"pb(bool_value: true)pb");
+  std::string jsonString = "true";
+
+  ASSERT_OK_AND_ASSIGN(
+      security::json::serde_json_bridge::SerdeJson json,
+      security::json::serde_json_bridge::SerdeJson::Parse(jsonString));
+  ASSERT_THAT(json.ToProtoValue(), IsOkAndHolds(EqualsProto(expected_value)));
+}
+
+TEST(SerdeJsonBridge, JsonStringToProto) {
+  google::protobuf::Value expected_value =
+      ParseTextProtoOrDie(R"pb(string_value: "string")pb");
+  std::string jsonString = "\"string\"";
+
+  ASSERT_OK_AND_ASSIGN(
+      security::json::serde_json_bridge::SerdeJson json,
+      security::json::serde_json_bridge::SerdeJson::Parse(jsonString));
+  ASSERT_THAT(json.ToProtoValue(), IsOkAndHolds(EqualsProto(expected_value)));
+}
+
+TEST(SerdeJsonBridge, JsonIntToProto) {
+  google::protobuf::Value expected_value =
+      ParseTextProtoOrDie(R"pb(number_value: 1234)pb");
+  std::string jsonString = "1234";
+
+  ASSERT_OK_AND_ASSIGN(
+      security::json::serde_json_bridge::SerdeJson json,
+      security::json::serde_json_bridge::SerdeJson::Parse(jsonString));
+  ASSERT_THAT(json.ToProtoValue(), IsOkAndHolds(EqualsProto(expected_value)));
+}
+
+TEST(SerdeJsonBridge, JsonDoubleToProto) {
+  google::protobuf::Value expected_value =
+      ParseTextProtoOrDie(R"pb(number_value: 1337.1234)pb");
+  std::string jsonString = "1337.1234";
+
+  ASSERT_OK_AND_ASSIGN(
+      security::json::serde_json_bridge::SerdeJson json,
+      security::json::serde_json_bridge::SerdeJson::Parse(jsonString));
+  ASSERT_THAT(json.ToProtoValue(), IsOkAndHolds(EqualsProto(expected_value)));
+}
+
+TEST(SerdeJsonBridge, JsonArrayToProto) {
+  google::protobuf::Value expected_value = ParseTextProtoOrDie(R"pb(
+    list_value {
+      values { string_value: "first" }
+      values { number_value: 2 }
+      values { string_value: "third" }
+      values { number_value: 4 }
+    }
+  )pb");
+
+  std::string jsonString =
+      "[\n"
+      "  \"first\",\n"
+      "  2,\n"
+      "  \"third\",\n"
+      "  4\n"
+      "]";
+
+  ASSERT_OK_AND_ASSIGN(
+      security::json::serde_json_bridge::SerdeJson json,
+      security::json::serde_json_bridge::SerdeJson::Parse(jsonString));
+  ASSERT_THAT(json.ToProtoValue(), IsOkAndHolds(EqualsProto(expected_value)));
+}
+
+TEST(SerdeJsonBridge, JsonNULLToProto) {
+  google::protobuf::Value expected_value =
+      ParseTextProtoOrDie(R"pb(null_value: NULL_VALUE)pb");
+  std::string jsonString = "null";
+
+  ASSERT_OK_AND_ASSIGN(
+      security::json::serde_json_bridge::SerdeJson json,
+      security::json::serde_json_bridge::SerdeJson::Parse(jsonString));
+  ASSERT_THAT(json.ToProtoValue(), IsOkAndHolds(EqualsProto(expected_value)));
+}
+
+TEST(SerdeJsonBridge, JsonObjectToValue) {
+  google::protobuf::Value expected_value = ParseTextProtoOrDie(R"pb(
+    struct_value {
+      fields {
+        key: "firstName"
+        value { string_value: "John" }
+      }
+      fields {
+        key: "lastName"
+        value { string_value: "Doe" }
+      }
+      fields {
+        key: "value1"
+        value { number_value: 1.0 }
+      }
+      fields {
+        key: "value2"
+        value { number_value: 3.0 }
+      }
+    }
+  )pb");
+
+  std::string jsonString =
+      "{\n"
+      "  \"firstName\": \"John\",\n"
+      "  \"lastName\": \"Doe\",\n"
+      "  \"value1\": 1.0,\n"
+      "  \"value2\": 3.0\n"
+      "}";
+
+  ASSERT_OK_AND_ASSIGN(
+      security::json::serde_json_bridge::SerdeJson json,
+      security::json::serde_json_bridge::SerdeJson::Parse(jsonString));
+  ASSERT_THAT(json.ToProtoValue(), IsOkAndHolds(EqualsProto(expected_value)));
+}
+
+TEST(SerdeJsonBridge, JsonObjectToProtoStruct) {
+  google::protobuf::Struct expected_value = ParseTextProtoOrDie(R"pb(
+    fields {
+      key: "firstName"
+      value { string_value: "John" }
+    }
+    fields {
+      key: "lastName"
+      value { string_value: "Doe" }
+    }
+    fields {
+      key: "value1"
+      value { number_value: 1.0 }
+    }
+    fields {
+      key: "value2"
+      value { number_value: 3.0 }
+    }
+  )pb");
+
+  std::string jsonString =
+      "{\n"
+      "  \"firstName\": \"John\",\n"
+      "  \"lastName\": \"Doe\",\n"
+      "  \"value1\": 1.0,\n"
+      "  \"value2\": 3.0\n"
+      "}";
+
+  ASSERT_OK_AND_ASSIGN(
+      security::json::serde_json_bridge::SerdeJson json,
+      security::json::serde_json_bridge::SerdeJson::Parse(jsonString));
+  ASSERT_THAT(json.ToProtoStruct(), IsOkAndHolds(EqualsProto(expected_value)));
 }
 
 TEST(SerdeJsonBridge, CreateInt) {
