@@ -60,6 +60,10 @@ class SerdeJson final {
   // If the current node is an object, returns whether the field exists.
   absl::StatusOr<bool> HasField(absl::string_view key) const;
 
+  // Returns the keys of a json object, or non-ok status is this instance
+  // is not an object.
+  absl::StatusOr<std::vector<std::string>> GetKeys() const;
+
   // Convert this object to string.
   std::string ToString() const;
 

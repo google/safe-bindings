@@ -12,6 +12,7 @@
 
 namespace {
 
+using ::testing::UnorderedElementsAre;
 using ::testing::status::IsOkAndHolds;
 
 TEST(SerdeJsonBridge, SimpleParse) {
@@ -423,6 +424,33 @@ TEST(SerdeJsonBridge, IsInt) {
   EXPECT_FALSE(value.IsString());
   EXPECT_FALSE(value.IsBool());
   EXPECT_FALSE(value.IsDouble());
+}
+
+TEST(SerdeJsonBridge, GetKeys) {
+  std::string jsonString =
+      "{\n"
+      "  \"firstName\": \"John\",\n"
+      "  \"lastName\": \"Doe\",\n"
+      "  \"value1\": 1.0,\n"
+      "  \"value2\": 3.0\n"
+      "}";
+
+  ASSERT_OK_AND_ASSIGN(
+      security::json::serde_json_bridge::SerdeJson json,
+      security::json::serde_json_bridge::SerdeJson::Parse(jsonString));
+  ASSERT_OK_AND_ASSIGN(std::vector<std::string> keys, json.GetKeys());
+  EXPECT_THAT(
+      keys, UnorderedElementsAre("firstName", "lastName", "value1", "value2"));
+}
+
+TEST(SerdeJsonBridge, GetKeysNotFromObject) {
+  std::string jsonString = "10";
+
+  ASSERT_OK_AND_ASSIGN(
+      security::json::serde_json_bridge::SerdeJson json,
+      security::json::serde_json_bridge::SerdeJson::Parse(jsonString));
+  ASSERT_THAT(json.GetKeys(),
+              absl_testing::StatusIs(absl::StatusCode::kInvalidArgument));
 }
 
 TEST(SerdeJsonBridge, ToString) {

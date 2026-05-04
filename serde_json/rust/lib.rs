@@ -7,4 +7,6 @@
 mod crubit_util;
 mod crubit_vec_util;
 
+pub mod raw_string;
+
 pub mod json;

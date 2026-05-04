@@ -8,6 +8,7 @@ google3::import! {
 
 use crate::make_result_type;
 use crate::make_vec_type;
+use crate::raw_string::RawString;
 use anyhow::anyhow;
 use serde::Serialize;
 use status_wrapper::StatusWrapper;
@@ -254,6 +255,15 @@ impl SerdeJson {
         self.value.to_string().into()
     }
 
+    pub fn get_keys(&self) -> ResultVecRawString {
+        let object = match self.value.as_object() {
+            Some(o) => o,
+            None => return Err(anyhow::anyhow!("This isn't a object")).into(),
+        };
+
+        Ok(object.keys().map(|k| k.as_str().into()).collect::<Vec<RawString>>().into()).into()
+    }
+
     /// Returns true if the JSON object contains the given field.
     pub fn has_field(&self, raw_field_name: cc_std::std::string_view) -> ResultBool {
         raw_field_name.to_str().map_or_else(
@@ -361,6 +371,9 @@ make_result_type!(cc_std::std::string, ResultString);
 make_result_type!(bool, ResultBool);
 make_result_type!(i64, Resulti64);
 make_result_type!(f64, ResultDouble);
+
+make_vec_type!(RawString, VecRawString);
+make_result_type!(VecRawString, ResultVecRawString);
 
 make_vec_type!(SerdeJson, VecSerdeJson);
 make_result_type!(VecSerdeJson, ResultVecSerdeJson);

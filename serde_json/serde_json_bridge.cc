@@ -1,7 +1,9 @@
 #include "security/json/serde_json/serde_json_bridge.h"
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <iterator>
 #include <string>
 #include <utility>
 #include <vector>
@@ -13,6 +15,12 @@
 #include "third_party/absl/types/span.h"
 
 namespace security::json::serde_json_bridge {
+
+static std::string FromRustRawString(
+    const serde_json_bridge_rs::raw_string::RawString& raw_string) {
+  return std::string(reinterpret_cast<const char*>(raw_string.as_ptr()),
+                     raw_string.len());
+}
 
 SerdeJson::SerdeJson(serde_json_bridge_rs::json::SerdeJson sj)
     : json_obj_(std::move(sj)) {}
@@ -223,6 +231,24 @@ bool SerdeJson::IsDouble() const { return json_obj_.is_f64(); }
 bool SerdeJson::IsBool() const { return json_obj_.is_boolean(); }
 
 std::string SerdeJson::ToString() const { return json_obj_.to_string(); }
+
+absl::StatusOr<std::vector<std::string>> SerdeJson::GetKeys() const {
+  serde_json_bridge_rs::json::ResultVecRawString rs_result =
+      json_obj_.get_keys();
+
+  if (rs_result.is_err()) {
+    return absl::InvalidArgumentError(std::move(rs_result).unwrap_err());
+  }
+
+  serde_json_bridge_rs::json::VecRawString rust_raw_strings =
+      std::move(rs_result).unwrap();
+  std::vector<std::string> keys;
+  keys.reserve(rust_raw_strings.len());
+  std::transform(rust_raw_strings.as_ptr(),
+                 rust_raw_strings.as_ptr() + rust_raw_strings.len(),
+                 std::back_inserter(keys), FromRustRawString);
+  return keys;
+}
 
 absl::StatusOr<bool> SerdeJson::HasField(absl::string_view key) const {
   serde_json_bridge_rs::json::ResultBool rs_result = json_obj_.has_field(key);
