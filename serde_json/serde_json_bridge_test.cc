@@ -4,6 +4,7 @@
 #include <string>
 #include <vector>
 
+#include "google/protobuf/struct.proto.h"
 #include "net/proto2/contrib/parse_proto/parse_text_proto.h"
 #include "testing/base/public/gmock.h"
 #include "testing/base/public/gunit.h"
