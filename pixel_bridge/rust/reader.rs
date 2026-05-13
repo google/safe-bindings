@@ -1,6 +1,6 @@
 use crate::{
-    image::{GenericImageDecoder, ImageDecoder, ResultImageDecoder},
-    make_result_type,
+    image::{GenericImageDecoder, ImageDecoder},
+    vec_u8::VecU8,
 };
 use image::{
     codecs::bmp::BmpDecoder as RustBmpDecoder, codecs::gif::GifDecoder as RustGifDecoder,
@@ -60,10 +60,6 @@ impl From<Format> for ImageFormat {
     }
 }
 
-// A `ResultImageReader` that represents a Crubit-understandable `Result<ImageReader>`.
-// NOTE(b/367916605): Swap this with a real `Result<ImageReader>` once available.
-make_result_type!(ImageReader);
-
 impl ImageReader {
     /// Creates a new `ImageReader` with the provided input buffer.
     pub fn new_in_memory(input: &[u8]) -> Self {
@@ -77,10 +73,10 @@ impl ImageReader {
     }
 
     /// Creates a new `ImageReader` reading from the provided file.
-    pub fn new_from_file(path: &[u8]) -> ResultImageReader {
-        let filepath = match str::from_utf8(path) {
+    pub fn new_from_file(path: &[u8]) -> Result<ImageReader, VecU8> {
+        let filepath = match std::str::from_utf8(path) {
             Ok(path) => path,
-            Err(err) => return ResultImageReader::from_err(err.to_string()),
+            Err(err) => return Err(err.to_string().into()),
         };
 
         match std::fs::File::open(filepath) {
@@ -88,9 +84,8 @@ impl ImageReader {
                 inner: Some(Box::new(RustImageReader::new(
                     Box::new(BufReader::new(file)) as Box<dyn ReadSeek>
                 ))),
-            })
-            .into(),
-            Err(err) => ResultImageReader::from_err(err.to_string()),
+            }),
+            Err(err) => Err(err.to_string().into()),
         }
     }
 
@@ -105,9 +100,9 @@ impl ImageReader {
     /// Read the image.
     ///
     /// Uses the current format to construct the correct reader for the format.
-    pub fn into_decoder(self) -> ResultImageDecoder {
+    pub fn into_decoder(self) -> Result<ImageDecoder, VecU8> {
         let Some(inner) = self.inner else {
-            return ResultImageDecoder::from_err("Reader in illegal moved-out state");
+            return Err("Reader in illegal moved-out state".into());
         };
 
         // If we already know the format, we do not need to guess.
@@ -116,7 +111,7 @@ impl ImageReader {
         } else {
             match inner.with_guessed_format() {
                 Ok(inner) => inner,
-                Err(err) => return ResultImageDecoder::from_err(err.to_string()),
+                Err(err) => return Err(err.to_string().into()),
             }
         };
         // Delegate to non-inlined helper functions to reduce the stack frame size by 4k.
@@ -130,7 +125,7 @@ impl ImageReader {
             Some(ImageFormat::Ico) => ico(inner),
             _ => Err("unsupported image format".to_string()),
         }
-        .into()
+        .map_err(|err| err.into())
     }
 }
 

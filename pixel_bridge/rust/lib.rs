@@ -4,9 +4,6 @@
 //!
 //! WARNING: This crate should never be used from Rust, instead use image directly.
 
-mod crubit_util;
 pub mod image;
 pub mod reader;
 pub mod vec_u8;
-
-make_option_type!(u8, OptionU8);
