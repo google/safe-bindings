@@ -4,10 +4,11 @@ C++ wrappers (using Crubit) for Rust libraries.
 
 ## Bindings
 
-| Wrapper    | Wrapped crate                                     | Status |
-| ---------- | ------------------------------------------------- | ------ |
-| deflate    | [flate2](https://crates.io/crates/flate2)         | WIP    |
-| serde_json | [serde_json](https://crates.io/crates/serde_json) | WIP    |
+| Wrapper      | Wrapped crate                                     | Status   |
+| ------------ | ------------------------------------------------- | -------- |
+| deflate      | [flate2](https://crates.io/crates/flate2)         | WIP      |
+| pixel_bridge | [image](https://crates.io/crates/image)           | Compiles |
+| serde_json   | [serde_json](https://crates.io/crates/serde_json) | WIP      |
 
 ## Contributing
 

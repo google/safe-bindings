@@ -13,7 +13,6 @@ use image::{
     Frame as RustFrame, ImageBuffer as RustImageBuffer, ImageDecoder as RustImageDecoder,
     Rgba as RustRgba,
 };
-use log_rs::warn;
 use std::collections::VecDeque;
 use std::fmt;
 
@@ -94,10 +93,6 @@ impl RustImageDecoder for GenericImageDecoder {
         call_generic_decoder_mut!(self, decoder, decoder.xmp_metadata())
     }
 
-    fn extended_xmp_metadata(&mut self) -> image::ImageResult<Option<(String, Vec<u8>)>> {
-        call_generic_decoder_mut!(self, decoder, decoder.extended_xmp_metadata())
-    }
-
     fn iptc_metadata(&mut self) -> image::ImageResult<Option<Vec<u8>>> {
         call_generic_decoder_mut!(self, decoder, decoder.iptc_metadata())
     }
@@ -148,6 +143,25 @@ make_option_type!(VecU8, OptionVecU8);
 make_option_type!(u64, OptionU64);
 // NOTE: b/367916605 - Change once Result is supported by Crubit.
 make_result_type!(OptionVecU8);
+
+// NOTE: b/367916605 - Change once Result is supported by Crubit.
+make_result_type!((), ResultVoid);
+pub type Status = ResultVoid;
+
+#[inline(always)]
+fn ok() -> Status {
+    ().into()
+}
+
+#[inline(always)]
+fn internal_error(message: impl Into<String>) -> Status {
+    ResultVoid::from_err(message)
+}
+
+#[inline(always)]
+fn invalid_argument_error(message: impl Into<String>) -> Status {
+    ResultVoid::from_err(message)
+}
 
 /// Which Rust integer type backs the value of a pixel.
 #[repr(C)]
@@ -291,20 +305,6 @@ impl Frames {
     }
 }
 
-/// Represents chroma subsampling. The values are packed from `(h, v)` ratios
-/// as `(h << 4) | v`.
-#[repr(C)]
-#[derive(Default, Copy, Clone, Debug)]
-pub enum ChromaSubsampling {
-    #[default]
-    Unknown = 0,
-    CS444 = 0x11,
-    CS422 = 0x21,
-    CS420 = 0x22,
-    CS411 = 0x41,
-    CS410 = 0x42,
-}
-
 fn format_panic(err: Box<dyn std::any::Any + Send>) -> String {
     let backtrace = std::backtrace::Backtrace::capture();
     let msg = if let Some(msg) = err.downcast_ref::<&str>() {
@@ -328,22 +328,19 @@ where
         Ok(res) => Ok(res),
         Err(err) => {
             let formatted_error = format_panic(err);
-            warn!(every_n_sec = 3, "Rust panic: {}", formatted_error);
             Err(formatted_error)
         }
     }
 }
 
-fn run_read_image<F>(f: F) -> Result<(), status_wrapper::StatusWrapper>
+fn run_read_image<F>(f: F) -> Result<(), Status>
 where
     F: FnOnce() -> image::ImageResult<()>,
 {
     match run_catching_panics(f) {
         Ok(Ok(())) => Ok(()),
-        Ok(Err(err)) => {
-            Err(status::invalid_argument(format!("Failed to decode image: {:?}", err)).into())
-        }
-        Err(formatted_error) => Err(status::internal(formatted_error).into()),
+        Ok(Err(err)) => Err(invalid_argument_error(format!("Failed to decode image: {:?}", err))),
+        Err(formatted_error) => Err(internal_error(formatted_error)),
     }
 }
 
@@ -384,9 +381,9 @@ impl ImageDecoder {
     }
 
     /// Read the raw u8 image data into `buf`.
-    pub fn read_u8_slice(self, buf: &mut [u8]) -> status_wrapper::StatusWrapper {
+    pub fn read_u8_slice(self, buf: &mut [u8]) -> Status {
         let Some(inner) = self.inner else {
-            return status::internal("ImageDecoder is in invalid, moved out state").into();
+            return internal_error("ImageDecoder is in invalid, moved out state");
         };
         let (width, height) = inner.dimensions();
         let color_type = inner.color_type();
@@ -403,16 +400,16 @@ impl ImageDecoder {
                         _ => {}
                     }
                 }
-                status::OkStatus().into()
+                ok()
             }
             Err(status) => status,
         }
     }
 
     /// Read the raw u16 image data into `buf`.
-    pub fn read_u16_slice(self, buf: &mut [u16]) -> status_wrapper::StatusWrapper {
+    pub fn read_u16_slice(self, buf: &mut [u16]) -> Status {
         let Some(inner) = self.inner else {
-            return status::internal("ImageDecoder is in invalid, moved out state").into();
+            return internal_error("ImageDecoder is in invalid, moved out state");
         };
         let (width, height) = inner.dimensions();
         let color_type = inner.color_type();
@@ -436,16 +433,16 @@ impl ImageDecoder {
                         _ => {}
                     }
                 }
-                status::OkStatus().into()
+                ok()
             }
             Err(status) => status,
         }
     }
 
     /// Read the raw f32 image data into `buf`.
-    pub fn read_f32_slice(self, buf: &mut [f32]) -> status_wrapper::StatusWrapper {
+    pub fn read_f32_slice(self, buf: &mut [f32]) -> Status {
         let Some(inner) = self.inner else {
-            return status::internal("ImageDecoder is in invalid, moved out state").into();
+            return internal_error("ImageDecoder is in invalid, moved out state");
         };
         let color_type = inner.color_type();
         let byte_buf: &mut [u8] = bytemuck::cast_slice_mut(buf);
@@ -455,7 +452,7 @@ impl ImageDecoder {
                 if self.should_premultiply && color_type == RustColorType::Rgba32F {
                     pic_scale_safe::premultiply_rgba_f32(buf);
                 }
-                status::OkStatus().into()
+                ok()
             }
             Err(status) => status,
         }
@@ -552,23 +549,6 @@ impl ImageDecoder {
             .into()
     }
 
-    /// Returns the chroma subsampling of the image data produced by this decoder.
-    ///
-    /// This is only supported for JPEG images.
-    pub fn chroma_subsampling(&self) -> ChromaSubsampling {
-        match &self.inner {
-            Some(GenericImageDecoder::Jpeg(decoder)) => match decoder.chroma_subsampling() {
-                Ok(Some((1, 1))) => ChromaSubsampling::CS444,
-                Ok(Some((2, 1))) => ChromaSubsampling::CS422,
-                Ok(Some((2, 2))) => ChromaSubsampling::CS420,
-                Ok(Some((4, 1))) => ChromaSubsampling::CS411,
-                Ok(Some((4, 2))) => ChromaSubsampling::CS410,
-                _ => ChromaSubsampling::Unknown,
-            },
-            _ => ChromaSubsampling::Unknown,
-        }
-    }
-
     /// Returns the strides of the image data produced by this decoder.
     pub fn strides(&self) -> Strides {
         let (channels, width, height) =
@@ -633,8 +613,6 @@ impl ImageDecoder {
     /// image does not have one.
     /// For formats that don’t support embedded profiles this function should
     /// always return Ok(None).
-    /// NOTE: b/462340924 - Does not always detect Exif metadata in comparison to Twix
-    /// implementation.
     pub fn exif_metadata(&mut self) -> ResultOptionVecU8 {
         self.get_metadata(|inner| inner.exif_metadata())
     }
@@ -643,48 +621,14 @@ impl ImageDecoder {
     /// image does not have one.
     /// For formats that don’t support embedded profiles this function should
     /// always return Ok(None).
-    /// NOTE: b/462340924 - Does not always detect XMP metadata in comparison to Twix
-    /// implementation.
     pub fn xmp_metadata(&mut self) -> ResultOptionVecU8 {
         self.get_metadata(|inner| inner.xmp_metadata())
-    }
-
-    /// Returns the Extended XMP GUID embedded in the image, or Ok(None) if the
-    /// image does not have one.
-    pub fn extended_xmp_guid(&mut self) -> ResultOptionVecU8 {
-        let Some(ref mut inner) = self.inner else {
-            return ResultOptionVecU8::from_err("Reader in illegal moved-out state");
-        };
-
-        match inner.extended_xmp_metadata() {
-            Ok(Some((guid, _))) => ResultOptionVecU8::from_ok(OptionVecU8::from_some(guid.into())),
-            Ok(None) => ResultOptionVecU8::from_ok(None.into()),
-            Err(err) => ResultOptionVecU8::from_err(err.to_string()),
-        }
-    }
-
-    /// Returns the Extended XMP metadata embedded in the image, or Ok(None) if the
-    /// image does not have one.
-    pub fn extended_xmp_metadata(&mut self) -> ResultOptionVecU8 {
-        let Some(ref mut inner) = self.inner else {
-            return ResultOptionVecU8::from_err("Reader in illegal moved-out state");
-        };
-
-        match inner.extended_xmp_metadata() {
-            Ok(Some((_, metadata))) => {
-                ResultOptionVecU8::from_ok(OptionVecU8::from_some(metadata.into()))
-            }
-            Ok(None) => ResultOptionVecU8::from_ok(None.into()),
-            Err(err) => ResultOptionVecU8::from_err(err.to_string()),
-        }
     }
 
     /// Returns the IPTC metadata embedded in the image, or Ok(None) if the
     /// image does not have one.
     /// For formats that don’t support embedded profiles this function should
     /// always return Ok(None).
-    /// NOTE: b/462340924 - Does not always detect IPTC metadata in comparison to Twix
-    /// implementation, and report different bytes as well.
     pub fn iptc_metadata(&mut self) -> ResultOptionVecU8 {
         self.get_metadata(|inner| inner.iptc_metadata())
     }
@@ -707,16 +651,16 @@ impl ImageDecoder {
         self.background_subs = Some((color_u8, color_u16));
     }
 
-    pub fn set_limits(&mut self, max_alloc: u64) -> status_wrapper::StatusWrapper {
+    pub fn set_limits(&mut self, max_alloc: u64) -> Status {
         let mut limits = image::Limits::default();
         limits.max_alloc = Some(max_alloc);
 
-        if let Some(inner) = &mut self.inner {
-            if let Err(e) = inner.set_limits(limits) {
-                return status::invalid_argument(format!("Failed to set limits: {:?}", e)).into();
-            }
+        if let Some(inner) = &mut self.inner
+            && let Err(e) = inner.set_limits(limits)
+        {
+            return invalid_argument_error(format!("Failed to set limits: {:?}", e));
         }
-        status::OkStatus().into()
+        ok()
     }
 
     /// Performs the actual color correction.
@@ -737,8 +681,6 @@ impl ImageDecoder {
                 Self::perform_color_correction_inner(buf, color_u16, width, height);
             }
             RustColorType::La8 => {
-                // Unknown context for gray=green but this is the current behavior for thumbnailer:
-                // google3/third_party/picasa/yt/ytPNGFile.cpp;rcl=614000061;l=809
                 let gray = image::LumaA([color_u8.0[1], color_u8.0[3]]);
                 Self::perform_color_correction_inner(buf, gray, width, height);
             }

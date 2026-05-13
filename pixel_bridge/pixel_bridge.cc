@@ -7,7 +7,6 @@
 #include <utility>
 #include <vector>
 
-#include "monitoring/streamz/public/counter.h"
 #include "rust.h"
 #include "absl/log/check.h"
 #include "absl/status/status.h"
@@ -122,17 +121,12 @@ std::string FormatToString(Format format) {
   }
 }
 
-auto* const rust_panic_counter = monitoring::streamz::Counter<std::string>::New(
-    "/security/ise_memory_safety/image_processing/pixel_bridge/"
-    "rust_panic_count",
-    "format",
-    monitoring::streamz::Metadata(
-        "Count of Rust panics caught in pixel_bridge"));
-
-void RecordPanicIfApplicable(absl::string_view message, Format format) {
-  if (absl::StartsWith(message, "Rust panic caught")) {
-    rust_panic_counter->Increment(FormatToString(format));
+inline absl::Status ToStatus(rust::image::Status status) {
+  if (status.is_ok()) {
+    return absl::OkStatus();
   }
+  return absl::InternalError(
+      StringViewFromVecU8(std::move(status).unwrap_err()));
 }
 
 }  // namespace
@@ -200,8 +194,7 @@ absl::StatusOr<ImageDecoder::Samples> ImageDecoder::ReadSamples() && {
 
 absl::Status ImageDecoder::ReadSamplesIntoRaw(absl::Span<uint8_t> buffer) && {
   Format format = GetFormat();
-  absl::Status status = std::move(decoder_).read_u8_slice(buffer).status();
-  RecordPanicIfApplicable(status.message(), format);
+  absl::Status status = ToStatus(std::move(decoder_).read_u8_slice(buffer));
   return status;
 }
 
@@ -209,24 +202,21 @@ absl::Status ImageDecoder::ReadSamplesInto(absl::Span<uint8_t> buffer) && {
   CHECK_EQ(decoder_.pixel_type().tag,
            rust::image::PixelType::Tag::U8);
   Format format = GetFormat();
-  absl::Status status = std::move(decoder_).read_u8_slice(buffer).status();
-  RecordPanicIfApplicable(status.message(), format);
+  absl::Status status = ToStatus(std::move(decoder_).read_u8_slice(buffer));
   return status;
 }
 absl::Status ImageDecoder::ReadSamplesInto(absl::Span<uint16_t> buffer) && {
   CHECK_EQ(decoder_.pixel_type().tag,
            rust::image::PixelType::Tag::U16);
   Format format = GetFormat();
-  absl::Status status = std::move(decoder_).read_u16_slice(buffer).status();
-  RecordPanicIfApplicable(status.message(), format);
+  absl::Status status = ToStatus(std::move(decoder_).read_u16_slice(buffer));
   return status;
 }
 absl::Status ImageDecoder::ReadSamplesInto(absl::Span<float> buffer) && {
   CHECK_EQ(decoder_.pixel_type().tag,
            rust::image::PixelType::Tag::F32);
   Format format = GetFormat();
-  absl::Status status = std::move(decoder_).read_f32_slice(buffer).status();
-  RecordPanicIfApplicable(status.message(), format);
+  absl::Status status = ToStatus(std::move(decoder_).read_f32_slice(buffer));
   return status;
 }
 
@@ -257,7 +247,6 @@ absl::StatusOr<Frames> ImageDecoder::GetAllFrames() && {
   if (!result.is_ok()) {
     rust::vec_u8::VecU8 err_msg_vec = std::move(result).unwrap_err();
     absl::string_view err_msg = StringViewFromVecU8(err_msg_vec);
-    RecordPanicIfApplicable(err_msg, format);
     return absl::InternalError(err_msg);
   }
 
@@ -301,23 +290,6 @@ Format ImageDecoder::GetFormat() const {
   return FromRustFormat(decoder_.format());
 }
 
-ChromaSubsampling ImageDecoder::GetChromaSubsampling() {
-  switch (decoder_.chroma_subsampling().tag) {
-    case rust::image::ChromaSubsampling::Tag::Unknown:
-      return ChromaSubsampling::kUnknown;
-    case rust::image::ChromaSubsampling::Tag::CS444:
-      return ChromaSubsampling::kCs444;
-    case rust::image::ChromaSubsampling::Tag::CS422:
-      return ChromaSubsampling::kCs422;
-    case rust::image::ChromaSubsampling::Tag::CS420:
-      return ChromaSubsampling::kCs420;
-    case rust::image::ChromaSubsampling::Tag::CS411:
-      return ChromaSubsampling::kCs411;
-    case rust::image::ChromaSubsampling::Tag::CS410:
-      return ChromaSubsampling::kCs410;
-  }
-}
-
 bool ImageDecoder::IsCmyk() const { return decoder_.is_cmyk(); }
 
 bool ImageDecoder::HasPalette() const { return decoder_.has_palette(); }
@@ -340,15 +312,6 @@ absl::StatusOr<std::optional<std::string>> ImageDecoder::GetExifMetadata() {
 
 absl::StatusOr<std::optional<std::string>> ImageDecoder::GetXmpMetadata() {
   return GetMetadata(decoder_.xmp_metadata());
-}
-
-absl::StatusOr<std::optional<std::string>> ImageDecoder::GetExtendedXmpGuid() {
-  return GetMetadata(decoder_.extended_xmp_guid());
-}
-
-absl::StatusOr<std::optional<std::string>>
-ImageDecoder::GetExtendedXmpMetadata() {
-  return GetMetadata(decoder_.extended_xmp_metadata());
 }
 
 absl::StatusOr<std::optional<std::string>> ImageDecoder::GetIptcMetadata() {
@@ -387,14 +350,6 @@ ImageReader::ImageReader(rust::reader::ImageReader reader)
 
 void ImageReader::SetFormat(Format format) {
   reader_.set_format(ToRustFormat(format));
-}
-
-void ImageReader::SetJpegStrictMode(bool strict_mode) {
-  reader_.set_jpeg_strict_mode(strict_mode);
-}
-
-void ImageReader::SetPngIgnoreChecksums(bool ignore_checksums) {
-  reader_.set_png_ignore_checksums(ignore_checksums);
 }
 
 absl::StatusOr<ImageDecoder> ImageReader::IntoDecoder() && {

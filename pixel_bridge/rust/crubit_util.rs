@@ -1,13 +1,9 @@
 //! This file provides macros for creating Crubit-compatible `Result` and
 //! `Option` types.
-//! This has been copied from //security/audio/chord_bridge/crubit_util.rs.
-//! We opted for copying to simplify open sourcing some of our bindings and
-//! since this is simply a temporary solution. If we're copying this too
-//! much, we have to reevaluate.
 
 /// Macro for generating a Crubit-compatible `Result` type. The `Result` type
 /// has similar methods as a Rust `Result` and converts to/from the underlying
-/// type `T` and an `anyhow::Result<T>`. In the error case it returns a human
+/// type `T` and an `Result<T, String>`. In the error case it returns a human
 /// readable string describing the error.
 ///
 /// # Prerequisites
@@ -31,7 +27,7 @@ macro_rules! make_result_type {
         ($type:ty, $result_name:ident $( < $lt:lifetime > )?) => {
         #[derive(Debug)]
         pub struct $result_name $( <$lt> )? {
-            inner: Result<$type, String>,
+            inner: core::result::Result<$type, String>,
         }
 
         impl $( <$lt> )? $result_name $( <$lt> )? {
@@ -66,8 +62,8 @@ macro_rules! make_result_type {
             }
         }
 
-        impl $( <$lt> )? From<Result<$type, String>> for $result_name $( <$lt> )? {
-            fn from(val: Result<$type, String>) -> Self {
+        impl $( <$lt> )? From<core::result::Result<$type, String>> for $result_name $( <$lt> )? {
+            fn from(val: core::result::Result<$type, String>) -> Self {
                 Self { inner: val }
             }
         }

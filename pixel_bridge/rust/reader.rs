@@ -24,8 +24,6 @@ impl ReadSeek for std::io::BufReader<File> {}
 #[derive(Default)]
 pub struct ImageReader {
     inner: Option<Box<RustImageReader<Box<dyn ReadSeek>>>>,
-    jpeg_strict_mode: bool,
-    png_ignore_checksums: bool,
 }
 
 impl std::fmt::Debug for ImageReader {
@@ -75,8 +73,6 @@ impl ImageReader {
         let bytes_reader = std::io::BufReader::new(std::io::Cursor::new(input.to_vec()));
         Self {
             inner: Some(Box::new(RustImageReader::new(Box::new(bytes_reader)))),
-            jpeg_strict_mode: true,
-            png_ignore_checksums: false,
         }
     }
 
@@ -92,8 +88,6 @@ impl ImageReader {
                 inner: Some(Box::new(RustImageReader::new(
                     Box::new(BufReader::new(file)) as Box<dyn ReadSeek>
                 ))),
-                jpeg_strict_mode: true,
-                png_ignore_checksums: false,
             })
             .into(),
             Err(err) => ResultImageReader::from_err(err.to_string()),
@@ -106,16 +100,6 @@ impl ImageReader {
             return;
         };
         inner.set_format(format.into())
-    }
-
-    /// Supply whether to use strict mode for the JPEG decoder.
-    pub fn set_jpeg_strict_mode(&mut self, strict_mode: bool) {
-        self.jpeg_strict_mode = strict_mode;
-    }
-
-    /// Supply whether to ignore checksums for the PNG decoder.
-    pub fn set_png_ignore_checksums(&mut self, ignore_checksums: bool) {
-        self.png_ignore_checksums = ignore_checksums;
     }
 
     /// Read the image.
@@ -136,10 +120,9 @@ impl ImageReader {
             }
         };
         // Delegate to non-inlined helper functions to reduce the stack frame size by 4k.
-        // See WorksWithSmallStack in photos/editing/twix/codec/decode_image_safe_test.cc.
         match inner.format() {
-            Some(ImageFormat::Png) => png(inner, self.png_ignore_checksums),
-            Some(ImageFormat::Jpeg) => jpeg(inner, self.jpeg_strict_mode),
+            Some(ImageFormat::Png) => png(inner),
+            Some(ImageFormat::Jpeg) => jpeg(inner),
             Some(ImageFormat::WebP) => webp(inner),
             Some(ImageFormat::Gif) => gif(inner),
             Some(ImageFormat::Tiff) => tiff(inner),
@@ -154,21 +137,16 @@ impl ImageReader {
 #[inline(never)]
 fn png(
     d: RustImageReader<Box<dyn ReadSeek>>,
-    ignore_checksums: bool,
 ) -> Result<ImageDecoder, String> {
-    let decoder = RustPngDecoder::with_limits_and_options(
-        d.into_inner(),
-        image::Limits::no_limits(),
-        ignore_checksums,
-    )
-    .map_err(|e| e.to_string())?;
+    let decoder = RustPngDecoder::new(d.into_inner()).map_err(|e| e.to_string())?;
     Ok(ImageDecoder::new(GenericImageDecoder::Png(Box::new(decoder))))
 }
 
 #[inline(never)]
-fn jpeg(d: RustImageReader<Box<dyn ReadSeek>>, strict_mode: bool) -> Result<ImageDecoder, String> {
-    let mut decoder = RustJpegDecoder::new(d.into_inner()).map_err(|e| e.to_string())?;
-    decoder.set_strict_mode(strict_mode);
+fn jpeg(
+    d: RustImageReader<Box<dyn ReadSeek>>,
+) -> Result<ImageDecoder, String> {
+    let decoder = RustJpegDecoder::new(d.into_inner()).map_err(|e| e.to_string())?;
     Ok(ImageDecoder::new(GenericImageDecoder::Jpeg(Box::new(decoder))))
 }
 

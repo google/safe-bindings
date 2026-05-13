@@ -164,9 +164,6 @@ class ImageDecoder final {
   // whether an image is decodable. Returns `std::nullopt` if this cannot be
   // determined for a given image (does not mean the image is invalid).
   std::optional<uint8_t> GetInputBitDepth() const;
-  // Returns the chroma subsampling of the image data produced by this decoder.
-  // This is only supported for JPEG images.
-  ChromaSubsampling GetChromaSubsampling();
   // Returns the ICC color profile embedded in the image, or
   // std::nullopt if the image does not have one. For formats that
   // don’t support embedded profiles this function should always return
@@ -182,16 +179,6 @@ class ImageDecoder final {
   // don’t support embedded metadata this function should always return
   // std::nullopt. Fails if the XMP metadata is not parsable.
   absl::StatusOr<std::optional<std::string>> GetXmpMetadata();
-  // Returns the Extended XMP GUID embedded in the image, or
-  // std::nullopt if the image does not have any. For formats that
-  // don’t support embedded metadata this function should always return
-  // std::nullopt. Fails if the Extended XMP metadata is not parsable.
-  absl::StatusOr<std::optional<std::string>> GetExtendedXmpGuid();
-  // Returns the Extended XMP metadata embedded in the image, or
-  // std::nullopt if the image does not have any. For formats that
-  // don’t support embedded metadata this function should always return
-  // std::nullopt. Fails if the Extended XMP metadata is not parsable.
-  absl::StatusOr<std::optional<std::string>> GetExtendedXmpMetadata();
   // Returns the IPTC metadata embedded in the image, or
   // std::nullopt if the image does not have one. For formats that
   // don’t support embedded metadata this function should always return
@@ -239,10 +226,6 @@ class ImageReader final {
 
   // Supply the format as which to interpret the read image.
   void SetFormat(Format format);
-  // Supply whether to use strict mode for the JPEG decoder.
-  void SetJpegStrictMode(bool strict_mode);
-  // Supply whether to ignore checksums for the PNG decoder.
-  void SetPngIgnoreChecksums(bool ignore_checksums);
   // Convert the reader into a decoder.
   //
   // Guesses the format and constructs the correct decoder for the format.
