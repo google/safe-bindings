@@ -1,16 +1,16 @@
-#include "security/deflate/flate2.h"
+#include "flate2.h"
 
 #include <cstdint>
 #include <optional>
 #include <utility>
 
 #include "base/rust/rust_vec_u8.h"
-#include "security/deflate/rust/flate2_rs.h"
+#include "rust/flate2_rs.h"
 #include "security/ise_memory_safety/crubit_helpers/string_conversions.h"
-#include "third_party/absl/status/status.h"
-#include "third_party/absl/status/statusor.h"
-#include "third_party/absl/strings/cord.h"
-#include "third_party/absl/strings/string_view.h"
+#include "absl/status/status.h"
+#include "absl/status/statusor.h"
+#include "absl/strings/cord.h"
+#include "absl/strings/string_view.h"
 
 namespace security::deflate {
 

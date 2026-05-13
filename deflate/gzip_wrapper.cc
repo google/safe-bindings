@@ -1,12 +1,12 @@
-#include "security/deflate/gzip_wrapper.h"
+#include "gzip_wrapper.h"
 
 #include <utility>
 
-#include "security/deflate/flate2.h"
-#include "security/deflate/rust/flate2_rs.h"
-#include "third_party/absl/status/status.h"
-#include "third_party/absl/status/statusor.h"
-#include "third_party/absl/strings/string_view.h"
+#include "flate2.h"
+#include "rust/flate2_rs.h"
+#include "absl/status/status.h"
+#include "absl/status/statusor.h"
+#include "absl/strings/string_view.h"
 
 namespace security::deflate {
 

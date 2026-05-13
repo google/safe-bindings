@@ -4,10 +4,6 @@
 //! This file provides macros for creating Crubit-compatible `Vec` type.
 //! This has been adapted from the VecU8 type in //base/rust/rust_vec_u8.rs.
 
-google3::import! {
-  "//third_party/rust/paste/v1:paste";
-}
-
 /// Macro for generating a Crubit-compatible `Vec` type. The `Vec` type
 /// has similar methods as a Rust `Vec` and converts to/from the `Vec` type.
 /// This is adapted from VecU8 (//base/rust/rust_vec_u8.rs).
@@ -107,11 +103,7 @@ macro_rules! make_vec_type {
 
 #[cfg(test)]
 mod test {
-    google3::import! {
-        "//third_party/gtest_rust/googletest";
-    }
-
-    use googletest::prelude::*;
+        use googletest::prelude::*;
 
     #[derive(Debug, PartialEq, Clone, Copy, Default)]
     pub struct Demo {

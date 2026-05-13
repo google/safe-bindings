@@ -120,12 +120,7 @@ macro_rules! make_vec_type {
 
 #[cfg(test)]
 mod test {
-    google3::import! {
-        "//third_party/gtest_rust/googletest";
-        "//third_party/rust/paste/v1:paste";
-    }
-
-    use googletest::prelude::*;
+        use googletest::prelude::*;
     use std::slice;
 
     #[derive(Debug, PartialEq, Clone, Copy, Default)]

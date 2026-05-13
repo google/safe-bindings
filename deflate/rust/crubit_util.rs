@@ -168,14 +168,7 @@ macro_rules! make_option_type {
 
 #[cfg(test)]
 mod test {
-    google3::import! {
-        "//third_party/rust/anyhow/v1:anyhow";
-        "//third_party/rust/paste/v1:paste";
-        "//third_party/crubit/support/public:cc_std";
-        "//third_party/gtest_rust/googletest";
-    }
-
-    use anyhow::anyhow;
+        use anyhow::anyhow;
     use googletest::prelude::*;
 
     #[derive(Debug, PartialEq, Clone, Default)]

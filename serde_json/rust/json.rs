@@ -1,11 +1,3 @@
-google3::import! {
-  "//third_party/absl/status:status";
-  "//third_party/absl/status:status_wrapper";
-  "//third_party/rust/anyhow/v1:anyhow";
-  "//third_party/rust/serde/v1:serde";
-  "//third_party/rust/serde_json/v1:serde_json";
-}
-
 use crate::make_result_type;
 use crate::make_vec_type;
 use crate::raw_string::RawString;

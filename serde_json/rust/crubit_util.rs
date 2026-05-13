@@ -1,9 +1,3 @@
-google3::import! {
-  "//third_party/rust/anyhow/v1:anyhow";
-  "//third_party/rust/paste/v1:paste";
-  "//third_party/crubit/support/public:cc_std";
-}
-
 /// Macro for generating a Crubit-compatible `Result` type. The `Result` type
 /// has similar methods as a Rust `Result` and converts to/from the underlying
 /// type `T` and an `anyhow::Result<T>`. In the error case it returns a human
@@ -168,12 +162,7 @@ macro_rules! make_option_type {
 
 #[cfg(test)]
 mod test {
-    google3::import! {
-      "//third_party/rust/anyhow/v1:anyhow";
-      "//third_party/gtest_rust/googletest";
-    }
-
-    use anyhow::anyhow;
+        use anyhow::anyhow;
     use googletest::prelude::*;
 
     #[derive(Debug, PartialEq, Clone, Default)]

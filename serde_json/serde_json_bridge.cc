@@ -1,4 +1,4 @@
-#include "security/json/serde_json/serde_json_bridge.h"
+#include "serde_json_bridge.h"
 
 #include <algorithm>
 #include <cstddef>
@@ -9,12 +9,12 @@
 #include <vector>
 
 #include "google/protobuf/struct.proto.h"
-#include "security/json/serde_json/rust/serde_json_bridge_rs.h"
-#include "third_party/absl/status/status.h"
-#include "third_party/absl/status/statusor.h"
-#include "third_party/absl/strings/str_cat.h"
-#include "third_party/absl/strings/string_view.h"
-#include "third_party/absl/types/span.h"
+#include "rust/serde_json_bridge_rs.h"
+#include "absl/status/status.h"
+#include "absl/status/statusor.h"
+#include "absl/strings/str_cat.h"
+#include "absl/strings/string_view.h"
+#include "absl/types/span.h"
 #include "third_party/gloop/util/status/status_macros.h"
 
 namespace security::json::serde_json_bridge {

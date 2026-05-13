@@ -1,9 +1,9 @@
 #ifndef SECURITY_DEFLATE_GZIP_WRAPPER_H_
 #define SECURITY_DEFLATE_GZIP_WRAPPER_H_
 
-#include "security/deflate/flate2.h"
-#include "third_party/absl/status/statusor.h"
-#include "third_party/absl/strings/string_view.h"
+#include "flate2.h"
+#include "absl/status/statusor.h"
+#include "absl/strings/string_view.h"
 
 namespace security::deflate {
 
