@@ -28,3 +28,9 @@ impl From<String> for VecU8 {
         Self(val.into_bytes())
     }
 }
+
+impl From<&str> for VecU8 {
+    fn from(val: &str) -> Self {
+        Self(val.as_bytes().to_vec())
+    }
+}

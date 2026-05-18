@@ -10,10 +10,6 @@ doctest = false
 
 [dependencies]
 bytemuck = { version = "1", default-features = false, features = ["aarch64_simd", "derive", "extern_crate_alloc", "min_const_generics", "must_cast"] }
-paste = "1"
 image = { version = "0.25", default-features = false, features = ["bmp", "exr", "gif", "hdr", "ico", "jpeg", "png", "tiff", "webp"] }
 pic-scale-safe = "0.1"
 tiff = { version = "0.11", features = ["deflate", "fax", "jpeg", "lzw"] }
-
-[dev-dependencies]
-googletest = "0.14"

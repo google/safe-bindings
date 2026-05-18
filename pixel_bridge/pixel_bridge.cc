@@ -88,18 +88,20 @@ absl::string_view StringViewFromVecU8(
 }
 
 absl::StatusOr<std::optional<std::string>> GetMetadata(
-    rust::image::ResultOptionVecU8 result_stat) {
-  if (result_stat.is_err()) {
+    rs_std::Result<rs_std::Option<rust::vec_u8::VecU8>,
+                   rust::vec_u8::VecU8>
+        result_stat) {
+  if (!result_stat.has_value()) {
     // NOTE: b/351976355 - Find a better error code for this Rust error.
     return absl::InternalError(
-        StringViewFromVecU8(std::move(result_stat).unwrap_err()));
+        StringViewFromVecU8(std::move(result_stat).err()));
   }
-  rust::image::OptionVecU8 result_opt =
-      std::move(result_stat).unwrap();
-  if (result_opt.is_none()) {
+  std::optional<rust::vec_u8::VecU8> result_opt =
+      std::move(result_stat).value();
+  if (!result_opt.has_value()) {
     return std::nullopt;
   }
-  return std::string(StringViewFromVecU8(std::move(result_opt).unwrap()));
+  return std::string(StringViewFromVecU8(std::move(result_opt).value()));
 }
 
 std::string FormatToString(Format format) {
@@ -121,12 +123,12 @@ std::string FormatToString(Format format) {
   }
 }
 
-inline absl::Status ToStatus(rust::image::Status status) {
-  if (status.is_ok()) {
+inline absl::Status ToStatus(rs_std::Result<uint8_t, rust::vec_u8::VecU8>
+status) {
+  if (!status.has_value()) {
     return absl::OkStatus();
   }
-  return absl::InternalError(
-      StringViewFromVecU8(std::move(status).unwrap_err()));
+  return absl::InternalError(StringViewFromVecU8(std::move(status).err()));
 }
 
 }  // namespace
@@ -146,11 +148,12 @@ Frames::Frames(rust::image::Frames frames)
     : frames_(std::move(frames)) {}
 
 std::optional<Frame> Frames::GetCurrentFrameAndAdvance() {
-  rust::image::OptionFrame result = frames_.curr_frame_and_advance();
-  if (result.is_none()) {
+  std::optional<rust::image::Frame> result =
+      frames_.curr_frame_and_advance();
+  if (!result.has_value()) {
     return std::nullopt;
   }
-  return Frame(std::move(result).unwrap());
+  return Frame(std::move(result).value());
 }
 
 ImageDecoder::ImageDecoder(rust::image::ImageDecoder decoder)
@@ -242,15 +245,15 @@ bool ImageDecoder::IsAnimated() const { return decoder_.is_animated(); }
 
 absl::StatusOr<Frames> ImageDecoder::GetAllFrames() && {
   Format format = GetFormat();
-  rust::image::ResultFrames result =
-      std::move(decoder_).all_frames();
-  if (!result.is_ok()) {
-    rust::vec_u8::VecU8 err_msg_vec = std::move(result).unwrap_err();
+  rs_std::Result<rust::image::Frames, rust::vec_u8::VecU8>
+      result = std::move(decoder_).all_frames();
+  if (!result.has_value()) {
+    rust::vec_u8::VecU8 err_msg_vec = std::move(result).err();
     absl::string_view err_msg = StringViewFromVecU8(err_msg_vec);
     return absl::InternalError(err_msg);
   }
 
-  return Frames(std::move(result).unwrap());
+  return Frames(std::move(result).value());
 }
 
 PixelType ImageDecoder::GetPixelType() {
@@ -295,11 +298,7 @@ bool ImageDecoder::IsCmyk() const { return decoder_.is_cmyk(); }
 bool ImageDecoder::HasPalette() const { return decoder_.has_palette(); }
 
 std::optional<uint8_t> ImageDecoder::GetInputBitDepth() const {
-  rust::OptionU8 result = decoder_.bit_depth();
-  if (result.is_none()) {
-    return std::nullopt;
-  }
-  return std::move(result).unwrap();
+  return decoder_.bit_depth();
 }
 
 absl::StatusOr<std::optional<std::string>> ImageDecoder::GetIccProfile() {
@@ -320,17 +319,17 @@ absl::StatusOr<std::optional<std::string>> ImageDecoder::GetIptcMetadata() {
 
 absl::StatusOr<ImageReader> ImageReader::NewFromFile(
     absl::string_view filepath) {
-  rust::reader::ResultImageReader reader =
-      rust::reader::ImageReader::new_from_file(
+  rs_std::Result<rust::reader::ImageReader,
+                 rust::vec_u8::VecU8>
+      reader = rust::reader::ImageReader::new_from_file(
           absl::Span<const uint8_t>(
               reinterpret_cast<const uint8_t*>(filepath.data()),
               filepath.size()));
-  if (reader.is_err()) {
+  if (!reader.has_value()) {
     // NOTE: b/351976355 - Find a better error code for this Rust error.
-    return absl::InternalError(
-        StringViewFromVecU8(std::move(reader).unwrap_err()));
+    return absl::InternalError(StringViewFromVecU8(std::move(reader).err()));
   }
-  return ImageReader(std::move(reader).unwrap());
+  return ImageReader(std::move(reader).value());
 }
 
 ImageReader::ImageReader(absl::string_view input) {
@@ -353,13 +352,14 @@ void ImageReader::SetFormat(Format format) {
 }
 
 absl::StatusOr<ImageDecoder> ImageReader::IntoDecoder() && {
-  rust::image::ResultImageDecoder decoder =
-      std::move(reader_).into_decoder();
-  if (!decoder.is_ok()) {
+  rs_std::Result<rust::image::ImageDecoder,
+                 rust::vec_u8::VecU8>
+      decoder = std::move(reader_).into_decoder();
+  if (!decoder.has_value()) {
     return absl::InvalidArgumentError(
-        StringViewFromVecU8(std::move(decoder).unwrap_err()));
+        StringViewFromVecU8(std::move(decoder).err()));
   }
-  return ImageDecoder(std::move(decoder).unwrap());
+  return ImageDecoder(std::move(decoder).value());
 }
 
 }  // namespace security::pixel_bridge

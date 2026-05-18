@@ -1,8 +1,6 @@
 use crate::{
-    make_option_type, make_result_type,
     reader::{Format, ReadSeek},
     vec_u8::VecU8,
-    OptionU8,
 };
 use image::{
     codecs::bmp::BmpDecoder as RustBmpDecoder, codecs::gif::GifDecoder as RustGifDecoder,
@@ -135,32 +133,22 @@ impl std::fmt::Debug for ImageDecoder {
     }
 }
 
-// NOTE: b/367916605 - Change once Result is supported by Crubit.
-make_result_type!(ImageDecoder);
-// NOTE: b/367916605 - Change once Option is supported by Crubit.
-make_option_type!(VecU8, OptionVecU8);
-// NOTE: b/367916605 - Change once Option is supported by Crubit.
-make_option_type!(u64, OptionU64);
-// NOTE: b/367916605 - Change once Result is supported by Crubit.
-make_result_type!(OptionVecU8);
-
-// NOTE: b/367916605 - Change once Result is supported by Crubit.
-make_result_type!((), ResultVoid);
-pub type Status = ResultVoid;
+// NOTE: Crubit doesn't seem to support () here, so using a u8 for now.
+pub type Status = Result<u8, VecU8>;
 
 #[inline(always)]
 fn ok() -> Status {
-    ().into()
+    Ok(0)
 }
 
 #[inline(always)]
 fn internal_error(message: impl Into<String>) -> Status {
-    ResultVoid::from_err(message)
+    Err(message.into().into())
 }
 
 #[inline(always)]
 fn invalid_argument_error(message: impl Into<String>) -> Status {
-    ResultVoid::from_err(message)
+    Err(message.into().into())
 }
 
 /// Which Rust integer type backs the value of a pixel.
@@ -254,11 +242,6 @@ impl fmt::Debug for Frames {
     }
 }
 
-// NOTE: b/367916605 - Change once Result is supported by Crubit.
-make_result_type!(Frames);
-// NOTE: b/367916605 - Change once Option is supported by Crubit.
-make_option_type!(Frame);
-
 impl Frame {
     fn new(frame: RustFrame) -> Self {
         Self { inner: Some(frame) }
@@ -296,12 +279,9 @@ impl Frames {
     }
 
     /// Returns the bytes of the current image and advances to the next Frame.
-    pub fn curr_frame_and_advance(&mut self) -> OptionFrame {
-        let Some(first) = self.inner.pop_front() else {
-            return OptionFrame::default();
-        };
-
-        Frame::new(first).into()
+    pub fn curr_frame_and_advance(&mut self) -> Option<Frame> {
+        let first = self.inner.pop_front()?;
+        Some(Frame::new(first))
     }
 }
 
@@ -344,13 +324,13 @@ where
     }
 }
 
-fn run_fallible_result<F>(f: F) -> ResultFrames
+fn run_fallible_result<F>(f: F) -> Result<Frames, VecU8>
 where
-    F: FnOnce() -> ResultFrames,
+    F: FnOnce() -> Result<Frames, VecU8>,
 {
     match run_catching_panics(f) {
         Ok(res) => res,
-        Err(formatted_error) => ResultFrames::from_err(formatted_error),
+        Err(formatted_error) => Err(formatted_error.into()),
     }
 }
 
@@ -532,21 +512,18 @@ impl ImageDecoder {
     /// unimplemented). It also does not necessarily indicate whether an image is decodable.
     /// Returns `None` if this cannot be determined for a given image (does not mean the
     /// image is invalid).
-    pub fn bit_depth(&self) -> OptionU8 {
-        self.inner
-            .as_ref()
-            .and_then(|inner| {
-                let color_type = inner.original_color_type();
-                let channel_count = color_type.channel_count();
-                if channel_count == 0 {
-                    return None;
-                }
-                let bits_per_pixel = color_type.bits_per_pixel();
-                // Perform division before casting to u8 to prevent overflow.
-                let bit_depth = bits_per_pixel / (channel_count as u16);
-                u8::try_from(bit_depth).ok()
-            })
-            .into()
+    pub fn bit_depth(&self) -> Option<u8> {
+        self.inner.as_ref().and_then(|inner| {
+            let color_type = inner.original_color_type();
+            let channel_count = color_type.channel_count();
+            if channel_count == 0 {
+                return None;
+            }
+            let bits_per_pixel = color_type.bits_per_pixel();
+            // Perform division before casting to u8 to prevent overflow.
+            let bit_depth = bits_per_pixel / (channel_count as u16);
+            u8::try_from(bit_depth).ok()
+        })
     }
 
     /// Returns the strides of the image data produced by this decoder.
@@ -563,41 +540,39 @@ impl ImageDecoder {
 
     /// Returns all animated frames of the image. This only returns data for decoders, where
     /// `is_animated` returns true.
-    pub fn all_frames(self) -> ResultFrames {
+    pub fn all_frames(self) -> Result<Frames, VecU8> {
         run_fallible_result(move || match self.inner {
             Some(GenericImageDecoder::Gif(gif_decoder)) => {
                 match gif_decoder.into_frames().collect_frames() {
-                    Ok(frames) => ResultFrames::from_ok(Frames::new(frames)),
-                    Err(err) => ResultFrames::from_err(err.to_string()),
+                    Ok(frames) => Ok(Frames::new(frames)),
+                    Err(err) => Err(err.to_string().into()),
                 }
             }
             Some(GenericImageDecoder::WebP(webp_decoder)) => {
                 match webp_decoder.into_frames().collect_frames() {
-                    Ok(frames) => ResultFrames::from_ok(Frames::new(frames)),
-                    Err(err) => ResultFrames::from_err(err.to_string()),
+                    Ok(frames) => Ok(Frames::new(frames)),
+                    Err(err) => Err(err.to_string().into()),
                 }
             }
-            Some(_) => ResultFrames::from_err(
-                "Trying to get animated data on a codec that does not support animation",
-            ),
-            None => ResultFrames::from_err("Decoder is in invalid, moved out state"),
+            Some(_) => {
+                Err("Trying to get animated data on a codec that does not support animation".into())
+            }
+            None => Err("Decoder is in invalid, moved out state".into()),
         })
     }
 
-    fn get_metadata<F>(&mut self, metadata_fn: F) -> ResultOptionVecU8
+    fn get_metadata<F>(&mut self, metadata_fn: F) -> Result<Option<VecU8>, VecU8>
     where
         F: FnOnce(&mut GenericImageDecoder) -> image::ImageResult<Option<Vec<u8>>>,
     {
         let Some(ref mut inner) = self.inner else {
-            return ResultOptionVecU8::from_err("Reader in illegal moved-out state");
+            return Err("Reader in illegal moved-out state".into());
         };
 
         match metadata_fn(inner) {
-            Ok(Some(metadata)) => {
-                ResultOptionVecU8::from_ok(OptionVecU8::from_some(metadata.into()))
-            }
-            Ok(None) => ResultOptionVecU8::from_ok(None.into()),
-            Err(err) => ResultOptionVecU8::from_err(err.to_string()),
+            Ok(Some(metadata)) => Ok(Some(metadata.into())),
+            Ok(None) => Ok(None),
+            Err(err) => Err(err.to_string().into()),
         }
     }
 
@@ -605,7 +580,7 @@ impl ImageDecoder {
     /// image does not have one.
     /// For formats that don’t support embedded profiles this function should
     /// always return Ok(None).
-    pub fn icc_profile(&mut self) -> ResultOptionVecU8 {
+    pub fn icc_profile(&mut self) -> Result<Option<VecU8>, VecU8> {
         self.get_metadata(|inner| inner.icc_profile())
     }
 
@@ -613,7 +588,7 @@ impl ImageDecoder {
     /// image does not have one.
     /// For formats that don’t support embedded profiles this function should
     /// always return Ok(None).
-    pub fn exif_metadata(&mut self) -> ResultOptionVecU8 {
+    pub fn exif_metadata(&mut self) -> Result<Option<VecU8>, VecU8> {
         self.get_metadata(|inner| inner.exif_metadata())
     }
 
@@ -621,7 +596,7 @@ impl ImageDecoder {
     /// image does not have one.
     /// For formats that don’t support embedded profiles this function should
     /// always return Ok(None).
-    pub fn xmp_metadata(&mut self) -> ResultOptionVecU8 {
+    pub fn xmp_metadata(&mut self) -> Result<Option<VecU8>, VecU8> {
         self.get_metadata(|inner| inner.xmp_metadata())
     }
 
@@ -629,7 +604,7 @@ impl ImageDecoder {
     /// image does not have one.
     /// For formats that don’t support embedded profiles this function should
     /// always return Ok(None).
-    pub fn iptc_metadata(&mut self) -> ResultOptionVecU8 {
+    pub fn iptc_metadata(&mut self) -> Result<Option<VecU8>, VecU8> {
         self.get_metadata(|inner| inner.iptc_metadata())
     }
 
