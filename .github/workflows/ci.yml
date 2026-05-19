@@ -1,0 +1,39 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build:
+    name: build ${{ matrix.binding }}
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        binding: [pixel_bridge]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Rust
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          # NOTE: b/514328084 - Crubit generates some code that causes unused-imports warnings. By
+          # default rustflags is "-D warnings" causing the build to fail.
+          rustflags: ""
+
+      - name: Configure CMake
+        run: cmake -B build -S ${{ matrix.binding }}
+
+      - name: Build
+        run: cmake --build build --parallel
+
+  summary:
+    name: summary
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Complete
+        run: echo "All bindings built successfully!"
