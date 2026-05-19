@@ -15,3 +15,6 @@ C++ wrappers (using Crubit) for Rust libraries.
 We want to be open and set the right expectations: We're currently not set up to
 accept contributions. We plan to open source more bindings and gather interest
 and may accept contributions in the future.
+
+A test to trigger CI
+Another trigger
