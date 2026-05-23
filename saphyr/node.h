@@ -209,7 +209,7 @@ class Node {
   NodeView operator[](const char* key) const {
     return operator[](rs_std::StrRef::FromUtf8Unchecked(key));
   }
-  NodeView operator[](const std::string& key) const {
+  NodeView operator[](absl::string_view key) const {
     return operator[](rs_std::StrRef::FromUtf8Unchecked(key));
   }
   // Accesses an element in a sequence by index.
@@ -252,7 +252,7 @@ std::ostream& operator<<(std::ostream& out, const Node& node);
 // Returns an error if parsing fails.
 absl::StatusOr<Node> Load(rs_std::StrRef input);
 
-inline absl::StatusOr<Node> Load(const std::string& input) {
+inline absl::StatusOr<Node> Load(absl::string_view input) {
   return Load(rs_std::StrRef::FromUtf8Unchecked(input));
 }
 
