@@ -8,6 +8,7 @@ use image::{
     codecs::png::PngDecoder as RustPngDecoder, codecs::tiff::TiffDecoder as RustTiffDecoder,
     codecs::webp::WebPDecoder as RustWebPDecoder, ImageFormat, ImageReader as RustImageReader,
 };
+use png as png_crate;
 use std::fs::File;
 use std::io::{BufRead, BufReader, Cursor, Read, Seek};
 
@@ -199,4 +200,39 @@ fn ico(d: RustImageReader<Box<dyn ReadSeek>>) -> Result<ImageDecoder, String> {
     Ok(ImageDecoder::new(GenericImageDecoder::Ico(Box::new(
         RustIcoDecoder::new(d.into_inner()).map_err(|e| e.to_string())?,
     ))))
+}
+
+pub fn extract_png_text_metadata(
+    png_data: &[u8],
+) -> Result<crate::vec_u8::VecU8, crate::vec_u8::VecU8> {
+    let decoder = png_crate::Decoder::new(std::io::Cursor::new(png_data));
+    let reader = decoder.read_info().map_err(|e| crate::vec_u8::VecU8::from(e.to_string()))?;
+    let info = reader.info();
+
+    let mut serialized = Vec::new();
+
+    let mut append_entry = |key: &str, text: &str| {
+        serialized.extend_from_slice(key.as_bytes());
+        serialized.push(0);
+        serialized.extend_from_slice(text.as_bytes());
+        serialized.push(0);
+    };
+
+    for text_chunk in &info.uncompressed_latin1_text {
+        append_entry(&text_chunk.keyword, &text_chunk.text);
+    }
+
+    for text_chunk in &info.compressed_latin1_text {
+        if let Some(val_str) = text_chunk.get_text().ok() {
+            append_entry(&text_chunk.keyword, &val_str);
+        }
+    }
+
+    for text_chunk in &info.utf8_text {
+        if let Some(val_str) = text_chunk.get_text().ok() {
+            append_entry(&text_chunk.keyword, &val_str);
+        }
+    }
+
+    Ok(crate::vec_u8::VecU8::from(serialized))
 }

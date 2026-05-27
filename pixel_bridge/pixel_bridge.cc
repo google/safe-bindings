@@ -358,4 +358,32 @@ absl::StatusOr<ImageDecoder> ImageReader::IntoDecoder() && {
   return ImageDecoder(std::move(decoder).value());
 }
 
+absl::StatusOr<std::vector<std::pair<std::string, std::string>>>
+ExtractPngTextMetadata(absl::string_view png_string) {
+  absl::Span<const uint8_t> span(
+      reinterpret_cast<const uint8_t*>(png_string.data()), png_string.size());
+  rs_std::Result<rust::vec_u8::VecU8, rust::vec_u8::VecU8>
+      result = rust::reader::extract_png_text_metadata(span);
+  if (!result.has_value()) {
+    return absl::InvalidArgumentError(
+        StringViewFromVecU8(std::move(result).err()));
+  }
+  rust::vec_u8::VecU8 vec = std::move(result).value();
+  absl::string_view serialized = StringViewFromVecU8(vec);
+  std::vector<std::pair<std::string, std::string>> metadata;
+  size_t idx = 0;
+  while (idx < serialized.size()) {
+    size_t key_end = serialized.find('\0', idx);
+    if (key_end == absl::string_view::npos) break;
+    std::string key(serialized.substr(idx, key_end - idx));
+    idx = key_end + 1;
+    size_t val_end = serialized.find('\0', idx);
+    if (val_end == absl::string_view::npos) break;
+    std::string val(serialized.substr(idx, val_end - idx));
+    idx = val_end + 1;
+    metadata.push_back({std::move(key), std::move(val)});
+  }
+  return metadata;
+}
+
 }  // namespace security::pixel_bridge

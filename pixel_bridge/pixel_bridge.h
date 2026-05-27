@@ -236,6 +236,11 @@ class ImageReader final {
   rust::reader::ImageReader reader_;
 };
 
+// Extracts all PNG text chunks (tEXt, zTXt, iTXt) as key-value pairs.
+// Returns an error if parsing fails.
+absl::StatusOr<std::vector<std::pair<std::string, std::string>>>
+ExtractPngTextMetadata(absl::string_view png_string);
+
 }  // namespace security::pixel_bridge
 
 #endif  // SAFE_BINDINGS_PIXEL_BRIDGE_H_
