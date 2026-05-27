@@ -348,4 +348,12 @@ absl::Status SerdeJson::AddFieldArray(absl::string_view key,
   return json_obj_.add_field_array(key, arr).status();
 }
 
+bool SerdeJson::operator==(const SerdeJson& other) const {
+  return json_obj_.is_json_equal(other.json_obj_);
+}
+
+bool SerdeJson::operator!=(const SerdeJson& other) const {
+  return !json_obj_.is_json_equal(other.json_obj_);
+}
+
 }  // namespace security::json::serde_json_bridge

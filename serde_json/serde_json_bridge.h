@@ -16,6 +16,10 @@ namespace security::json::serde_json_bridge {
 
 class SerdeJson final {
  public:
+  // Compare two SerdeJson objects.
+  bool operator==(const SerdeJson& other) const;
+  bool operator!=(const SerdeJson& other) const;
+
   // Parses a raw JSON string into a SerdeJson object.
   // Returns an absl::Status if the input is malformed.
   static absl::StatusOr<SerdeJson> Parse(absl::string_view data);

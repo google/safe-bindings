@@ -355,6 +355,11 @@ impl SerdeJson {
             items.iter().map(|v| v.value.clone()).collect::<Vec<serde_json::Value>>(),
         )
     }
+
+    /// Compares two SerdeJson objects.
+    pub fn is_json_equal(&self, other: &Self) -> bool {
+        self.value == other.value
+    }
 }
 
 // NOTE: b/367916605 - Remove make_result_type and make_vec_type macros.
