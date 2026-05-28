@@ -7,7 +7,7 @@
 #include <optional>
 #include <string>
 
-#include "crubit/support/rs_std/str_ref.h"
+#include "support/rs_std/str_ref.h"
 #include "rust/saphyr_rust_wrapper.h"
 #include "absl/status/statusor.h"
 #include "absl/strings/string_view.h"

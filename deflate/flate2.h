@@ -4,7 +4,7 @@
 #include <cstdint>
 #include <optional>
 
-#include "rust/flate2_rs.h"
+#include "rust.h"
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
 #include "absl/strings/cord.h"
@@ -30,8 +30,8 @@ class GzDecoderImpl final {
   RustDecoder decoder_;
 };
 
-using GzDecoder = GzDecoderImpl<flate2_rs::read::GzDecoder>;
-using MultiGzDecoder = GzDecoderImpl<flate2_rs::read::MultiGzDecoder>;
+using GzDecoder = GzDecoderImpl<rust::read::GzDecoder>;
+using MultiGzDecoder = GzDecoderImpl<rust::read::MultiGzDecoder>;
 
 class GzEncoder final {
  public:
@@ -39,8 +39,8 @@ class GzEncoder final {
   absl::StatusOr<VecU8Wrapper> read_to_end();
 
  private:
-  explicit GzEncoder(flate2_rs::read::GzEncoder encoder);
-  flate2_rs::read::GzEncoder encoder_;
+  explicit GzEncoder(rust::read::GzEncoder encoder);
+  rust::read::GzEncoder encoder_;
 };
 
 }  // namespace read
@@ -61,8 +61,8 @@ class GzDecoderImpl final {
   RustDecoder decoder_;
 };
 
-using GzDecoder = GzDecoderImpl<flate2_rs::write::GzDecoder>;
-using MultiGzDecoder = GzDecoderImpl<flate2_rs::write::MultiGzDecoder>;
+using GzDecoder = GzDecoderImpl<rust::write::GzDecoder>;
+using MultiGzDecoder = GzDecoderImpl<rust::write::MultiGzDecoder>;
 
 class GzEncoder final {
  public:
@@ -71,8 +71,8 @@ class GzEncoder final {
   absl::StatusOr<VecU8Wrapper> finish() &&;
 
  private:
-  explicit GzEncoder(flate2_rs::write::GzEncoder encoder);
-  flate2_rs::write::GzEncoder encoder_;
+  explicit GzEncoder(rust::write::GzEncoder encoder);
+  rust::write::GzEncoder encoder_;
 };
 
 }  // namespace write
@@ -86,10 +86,10 @@ class Compression final {
  private:
   friend class read::GzEncoder;
   friend class write::GzEncoder;
-  explicit Compression(flate2_rs::Compression compression);
-  flate2_rs::Compression get() const;
+  explicit Compression(rust::Compression compression);
+  rust::Compression get() const;
 
-  flate2_rs::Compression compression_;
+  rust::Compression compression_;
 };
 
 class GzHeader final {
@@ -98,22 +98,22 @@ class GzHeader final {
   uint32_t mtime() const;
 
   static std::optional<GzHeader> FromRustOptionGzHeader(
-      std::optional<flate2_rs::GzHeader> header);
+      std::optional<rust::GzHeader> header);
 
  private:
-  explicit GzHeader(flate2_rs::GzHeader gz_header);
+  explicit GzHeader(rust::GzHeader gz_header);
 
-  flate2_rs::GzHeader gz_header_;
+  rust::GzHeader gz_header_;
 };
 
 class VecU8Wrapper {
  public:
-  explicit VecU8Wrapper(flate2_rs::vec_u8::VecU8 vec_u8);
+  explicit VecU8Wrapper(rust::vec_u8::VecU8 vec_u8);
   absl::string_view as_string_view() const;
   absl::Cord as_cord() &&;
 
  private:
-  flate2_rs::vec_u8::VecU8 vec_u8_;
+  rust::vec_u8::VecU8 vec_u8_;
 };
 
 }  // namespace security::deflate

@@ -4,7 +4,7 @@
 #include <utility>
 
 #include "flate2.h"
-#include "rust/flate2_rs.h"
+#include "rust.h"
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
 #include "absl/strings/string_view.h"
@@ -14,7 +14,7 @@ namespace security::deflate {
 
 namespace {
 
-absl::string_view StringViewFromVecU8(const flate2_rs::vec_u8::VecU8& vec) {
+absl::string_view StringViewFromVecU8(const rust::vec_u8::VecU8& vec) {
   static_assert(sizeof(const char) == sizeof(const uint8_t),
                 "Alignment check failed");
   static_assert(alignof(const char) <= alignof(const uint8_t),
@@ -32,12 +32,12 @@ absl::StatusOr<VecU8Wrapper> CompressGzip(absl::string_view contents,
     return absl::InvalidArgumentError("invalid compression level, must be 0-9");
   }
 
-  auto encoder = flate2_rs::read::GzEncoder::create(
+  auto encoder = rust::read::GzEncoder::create(
       absl::Span<const uint8_t>(
           reinterpret_cast<const uint8_t*>(contents.data()), contents.size()),
-      flate2_rs::Compression::new_(compression_level));
+      rust::Compression::new_(compression_level));
 
-  rs_std::Result<flate2_rs::vec_u8::VecU8, flate2_rs::vec_u8::VecU8> result =
+  rs_std::Result<rust::vec_u8::VecU8, rust::vec_u8::VecU8> result =
       encoder.read_to_end();
   if (!result.has_value()) {
     // Potential errors only include system errors when reading from the
@@ -49,9 +49,9 @@ absl::StatusOr<VecU8Wrapper> CompressGzip(absl::string_view contents,
 }
 
 absl::StatusOr<VecU8Wrapper> UncompressGzip(absl::string_view compressed) {
-  auto decoder = flate2_rs::read::GzDecoder::create(absl::Span<const uint8_t>(
+  auto decoder = rust::read::GzDecoder::create(absl::Span<const uint8_t>(
       reinterpret_cast<const uint8_t*>(compressed.data()), compressed.size()));
-  rs_std::Result<flate2_rs::vec_u8::VecU8, flate2_rs::vec_u8::VecU8> result =
+  rs_std::Result<rust::vec_u8::VecU8, rust::vec_u8::VecU8> result =
       decoder.read_to_end();
   if (!result.has_value()) {
     // Potential errors from flate2 crate

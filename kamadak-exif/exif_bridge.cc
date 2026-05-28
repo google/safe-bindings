@@ -9,7 +9,7 @@
 #include <utility>
 #include <vector>
 
-#include "crubit/support/rs_std/slice_ref.h"
+#include "support/rs_std/slice_ref.h"
 #include "file/base/file.h"
 #include "file/base/helpers.h"
 #include "file/base/options.h"

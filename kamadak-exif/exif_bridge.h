@@ -9,7 +9,7 @@
 #include <string>
 #include <vector>
 
-#include "crubit/support/rs_std/slice_ref.h"
+#include "support/rs_std/slice_ref.h"
 #include "file/base/file.h"
 #include "rust/exif_bridge_rs.h"
 #include "absl/base/attributes.h"

@@ -4,7 +4,7 @@
 #include <optional>
 #include <utility>
 
-#include "rust/flate2_rs.h"
+#include "rust.h"
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
 #include "absl/strings/cord.h"
@@ -15,7 +15,7 @@ namespace security::deflate {
 
 namespace {
 
-absl::string_view StringViewFromVecU8(const flate2_rs::vec_u8::VecU8& vec) {
+absl::string_view StringViewFromVecU8(const rust::vec_u8::VecU8& vec) {
   static_assert(sizeof(const char) == sizeof(const uint8_t),
                 "Alignment check failed");
   static_assert(alignof(const char) <= alignof(const uint8_t),
@@ -27,7 +27,7 @@ absl::string_view StringViewFromVecU8(const flate2_rs::vec_u8::VecU8& vec) {
 
 }  // namespace
 
-VecU8Wrapper::VecU8Wrapper(flate2_rs::vec_u8::VecU8 vec_u8)
+VecU8Wrapper::VecU8Wrapper(rust::vec_u8::VecU8 vec_u8)
     : vec_u8_(std::move(vec_u8)) {}
 
 absl::string_view VecU8Wrapper::as_string_view() const {
@@ -47,21 +47,21 @@ absl::Cord VecU8Wrapper::as_cord() && {
   return absl::MakeCordFromExternal(view, [b = std::move(vec_u8_)] {});
 }
 
-Compression::Compression(flate2_rs::Compression compression)
+Compression::Compression(rust::Compression compression)
     : compression_(compression) {}
 Compression::Compression(int level)
-    : compression_(flate2_rs::Compression::new_(level)) {}
+    : compression_(rust::Compression::new_(level)) {}
 
-flate2_rs::Compression Compression::get() const { return compression_; }
+rust::Compression Compression::get() const { return compression_; }
 
 Compression Compression::best() {
-  return Compression(flate2_rs::Compression::best());
+  return Compression(rust::Compression::best());
 }
 Compression Compression::none() {
-  return Compression(flate2_rs::Compression::none());
+  return Compression(rust::Compression::none());
 }
 
-GzHeader::GzHeader(flate2_rs::GzHeader gz_header) : gz_header_(gz_header) {}
+GzHeader::GzHeader(rust::GzHeader gz_header) : gz_header_(gz_header) {}
 
 uint8_t GzHeader::operating_system() const {
   return gz_header_.operating_system();
@@ -69,7 +69,7 @@ uint8_t GzHeader::operating_system() const {
 uint32_t GzHeader::mtime() const { return gz_header_.mtime(); }
 
 std::optional<GzHeader> GzHeader::FromRustOptionGzHeader(
-    std::optional<flate2_rs::GzHeader> header) {
+    std::optional<rust::GzHeader> header) {
   if (!header.has_value()) {
     return std::nullopt;
   }
@@ -96,7 +96,7 @@ std::optional<GzHeader> GzDecoderImpl<RustDecoder>::header() const {
 
 template <typename RustDecoder>
 absl::StatusOr<VecU8Wrapper> GzDecoderImpl<RustDecoder>::read_to_end() {
-  rs_std::Result<flate2_rs::vec_u8::VecU8, flate2_rs::vec_u8::VecU8>
+  rs_std::Result<rust::vec_u8::VecU8, rust::vec_u8::VecU8>
       result_vec_u8 = decoder_.read_to_end();
   if (!result_vec_u8.has_value()) {
     // Potential errors from flate2 crate
@@ -111,18 +111,18 @@ absl::StatusOr<VecU8Wrapper> GzDecoderImpl<RustDecoder>::read_to_end() {
   return VecU8Wrapper(std::move(result_vec_u8).value());
 }
 
-GzEncoder::GzEncoder(flate2_rs::read::GzEncoder encoder)
+GzEncoder::GzEncoder(rust::read::GzEncoder encoder)
     : encoder_(std::move(encoder)) {}
 
 GzEncoder GzEncoder::create(absl::string_view data, Compression level) {
-  return GzEncoder(flate2_rs::read::GzEncoder::create(
+  return GzEncoder(rust::read::GzEncoder::create(
       absl::Span<const uint8_t>(reinterpret_cast<const uint8_t*>(data.data()),
                                 data.size()),
       level.get()));
 }
 
 absl::StatusOr<VecU8Wrapper> GzEncoder::read_to_end() {
-  rs_std::Result<flate2_rs::vec_u8::VecU8, flate2_rs::vec_u8::VecU8>
+  rs_std::Result<rust::vec_u8::VecU8, rust::vec_u8::VecU8>
       result_vec_u8 = encoder_.read_to_end();
   if (!result_vec_u8.has_value()) {
     // Potential errors only include system errors when reading from the
@@ -134,8 +134,8 @@ absl::StatusOr<VecU8Wrapper> GzEncoder::read_to_end() {
   return VecU8Wrapper(std::move(result_vec_u8).value());
 }
 
-template class GzDecoderImpl<flate2_rs::read::GzDecoder>;
-template class GzDecoderImpl<flate2_rs::read::MultiGzDecoder>;
+template class GzDecoderImpl<rust::read::GzDecoder>;
+template class GzDecoderImpl<rust::read::MultiGzDecoder>;
 
 }  // namespace read
 
@@ -157,7 +157,7 @@ std::optional<GzHeader> GzDecoderImpl<RustDecoder>::header() const {
 
 template <typename RustDecoder>
 absl::Status GzDecoderImpl<RustDecoder>::write_all(absl::string_view data) {
-  rs_std::Result<uint8_t, flate2_rs::vec_u8::VecU8> result_unit =
+  rs_std::Result<uint8_t, rust::vec_u8::VecU8> result_unit =
       decoder_.write_all(absl::Span<const uint8_t>(
           reinterpret_cast<const uint8_t*>(data.data()), data.size()));
   if (!result_unit.has_value()) {
@@ -175,7 +175,7 @@ absl::Status GzDecoderImpl<RustDecoder>::write_all(absl::string_view data) {
 
 template <typename RustDecoder>
 absl::StatusOr<VecU8Wrapper> GzDecoderImpl<RustDecoder>::finish() && {
-  rs_std::Result<flate2_rs::vec_u8::VecU8, flate2_rs::vec_u8::VecU8>
+  rs_std::Result<rust::vec_u8::VecU8, rust::vec_u8::VecU8>
       result_vec_u8 = std::move(decoder_).finish();
   if (!result_vec_u8.has_value()) {
     // Potential errors from flate2 crate
@@ -187,15 +187,15 @@ absl::StatusOr<VecU8Wrapper> GzDecoderImpl<RustDecoder>::finish() && {
   return VecU8Wrapper(std::move(result_vec_u8).value());
 }
 
-GzEncoder::GzEncoder(flate2_rs::write::GzEncoder encoder)
+GzEncoder::GzEncoder(rust::write::GzEncoder encoder)
     : encoder_(std::move(encoder)) {}
 
 GzEncoder GzEncoder::create(Compression level) {
-  return GzEncoder(flate2_rs::write::GzEncoder::create(level.get()));
+  return GzEncoder(rust::write::GzEncoder::create(level.get()));
 }
 
 absl::Status GzEncoder::write_all(absl::string_view data) {
-  rs_std::Result<uint8_t, flate2_rs::vec_u8::VecU8> result_unit =
+  rs_std::Result<uint8_t, rust::vec_u8::VecU8> result_unit =
       encoder_.write_all(absl::Span<const uint8_t>(
           reinterpret_cast<const uint8_t*>(data.data()), data.size()));
   if (!result_unit.has_value()) {
@@ -210,7 +210,7 @@ absl::Status GzEncoder::write_all(absl::string_view data) {
 }
 
 absl::StatusOr<VecU8Wrapper> GzEncoder::finish() && {
-  rs_std::Result<flate2_rs::vec_u8::VecU8, flate2_rs::vec_u8::VecU8>
+  rs_std::Result<rust::vec_u8::VecU8, rust::vec_u8::VecU8>
       result_vec_u8 = std::move(encoder_).finish();
   if (!result_vec_u8.has_value()) {
     // Potential errors only include system errors when using the
@@ -222,8 +222,8 @@ absl::StatusOr<VecU8Wrapper> GzEncoder::finish() && {
   return VecU8Wrapper(std::move(result_vec_u8).value());
 }
 
-template class GzDecoderImpl<flate2_rs::write::GzDecoder>;
-template class GzDecoderImpl<flate2_rs::write::MultiGzDecoder>;
+template class GzDecoderImpl<rust::write::GzDecoder>;
+template class GzDecoderImpl<rust::write::MultiGzDecoder>;
 
 }  // namespace write
 
