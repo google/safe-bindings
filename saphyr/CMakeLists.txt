@@ -32,6 +32,7 @@ FetchContent_Declare(
 FetchContent_MakeAvailable(absl)
 
 add_library(node node.cc node.h)
+target_include_directories(node PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/..")
 target_link_libraries(node PRIVATE rust absl::die_if_null absl::status absl::statusor absl::strings)
 
 add_executable(saphyr_example main.cc)

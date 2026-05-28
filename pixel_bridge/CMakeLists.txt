@@ -32,6 +32,7 @@ FetchContent_Declare(
 FetchContent_MakeAvailable(absl)
 
 add_library(pixel_bridge pixel_bridge.cc pixel_bridge.h)
+target_include_directories(pixel_bridge PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/..")
 target_link_libraries(pixel_bridge PRIVATE rust)
 
 add_executable(pixel_bridge_example main.cc)

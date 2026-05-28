@@ -5,6 +5,7 @@
 #include <utility>
 
 #include "rust.h"
+#include "crubit_helpers/string_conversions.h"
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
 #include "absl/strings/cord.h"
@@ -13,19 +14,7 @@
 
 namespace security::deflate {
 
-namespace {
-
-absl::string_view StringViewFromVecU8(const rust::vec_u8::VecU8& vec) {
-  static_assert(sizeof(const char) == sizeof(const uint8_t),
-                "Alignment check failed");
-  static_assert(alignof(const char) <= alignof(const uint8_t),
-                "We need to keep the pointer to `vec`'s data aligned after the "
-                "conversion to char.");
-  return absl::string_view(reinterpret_cast<const char*>(vec.as_ptr()),
-                           vec.len());
-}
-
-}  // namespace
+using ::security::crubit_helpers::StringViewFromVecU8;
 
 VecU8Wrapper::VecU8Wrapper(rust::vec_u8::VecU8 vec_u8)
     : vec_u8_(std::move(vec_u8)) {}

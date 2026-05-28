@@ -9,6 +9,7 @@
 #include <utility>
 
 #include "support/rs_std/str_ref.h"
+#include "crubit_helpers/string_conversions.h"
 #include "rust.h"
 #include "absl/log/die_if_null.h"
 #include "absl/status/status.h"
@@ -17,14 +18,7 @@
 
 namespace security::yaml {
 
-namespace {
-
-absl::string_view StringViewFromVecU8(const rust::vec_u8::VecU8& vec) {
-  return absl::string_view(reinterpret_cast<const char*>(vec.as_ptr()),
-                           vec.len());
-}
-
-}  // namespace
+using ::security::crubit_helpers::StringViewFromVecU8;
 
 // NodeView
 bool NodeView::IsSequence() const { return view_.is_sequence(); }

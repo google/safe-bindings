@@ -7,6 +7,7 @@
 #include <utility>
 #include <vector>
 
+#include "crubit_helpers/string_conversions.h"
 #include "rust.h"
 #include "absl/log/check.h"
 #include "absl/status/status.h"
@@ -18,6 +19,8 @@
 namespace security::pixel_bridge {
 
 namespace {
+
+using ::security::crubit_helpers::StringViewFromVecU8;
 
 rust::reader::Format ToRustFormat(Format format) {
   rust::reader::Format result;
@@ -79,12 +82,6 @@ absl::string_view StringViewFromSpanU8(absl::Span<const uint8_t> data) {
                 "conversion to char.");
   return absl::string_view(reinterpret_cast<const char*>(data.data()),
                            data.size());
-}
-
-absl::string_view StringViewFromVecU8(
-    const rust::vec_u8::VecU8& vec) {
-  absl::Span<const uint8_t> data = absl::MakeSpan(vec.as_ptr(), vec.len());
-  return StringViewFromSpanU8(data);
 }
 
 absl::StatusOr<std::optional<std::string>> GetMetadata(

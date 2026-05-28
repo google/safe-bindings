@@ -4,7 +4,7 @@
 #include <utility>
 
 #include "base/rust/rust_vec_u8.h"
-#include "security/ise_memory_safety/crubit_helpers/string_conversions.h"
+#include "crubit_helpers/string_conversions.h"
 #include "rust/zip_wrapper.h"
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"

@@ -32,6 +32,7 @@ FetchContent_Declare(
 FetchContent_MakeAvailable(absl)
 
 add_library(flate2 flate2.cc flate2.h)
+target_include_directories(flate2 PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/..")
 target_link_libraries(flate2 PRIVATE rust absl::status absl::statusor absl::cord absl::strings absl::span)
 
 add_library(gzip_wrapper gzip_wrapper.cc gzip_wrapper.h)
