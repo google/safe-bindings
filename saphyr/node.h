@@ -8,7 +8,7 @@
 #include <string>
 
 #include "support/rs_std/str_ref.h"
-#include "rust/saphyr_rust_wrapper.h"
+#include "rust.h"
 #include "absl/status/statusor.h"
 #include "absl/strings/string_view.h"
 
@@ -20,7 +20,7 @@ namespace security::yaml {
 class NodeView {
  public:
   NodeView() = default;
-  explicit NodeView(saphyr::NodeView view) : view_(view) {}
+  explicit NodeView(rust::NodeView view) : view_(view) {}
 
   // Returns true if the node is a YAML sequence (list).
   bool IsSequence() const;
@@ -86,7 +86,7 @@ class NodeView {
 
  private:
   friend class Node;
-  saphyr::NodeView view_;
+  rust::NodeView view_;
 };
 
 // Emits the node to the given output stream.
@@ -151,12 +151,12 @@ class NodeView::Iterator {
   void FetchNext() {
     if (!node_ || !has_value_ || !rust_iter_.has_value()) return;
 
-    saphyr::NodeView key;
-    rs_std::Option<saphyr::NodeView> value;
+    rust::NodeView key;
+    rs_std::Option<rust::NodeView> value;
     has_value_ = rust_iter_->next(key, value);
 
     if (has_value_) {
-      std::optional<saphyr::NodeView> std_value = std::move(value);
+      std::optional<rust::NodeView> std_value = std::move(value);
       if (std_value.has_value()) {
         proxy_.first = NodeView(key);
         proxy_.second = NodeView(*std_value);
@@ -168,7 +168,7 @@ class NodeView::Iterator {
   }
 
   const NodeView* node_;
-  std::optional<saphyr::YamlIterator> rust_iter_;
+  std::optional<rust::YamlIterator> rust_iter_;
   Proxy proxy_;
   // The index of the current element in the sequence or map.
   size_t index_ = 0;
@@ -183,7 +183,7 @@ inline NodeView::Iterator NodeView::end() const { return Iterator(); }
 class Node {
  public:
   Node() = default;
-  explicit Node(saphyr::NodeOwned node) : node_(std::move(node)) {}
+  explicit Node(rust::NodeOwned node) : node_(std::move(node)) {}
 
   // Returns true if the node is a YAML sequence (list).
   bool IsSequence() const;
@@ -229,7 +229,7 @@ class Node {
   // If `index` is within bounds, the existing value is replaced.
   // If `index` is equal to `size()`, the value is appended.
   // If the node is not a sequence, this function does nothing.
-  void SetAtIndex(size_t index, saphyr::YamlOwned value);
+  void SetAtIndex(size_t index, rust::YamlOwned value);
 
   // Tries to convert the node to the specified type `T`.
   // Returns `std::nullopt` if the conversion fails or the node is undefined.
@@ -240,7 +240,7 @@ class Node {
   NodeView as_view() const;
 
  private:
-  saphyr::NodeOwned node_;
+  rust::NodeOwned node_;
 };
 
 // Converts the node to a YAML string.
@@ -260,13 +260,13 @@ inline absl::StatusOr<Node> Load(const char* input) {
   return Load(rs_std::StrRef::FromUtf8Unchecked(input));
 }
 
-// Helper functions to convert primitive C++ types to `saphyr::YamlOwned`
+// Helper functions to convert primitive C++ types to `rust::YamlOwned`
 // values.
-saphyr::YamlOwned ToYaml(int64_t value);
-saphyr::YamlOwned ToYaml(int value);
-saphyr::YamlOwned ToYaml(double value);
-saphyr::YamlOwned ToYaml(bool value);
-saphyr::YamlOwned ToYaml(const char* value);
+rust::YamlOwned ToYaml(int64_t value);
+rust::YamlOwned ToYaml(int value);
+rust::YamlOwned ToYaml(double value);
+rust::YamlOwned ToYaml(bool value);
+rust::YamlOwned ToYaml(const char* value);
 
 }  // namespace security::yaml
 

@@ -9,7 +9,7 @@
 #include <utility>
 
 #include "support/rs_std/str_ref.h"
-#include "rust/saphyr_rust_wrapper.h"
+#include "rust.h"
 #include "absl/log/die_if_null.h"
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
@@ -19,7 +19,7 @@ namespace security::yaml {
 
 namespace {
 
-absl::string_view StringViewFromVecU8(const saphyr::vec_u8::VecU8& vec) {
+absl::string_view StringViewFromVecU8(const rust::vec_u8::VecU8& vec) {
   return absl::string_view(reinterpret_cast<const char*>(vec.as_ptr()),
                            vec.len());
 }
@@ -36,11 +36,11 @@ bool NodeView::IsEmpty() const { return view_.is_empty(); }
 NodeView::operator bool() const { return IsDefined(); }
 
 NodeView NodeView::operator[](size_t index) const {
-  return NodeView(view_.get_at_index(index).value_or(saphyr::NodeView()));
+  return NodeView(view_.get_at_index(index).value_or(rust::NodeView()));
 }
 
 NodeView NodeView::operator[](rs_std::StrRef key) const {
-  return NodeView(view_.get_at_key(key).value_or(saphyr::NodeView()));
+  return NodeView(view_.get_at_key(key).value_or(rust::NodeView()));
 }
 
 std::optional<NodeView> NodeView::Get(size_t index) const {
@@ -51,11 +51,11 @@ std::optional<NodeView> NodeView::Get(size_t index) const {
 }
 
 NodeView NodeView::get_key_at_index(size_t index) const {
-  return NodeView(view_.get_key_at_index(index).value_or(saphyr::NodeView()));
+  return NodeView(view_.get_key_at_index(index).value_or(rust::NodeView()));
 }
 
 NodeView NodeView::get_value_at_index(size_t index) const {
-  return NodeView(view_.get_value_at_index(index).value_or(saphyr::NodeView()));
+  return NodeView(view_.get_value_at_index(index).value_or(rust::NodeView()));
 }
 
 template <>
@@ -106,8 +106,8 @@ std::optional<double> NodeView::as_optional<double>() const {
 }
 
 absl::StatusOr<std::string> NodeView::Dump() const {
-  rs_std::Result<saphyr::vec_u8::VecU8, saphyr::vec_u8::VecU8> result =
-      saphyr::dump(view_);
+  rs_std::Result<rust::vec_u8::VecU8, rust::vec_u8::VecU8> result =
+      rust::dump(view_);
   if (!result.has_value()) {
     return absl::InternalError(StringViewFromVecU8(std::move(result).err()));
   }
@@ -132,10 +132,10 @@ bool Node::IsEmpty() const { return node_.is_empty(); }
 Node::operator bool() const { return IsDefined(); }
 
 NodeView Node::operator[](rs_std::StrRef key) const {
-  return NodeView(node_.get_at_key(key).value_or(saphyr::NodeView()));
+  return NodeView(node_.get_at_key(key).value_or(rust::NodeView()));
 }
 NodeView Node::operator[](size_t index) const {
-  return NodeView(node_.get_at_index(index).value_or(saphyr::NodeView()));
+  return NodeView(node_.get_at_index(index).value_or(rust::NodeView()));
 }
 std::optional<NodeView> Node::Get(size_t index) const {
   if (auto val = node_.get_at_index(index)) {
@@ -151,7 +151,7 @@ std::optional<NodeView> Node::Get(rs_std::StrRef key) const {
   return std::nullopt;
 }
 
-void Node::SetAtIndex(size_t index, saphyr::YamlOwned value) {
+void Node::SetAtIndex(size_t index, rust::YamlOwned value) {
   node_.set_at_index(index, std::move(value));
 }
 
@@ -204,35 +204,35 @@ std::ostream& operator<<(std::ostream& out, const Node& node) {
 
 // Load functions
 absl::StatusOr<Node> Load(rs_std::StrRef input) {
-  rs_std::Result<saphyr::NodeOwned, saphyr::vec_u8::VecU8> result =
-      saphyr::load(input);
+  rs_std::Result<rust::NodeOwned, rust::vec_u8::VecU8> result =
+      rust::load(input);
   if (!result.has_value()) {
     return absl::InvalidArgumentError(
         StringViewFromVecU8(std::move(result).err()));
   }
-  saphyr::NodeOwned docs = std::move(result).value();
+  rust::NodeOwned docs = std::move(result).value();
   return Node(docs.get_at_index(0)->to_owned());
 }
 
-saphyr::YamlOwned ToYaml(int64_t value) {
-  return saphyr::yaml_owned_from_i64(value);
+rust::YamlOwned ToYaml(int64_t value) {
+  return rust::yaml_owned_from_i64(value);
 }
-saphyr::YamlOwned ToYaml(int value) {
-  return saphyr::yaml_owned_from_i64(static_cast<int64_t>(value));
+rust::YamlOwned ToYaml(int value) {
+  return rust::yaml_owned_from_i64(static_cast<int64_t>(value));
 }
-saphyr::YamlOwned ToYaml(double value) {
-  return saphyr::yaml_owned_from_f64(value);
+rust::YamlOwned ToYaml(double value) {
+  return rust::yaml_owned_from_f64(value);
 }
-saphyr::YamlOwned ToYaml(bool value) {
-  return saphyr::yaml_owned_from_bool(value);
+rust::YamlOwned ToYaml(bool value) {
+  return rust::yaml_owned_from_bool(value);
 }
-saphyr::YamlOwned ToYaml(const char* value) {
+rust::YamlOwned ToYaml(const char* value) {
   // Ideally, we want to use `rs_std::StrRef` at the function API to avoid
   // using FromUtf8Unchecked but the compiler does not prefer the user-defined
   // over the`bool` (built-in) conversion.
   //
   // So we have to use char* to provide exact match for string literals
-  return saphyr::yaml_owned_from_str(rs_std::StrRef::FromUtf8Unchecked(
+  return rust::yaml_owned_from_str(rs_std::StrRef::FromUtf8Unchecked(
       // Check for nullptr before passing into rust
       ABSL_DIE_IF_NULL(value)));
 }
