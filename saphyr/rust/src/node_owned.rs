@@ -1,4 +1,3 @@
-use crate::make_result_type;
 use crate::node_view::NodeView;
 use saphyr::YamlOwned;
 
@@ -6,8 +5,6 @@ use saphyr::YamlOwned;
 pub struct NodeOwned {
     yaml: YamlOwned,
 }
-
-make_result_type!(NodeOwned);
 
 impl Default for NodeOwned {
     fn default() -> Self {

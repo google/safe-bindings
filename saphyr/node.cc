@@ -17,6 +17,15 @@
 
 namespace security::yaml {
 
+namespace {
+
+absl::string_view StringViewFromVecU8(const saphyr::vec_u8::VecU8& vec) {
+  return absl::string_view(reinterpret_cast<const char*>(vec.as_ptr()),
+                           vec.len());
+}
+
+}  // namespace
+
 // NodeView
 bool NodeView::IsSequence() const { return view_.is_sequence(); }
 bool NodeView::IsMap() const { return view_.is_mapping(); }
@@ -97,11 +106,12 @@ std::optional<double> NodeView::as_optional<double>() const {
 }
 
 absl::StatusOr<std::string> NodeView::Dump() const {
-  saphyr::ResultString result = saphyr::dump(view_);
-  if (!result.is_ok()) {
-    return absl::InternalError(std::move(result).unwrap_err());
+  rs_std::Result<saphyr::vec_u8::VecU8, saphyr::vec_u8::VecU8> result =
+      saphyr::dump(view_);
+  if (!result.has_value()) {
+    return absl::InternalError(StringViewFromVecU8(std::move(result).err()));
   }
-  return std::string(std::move(result).unwrap());
+  return std::string(StringViewFromVecU8(std::move(result).value()));
 }
 
 std::ostream& operator<<(std::ostream& out, const NodeView& node) {
@@ -194,11 +204,13 @@ std::ostream& operator<<(std::ostream& out, const Node& node) {
 
 // Load functions
 absl::StatusOr<Node> Load(rs_std::StrRef input) {
-  saphyr::ResultNodeOwned result = saphyr::load(input);
-  if (!result.is_ok()) {
-    return absl::InvalidArgumentError(std::move(result).unwrap_err());
+  rs_std::Result<saphyr::NodeOwned, saphyr::vec_u8::VecU8> result =
+      saphyr::load(input);
+  if (!result.has_value()) {
+    return absl::InvalidArgumentError(
+        StringViewFromVecU8(std::move(result).err()));
   }
-  saphyr::NodeOwned docs = std::move(result).unwrap();
+  saphyr::NodeOwned docs = std::move(result).value();
   return Node(docs.get_at_index(0)->to_owned());
 }
 
