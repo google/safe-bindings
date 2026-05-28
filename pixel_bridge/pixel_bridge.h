@@ -67,6 +67,9 @@ struct Strides final {
   uintptr_t channels;
 };
 
+std::vector<uint8_t> SniffPalette(absl::string_view data);
+std::vector<uint8_t> SniffBkgd(absl::string_view data);
+
 class Frame final {
  public:
   // Frames should not be copied, because the data it carries is too big for

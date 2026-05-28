@@ -359,4 +359,24 @@ absl::StatusOr<ImageDecoder> ImageReader::IntoDecoder() && {
   return ImageDecoder(std::move(decoder).value());
 }
 
+std::vector<uint8_t> SniffPalette(absl::string_view data) {
+  auto result = rust::image::sniff_palette(absl::Span<const uint8_t>(
+      reinterpret_cast<const uint8_t*>(data.data()), data.size()));
+  std::vector<uint8_t> palette(result.len());
+  if (result.len() > 0) {
+    memcpy(palette.data(), result.as_ptr(), result.len());
+  }
+  return palette;
+}
+
+std::vector<uint8_t> SniffBkgd(absl::string_view data) {
+  auto result = rust::image::sniff_bkgd(absl::Span<const uint8_t>(
+      reinterpret_cast<const uint8_t*>(data.data()), data.size()));
+  std::vector<uint8_t> bkgd(result.len());
+  if (result.len() > 0) {
+    memcpy(bkgd.data(), result.as_ptr(), result.len());
+  }
+  return bkgd;
+}
+
 }  // namespace security::pixel_bridge

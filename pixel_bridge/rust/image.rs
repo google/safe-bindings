@@ -683,3 +683,80 @@ impl ImageDecoder {
         }
     }
 }
+
+struct Chunk<'a> {
+    chunk_type: [u8; 4],
+    data: &'a [u8],
+}
+
+fn parse_png_chunks(data: &[u8]) -> Vec<Chunk> {
+    let mut chunks = Vec::new();
+    if data.len() < 8 || &data[0..8] != b"\x89PNG\r\n\x1a\n" {
+        return chunks;
+    }
+
+    let mut cur = 8;
+    while cur + 12 <= data.len() {
+        let length =
+            u32::from_be_bytes([data[cur], data[cur + 1], data[cur + 2], data[cur + 3]]) as usize;
+        cur += 4;
+
+        let mut chunk_type = [0u8; 4];
+        chunk_type.copy_from_slice(&data[cur..cur + 4]);
+        cur += 4;
+
+        if cur + length + 4 > data.len() {
+            break;
+        }
+
+        chunks.push(Chunk { chunk_type, data: &data[cur..cur + length] });
+
+        cur += length + 4;
+
+        if chunk_type == *b"IEND" {
+            break;
+        }
+    }
+    chunks
+}
+
+pub fn sniff_palette(data: &[u8]) -> crate::vec_u8::VecU8 {
+    let mut palette = Vec::new();
+    let chunks = parse_png_chunks(data);
+
+    let mut plte_data = None;
+    let mut trns_data = None;
+    for chunk in &chunks {
+        if chunk.chunk_type == *b"PLTE" {
+            plte_data = Some(chunk.data);
+        } else if chunk.chunk_type == *b"tRNS" {
+            trns_data = Some(chunk.data);
+        }
+    }
+
+    if let Some(plte) = plte_data {
+        let num_colors = plte.len() / 3;
+        let trns = trns_data.unwrap_or(&[]);
+        for i in 0..num_colors {
+            palette.push(plte[i * 3]);
+            palette.push(plte[i * 3 + 1]);
+            palette.push(plte[i * 3 + 2]);
+            if i < trns.len() {
+                palette.push(trns[i]);
+            } else {
+                palette.push(255);
+            }
+        }
+    }
+    palette.into()
+}
+
+pub fn sniff_bkgd(data: &[u8]) -> crate::vec_u8::VecU8 {
+    let chunks = parse_png_chunks(data);
+    for chunk in &chunks {
+        if chunk.chunk_type == *b"bKGD" {
+            return chunk.data.to_vec().into();
+        }
+    }
+    Vec::new().into()
+}
