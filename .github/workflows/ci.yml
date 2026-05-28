@@ -12,7 +12,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        binding: [pixel_bridge]
+        binding: [pixel_bridge, deflate, saphyr]
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
