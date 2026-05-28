@@ -4,7 +4,6 @@
 #include <cstdint>
 #include <optional>
 
-#include "base/rust/rust_vec_u8.h"
 #include "rust/flate2_rs.h"
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
@@ -99,7 +98,7 @@ class GzHeader final {
   uint32_t mtime() const;
 
   static std::optional<GzHeader> FromRustOptionGzHeader(
-      flate2_rs::OptionGzHeader header);
+      std::optional<flate2_rs::GzHeader> header);
 
  private:
   explicit GzHeader(flate2_rs::GzHeader gz_header);
@@ -109,12 +108,12 @@ class GzHeader final {
 
 class VecU8Wrapper {
  public:
-  explicit VecU8Wrapper(rust_vec_u8::VecU8 vec_u8);
+  explicit VecU8Wrapper(flate2_rs::vec_u8::VecU8 vec_u8);
   absl::string_view as_string_view() const;
   absl::Cord as_cord() &&;
 
  private:
-  rust_vec_u8::VecU8 vec_u8_;
+  flate2_rs::vec_u8::VecU8 vec_u8_;
 };
 
 }  // namespace security::deflate

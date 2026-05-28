@@ -4,21 +4,34 @@
 #include <optional>
 #include <utility>
 
-#include "base/rust/rust_vec_u8.h"
 #include "rust/flate2_rs.h"
-#include "security/ise_memory_safety/crubit_helpers/string_conversions.h"
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
 #include "absl/strings/cord.h"
 #include "absl/strings/string_view.h"
+#include "absl/types/span.h"
 
 namespace security::deflate {
 
-VecU8Wrapper::VecU8Wrapper(rust_vec_u8::VecU8 vec_u8)
+namespace {
+
+absl::string_view StringViewFromVecU8(const flate2_rs::vec_u8::VecU8& vec) {
+  static_assert(sizeof(const char) == sizeof(const uint8_t),
+                "Alignment check failed");
+  static_assert(alignof(const char) <= alignof(const uint8_t),
+                "We need to keep the pointer to `vec`'s data aligned after the "
+                "conversion to char.");
+  return absl::string_view(reinterpret_cast<const char*>(vec.as_ptr()),
+                           vec.len());
+}
+
+}  // namespace
+
+VecU8Wrapper::VecU8Wrapper(flate2_rs::vec_u8::VecU8 vec_u8)
     : vec_u8_(std::move(vec_u8)) {}
 
 absl::string_view VecU8Wrapper::as_string_view() const {
-  return crubit_helpers::StringViewFromVecU8(vec_u8_);
+  return StringViewFromVecU8(vec_u8_);
 }
 
 absl::Cord VecU8Wrapper::as_cord() && {
@@ -48,19 +61,19 @@ Compression Compression::none() {
   return Compression(flate2_rs::Compression::none());
 }
 
-GzHeader::GzHeader(flate2_rs::GzHeader gz_header)
-    : gz_header_(std::move(gz_header)) {}
+GzHeader::GzHeader(flate2_rs::GzHeader gz_header) : gz_header_(gz_header) {}
+
 uint8_t GzHeader::operating_system() const {
   return gz_header_.operating_system();
 }
 uint32_t GzHeader::mtime() const { return gz_header_.mtime(); }
 
 std::optional<GzHeader> GzHeader::FromRustOptionGzHeader(
-    flate2_rs::OptionGzHeader header) {
-  if (header.is_none()) {
+    std::optional<flate2_rs::GzHeader> header) {
+  if (!header.has_value()) {
     return std::nullopt;
   }
-  return GzHeader(std::move(header).unwrap());
+  return GzHeader(std::move(header).value());
 }
 
 namespace read {
@@ -72,7 +85,8 @@ GzDecoderImpl<RustDecoder>::GzDecoderImpl(RustDecoder decoder)
 template <typename RustDecoder>
 GzDecoderImpl<RustDecoder> GzDecoderImpl<RustDecoder>::create(
     absl::string_view data) {
-  return GzDecoderImpl(RustDecoder::create(data));
+  return GzDecoderImpl(RustDecoder::create(absl::Span<const uint8_t>(
+      reinterpret_cast<const uint8_t*>(data.data()), data.size())));
 }
 
 template <typename RustDecoder>
@@ -82,35 +96,42 @@ std::optional<GzHeader> GzDecoderImpl<RustDecoder>::header() const {
 
 template <typename RustDecoder>
 absl::StatusOr<VecU8Wrapper> GzDecoderImpl<RustDecoder>::read_to_end() {
-  flate2_rs::ResultVecU8 result_vec_u8 = decoder_.read_to_end();
-  if (result_vec_u8.is_err()) {
+  rs_std::Result<flate2_rs::vec_u8::VecU8, flate2_rs::vec_u8::VecU8>
+      result_vec_u8 = decoder_.read_to_end();
+  if (!result_vec_u8.has_value()) {
     // Potential errors from flate2 crate
     // - Invalid gzip header or invalid checksum. Error locations:
     //    - //third_party/rust/flate2/v1/src/gz/mod.rs:126
     //    - //third_party/rust/flate2/v1/src/gz/bufread.rs:310
     // - Invalid EOF due to truncated gzip stream. Error locations:
     //    - //third_party/rust/flate2/v1/src/gz/bufread.rs:304
-    return absl::InvalidArgumentError(std::move(result_vec_u8).unwrap_err());
+    return absl::InvalidArgumentError(
+        StringViewFromVecU8(std::move(result_vec_u8).err()));
   }
-  return VecU8Wrapper(std::move(result_vec_u8).unwrap());
+  return VecU8Wrapper(std::move(result_vec_u8).value());
 }
 
 GzEncoder::GzEncoder(flate2_rs::read::GzEncoder encoder)
     : encoder_(std::move(encoder)) {}
 
 GzEncoder GzEncoder::create(absl::string_view data, Compression level) {
-  return GzEncoder(flate2_rs::read::GzEncoder::create(data, level.get()));
+  return GzEncoder(flate2_rs::read::GzEncoder::create(
+      absl::Span<const uint8_t>(reinterpret_cast<const uint8_t*>(data.data()),
+                                data.size()),
+      level.get()));
 }
 
 absl::StatusOr<VecU8Wrapper> GzEncoder::read_to_end() {
-  flate2_rs::ResultVecU8 result_vec_u8 = encoder_.read_to_end();
-  if (result_vec_u8.is_err()) {
+  rs_std::Result<flate2_rs::vec_u8::VecU8, flate2_rs::vec_u8::VecU8>
+      result_vec_u8 = encoder_.read_to_end();
+  if (!result_vec_u8.has_value()) {
     // Potential errors only include system errors when reading from the
     // underlying string_view.
     // NOTE: b/351976355 - Send the error code from Rust.
-    return absl::InternalError(std::move(result_vec_u8).unwrap_err());
+    return absl::InvalidArgumentError(
+        StringViewFromVecU8(std::move(result_vec_u8).err()));
   }
-  return VecU8Wrapper(std::move(result_vec_u8).unwrap());
+  return VecU8Wrapper(std::move(result_vec_u8).value());
 }
 
 template class GzDecoderImpl<flate2_rs::read::GzDecoder>;
@@ -136,29 +157,34 @@ std::optional<GzHeader> GzDecoderImpl<RustDecoder>::header() const {
 
 template <typename RustDecoder>
 absl::Status GzDecoderImpl<RustDecoder>::write_all(absl::string_view data) {
-  flate2_rs::ResultUnit result_unit = decoder_.write_all(data);
-  if (result_unit.is_err()) {
+  rs_std::Result<uint8_t, flate2_rs::vec_u8::VecU8> result_unit =
+      decoder_.write_all(absl::Span<const uint8_t>(
+          reinterpret_cast<const uint8_t*>(data.data()), data.size()));
+  if (!result_unit.has_value()) {
     // Potential errors include:
     //   - Invalid gzip header when parsing incoming data:
     //         //third_party/rust/flate2/v1/src/gz/write.rs:319
     //   - Corrupt deflate stream:
     //         //third_party/rust/flate2/v1/src/zio.rs:235
     // NOTE: b/351976355 - Send the error code from Rust.
-    return absl::InvalidArgumentError(std::move(result_unit).unwrap_err());
+    return absl::InvalidArgumentError(
+        StringViewFromVecU8(std::move(result_unit).err()));
   }
   return absl::OkStatus();
 }
 
 template <typename RustDecoder>
 absl::StatusOr<VecU8Wrapper> GzDecoderImpl<RustDecoder>::finish() && {
-  flate2_rs::ResultVecU8 result_vec_u8 = std::move(decoder_).finish();
-  if (result_vec_u8.is_err()) {
+  rs_std::Result<flate2_rs::vec_u8::VecU8, flate2_rs::vec_u8::VecU8>
+      result_vec_u8 = std::move(decoder_).finish();
+  if (!result_vec_u8.has_value()) {
     // Potential errors from flate2 crate
     // - Invalid checksum. Error locations:
     //    - //third_party/rust/flate2/v1/src/gz/write.rs:290
-    return absl::InvalidArgumentError(std::move(result_vec_u8).unwrap_err());
+    return absl::InvalidArgumentError(
+        StringViewFromVecU8(std::move(result_vec_u8).err()));
   }
-  return VecU8Wrapper(std::move(result_vec_u8).unwrap());
+  return VecU8Wrapper(std::move(result_vec_u8).value());
 }
 
 GzEncoder::GzEncoder(flate2_rs::write::GzEncoder encoder)
@@ -169,26 +195,31 @@ GzEncoder GzEncoder::create(Compression level) {
 }
 
 absl::Status GzEncoder::write_all(absl::string_view data) {
-  flate2_rs::ResultUnit result_unit = encoder_.write_all(data);
-  if (result_unit.is_err()) {
+  rs_std::Result<uint8_t, flate2_rs::vec_u8::VecU8> result_unit =
+      encoder_.write_all(absl::Span<const uint8_t>(
+          reinterpret_cast<const uint8_t*>(data.data()), data.size()));
+  if (!result_unit.has_value()) {
     // Potential errors include:
     //   - Corrupt deflate stream:
     //         //third_party/rust/flate2/v1/src/zio.rs:235
     // NOTE: b/351976355 - Send the error code from Rust.
-    return absl::InvalidArgumentError(std::move(result_unit).unwrap_err());
+    return absl::InvalidArgumentError(
+        StringViewFromVecU8(std::move(result_unit).err()));
   }
   return absl::OkStatus();
 }
 
 absl::StatusOr<VecU8Wrapper> GzEncoder::finish() && {
-  flate2_rs::ResultVecU8 result_vec_u8 = std::move(encoder_).finish();
-  if (result_vec_u8.is_err()) {
+  rs_std::Result<flate2_rs::vec_u8::VecU8, flate2_rs::vec_u8::VecU8>
+      result_vec_u8 = std::move(encoder_).finish();
+  if (!result_vec_u8.has_value()) {
     // Potential errors only include system errors when using the
     // internal Rust writer.
     // NOTE: b/351976355 - Send the error code from Rust.
-    return absl::InternalError(std::move(result_vec_u8).unwrap_err());
+    return absl::InternalError(
+        StringViewFromVecU8(std::move(result_vec_u8).err()));
   }
-  return VecU8Wrapper(std::move(result_vec_u8).unwrap());
+  return VecU8Wrapper(std::move(result_vec_u8).value());
 }
 
 template class GzDecoderImpl<flate2_rs::write::GzDecoder>;
