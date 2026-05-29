@@ -120,8 +120,7 @@ std::string FormatToString(Format format) {
   }
 }
 
-inline absl::Status ToStatus(rs_std::Result<uint8_t, rust::vec_u8::VecU8>
-status) {
+inline absl::Status ToStatus(rust::image::Status status) {
   if (!status.has_value()) {
     return absl::OkStatus();
   }
