@@ -133,7 +133,7 @@ impl std::fmt::Debug for ImageDecoder {
     }
 }
 
-// NOTE: Crubit doesn't seem to support () here, so using a u8 for now.
+// NOTE: b/517030085 - Crubit doesn't seem to support () here, so using a u8 for now.
 pub type Status = Result<u8, VecU8>;
 
 #[inline(always)]
