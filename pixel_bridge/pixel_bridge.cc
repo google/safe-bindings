@@ -8,7 +8,7 @@
 #include <vector>
 
 #include "crubit_helpers/string_conversions.h"
-#include "rust.h"
+#include "crubit/rust.h"
 #include "absl/log/check.h"
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"

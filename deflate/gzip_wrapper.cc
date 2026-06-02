@@ -4,7 +4,7 @@
 #include <utility>
 
 #include "flate2.h"
-#include "rust.h"
+#include "crubit/rust.h"
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
 #include "absl/strings/string_view.h"

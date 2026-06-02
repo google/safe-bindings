@@ -4,7 +4,7 @@
 #include <cstdint>
 #include <optional>
 
-#include "rust.h"
+#include "crubit/rust.h"
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
 #include "absl/strings/cord.h"

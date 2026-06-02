@@ -8,7 +8,7 @@
 #include <string>
 
 #include "support/rs_std/str_ref.h"
-#include "rust.h"
+#include "crubit/rust.h"
 #include "absl/status/statusor.h"
 #include "absl/strings/string_view.h"
 

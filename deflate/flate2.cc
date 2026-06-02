@@ -4,7 +4,7 @@
 #include <optional>
 #include <utility>
 
-#include "rust.h"
+#include "crubit/rust.h"
 #include "crubit_helpers/string_conversions.h"
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
