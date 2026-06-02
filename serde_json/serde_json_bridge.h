@@ -70,7 +70,7 @@ class SerdeJson final {
   absl::StatusOr<std::vector<std::string>> GetKeys() const;
 
   // Convert this object to string.
-  std::string ToString() const;
+  std::string ToString(bool sort_keys = true) const;
   absl::StatusOr<::google::protobuf::Struct> ToProtoStruct() const;
   absl::StatusOr<::google::protobuf::Value> ToProtoValue() const;
 

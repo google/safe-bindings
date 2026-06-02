@@ -243,7 +243,12 @@ impl SerdeJson {
     }
 
     /// Converts a [SerdeJson] to a string.
-    pub fn to_string(&self) -> cc_std::std::string {
+    pub fn to_string(&self, sort_keys: bool) -> cc_std::std::string {
+        if sort_keys {
+            let mut value = self.value.clone();
+            value.sort_all_objects();
+            return value.to_string().into();
+        }
         self.value.to_string().into()
     }
 

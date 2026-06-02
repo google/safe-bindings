@@ -233,7 +233,9 @@ bool SerdeJson::IsDouble() const { return json_obj_.is_f64(); }
 
 bool SerdeJson::IsBool() const { return json_obj_.is_boolean(); }
 
-std::string SerdeJson::ToString() const { return json_obj_.to_string(); }
+std::string SerdeJson::ToString(bool sort_keys) const {
+  return json_obj_.to_string(sort_keys);
+}
 
 absl::StatusOr<std::vector<std::string>> SerdeJson::GetKeys() const {
   serde_json_bridge_rs::json::ResultVecRawString rs_result =
