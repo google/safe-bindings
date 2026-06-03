@@ -9,11 +9,10 @@
 #include "rust/zip_wrapper.h"
 #include "absl/functional/overload.h"
 #include "absl/status/status.h"
+#include "absl/status/status_macros.h"
 #include "absl/status/statusor.h"
 #include "absl/strings/string_view.h"
 #include "absl/types/span.h"
-#include "third_party/gloop/util/status/status_macros.h"
-
 namespace security::zip {
 
 namespace {

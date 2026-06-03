@@ -7,11 +7,10 @@
 #include "converters.h"
 #include "file.h"
 #include "rust/zip_wrapper.h"
+#include "absl/status/status_macros.h"
 #include "absl/status/statusor.h"
 #include "absl/strings/string_view.h"
 #include "absl/types/span.h"
-#include "third_party/gloop/util/status/status_macros.h"
-
 namespace security::zip {
 
 absl::StatusOr<BufferedZipArchive> BufferedZipArchive::NewFromData(
