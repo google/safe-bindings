@@ -15,7 +15,6 @@
 #include "absl/strings/str_cat.h"
 #include "absl/strings/string_view.h"
 #include "absl/types/span.h"
-#include "third_party/gloop/util/status/status_macros.h"
 
 namespace security::json::serde_json_bridge {
 
@@ -23,6 +22,14 @@ static std::string FromRustRawString(
     const serde_json_bridge_rs::raw_string::RawString& raw_string) {
   return std::string(reinterpret_cast<const char*>(raw_string.as_ptr()),
                      raw_string.len());
+}
+
+inline absl::Status ToStatus(serde_json_bridge_rs::json::Status status) {
+  if (!status.has_value()) {
+    return absl::OkStatus();
+  }
+  return absl::InvalidArgumentError(
+      FromRustRawString(std::move(status).err()));
 }
 
 SerdeJson::SerdeJson(serde_json_bridge_rs::json::SerdeJson sj)
@@ -311,11 +318,15 @@ absl::StatusOr<bool> SerdeJson::HasField(absl::string_view key) const {
 
 absl::StatusOr<::google::protobuf::Struct> SerdeJson::ToProtoStruct() const {
   google::protobuf::Struct result;
-  ASSIGN_OR_RETURN(const std::vector<std::string> keys, GetKeys());
-  for (absl::string_view key : keys) {
-    ASSIGN_OR_RETURN(const SerdeJson field, GetField(key));
-    ASSIGN_OR_RETURN(::google::protobuf::Value value, field.ToProtoValue());
-    result.mutable_fields()->insert({std::string(key), std::move(value)});
+  absl::StatusOr<std::vector<std::string>> keys_or = GetKeys();
+  if (!keys_or.ok()) return keys_or.status();
+  for (absl::string_view key : *keys_or) {
+    absl::StatusOr<SerdeJson> field_or = GetField(key);
+    if (!field_or.ok()) return field_or.status();
+    absl::StatusOr<::google::protobuf::Value> value_or =
+        field_or->ToProtoValue();
+    if (!value_or.ok()) return value_or.status();
+    result.mutable_fields()->insert({std::string(key), std::move(*value_or)});
   }
   return result;
 }
@@ -324,23 +335,33 @@ absl::StatusOr<::google::protobuf::Value> SerdeJson::ToProtoValue() const {
   google::protobuf::Value result;
 
   if (IsObject()) {
-    ASSIGN_OR_RETURN(*result.mutable_struct_value(), ToProtoStruct());
+    absl::StatusOr<::google::protobuf::Struct> struct_or = ToProtoStruct();
+    if (!struct_or.ok()) return struct_or.status();
+    *result.mutable_struct_value() = std::move(*struct_or);
   } else if (IsString()) {
-    ASSIGN_OR_RETURN(*result.mutable_string_value(), GetString());
+    absl::StatusOr<std::string> string_or = GetString();
+    if (!string_or.ok()) return string_or.status();
+    *result.mutable_string_value() = std::move(*string_or);
   } else if (IsInt()) {
-    ASSIGN_OR_RETURN(int64_t number_value, GetInt());
-    result.set_number_value(number_value);
+    absl::StatusOr<int64_t> int_or = GetInt();
+    if (!int_or.ok()) return int_or.status();
+    result.set_number_value(*int_or);
   } else if (IsDouble()) {
-    ASSIGN_OR_RETURN(double number_value, GetDouble());
-    result.set_number_value(number_value);
+    absl::StatusOr<double> double_or = GetDouble();
+    if (!double_or.ok()) return double_or.status();
+    result.set_number_value(*double_or);
   } else if (IsBool()) {
-    ASSIGN_OR_RETURN(bool bool_value, GetBool());
-    result.set_bool_value(bool_value);
+    absl::StatusOr<bool> bool_or = GetBool();
+    if (!bool_or.ok()) return bool_or.status();
+    result.set_bool_value(*bool_or);
   } else if (IsArray()) {
     ::google::protobuf::ListValue* list_value = result.mutable_list_value();
-    ASSIGN_OR_RETURN(std::vector<SerdeJson> array_value, GetArray());
-    for (const SerdeJson& element : array_value) {
-      ASSIGN_OR_RETURN(*list_value->add_values(), element.ToProtoValue());
+    absl::StatusOr<std::vector<SerdeJson>> array_or = GetArray();
+    if (!array_or.ok()) return array_or.status();
+    for (const SerdeJson& element : *array_or) {
+      absl::StatusOr<::google::protobuf::Value> val_or = element.ToProtoValue();
+      if (!val_or.ok()) return val_or.status();
+      *list_value->add_values() = std::move(*val_or);
     }
   } else if (IsNull()) {
     result.set_null_value(::google::protobuf::NullValue::NULL_VALUE);
@@ -353,58 +374,46 @@ absl::StatusOr<::google::protobuf::Value> SerdeJson::ToProtoValue() const {
 }
 
 absl::Status SerdeJson::AddFieldInt(absl::string_view key, int64_t value) {
-  return json_obj_
-      .add_field_int(
-          absl::Span<const uint8_t>(
-              reinterpret_cast<const uint8_t*>(key.data()), key.size()),
-          value)
-      .status();
+  return ToStatus(json_obj_.add_field_int(
+      absl::Span<const uint8_t>(reinterpret_cast<const uint8_t*>(key.data()),
+                                key.size()),
+      value));
 }
 
 absl::Status SerdeJson::AddFieldBool(absl::string_view key, bool value) {
-  return json_obj_
-      .add_field_bool(
-          absl::Span<const uint8_t>(
-              reinterpret_cast<const uint8_t*>(key.data()), key.size()),
-          value)
-      .status();
+  return ToStatus(json_obj_.add_field_bool(
+      absl::Span<const uint8_t>(reinterpret_cast<const uint8_t*>(key.data()),
+                                key.size()),
+      value));
 }
 
 absl::Status SerdeJson::AddFieldString(absl::string_view key,
                                        const absl::string_view value) {
-  return json_obj_
-      .add_field_string(
-          absl::Span<const uint8_t>(
-              reinterpret_cast<const uint8_t*>(key.data()), key.size()),
-          absl::Span<const uint8_t>(
-              reinterpret_cast<const uint8_t*>(value.data()), value.size()))
-      .status();
+  return ToStatus(json_obj_.add_field_string(
+      absl::Span<const uint8_t>(reinterpret_cast<const uint8_t*>(key.data()),
+                                key.size()),
+      absl::Span<const uint8_t>(reinterpret_cast<const uint8_t*>(value.data()),
+                                value.size())));
 }
 
 absl::Status SerdeJson::AddFieldDouble(absl::string_view key, double value) {
-  return json_obj_
-      .add_field_double(
-          absl::Span<const uint8_t>(
-              reinterpret_cast<const uint8_t*>(key.data()), key.size()),
-          value)
-      .status();
+  return ToStatus(json_obj_.add_field_double(
+      absl::Span<const uint8_t>(reinterpret_cast<const uint8_t*>(key.data()),
+                                key.size()),
+      value));
 }
 
 absl::Status SerdeJson::AddFieldNull(absl::string_view key) {
-  return json_obj_
-      .add_field_null(absl::Span<const uint8_t>(
-          reinterpret_cast<const uint8_t*>(key.data()), key.size()))
-      .status();
+  return ToStatus(json_obj_.add_field_null(absl::Span<const uint8_t>(
+      reinterpret_cast<const uint8_t*>(key.data()), key.size())));
 }
 
 absl::Status SerdeJson::AddFieldObject(absl::string_view key,
                                        const SerdeJson& value) {
-  return json_obj_
-      .add_field_object(
-          absl::Span<const uint8_t>(
-              reinterpret_cast<const uint8_t*>(key.data()), key.size()),
-          value.json_obj_)
-      .status();
+  return ToStatus(json_obj_.add_field_object(
+      absl::Span<const uint8_t>(reinterpret_cast<const uint8_t*>(key.data()),
+                                key.size()),
+      value.json_obj_));
 }
 
 absl::Status SerdeJson::AddFieldArray(absl::string_view key,
@@ -420,12 +429,10 @@ absl::Status SerdeJson::AddFieldArray(absl::string_view key,
   for (auto& v : value) {
     arr.push_back(std::move(v.json_obj_));
   }
-  return json_obj_
-      .add_field_array(
-          absl::Span<const uint8_t>(
-              reinterpret_cast<const uint8_t*>(key.data()), key.size()),
-          arr)
-      .status();
+  return ToStatus(json_obj_.add_field_array(
+      absl::Span<const uint8_t>(reinterpret_cast<const uint8_t*>(key.data()),
+                                key.size()),
+      arr));
 }
 
 bool SerdeJson::operator==(const SerdeJson& other) const {

@@ -1,7 +1,23 @@
 use crate::make_vec_type;
 use crate::raw_string::RawString;
 use serde::Serialize;
-use status_wrapper::StatusWrapper;
+// NOTE: b/517030085 - Crubit doesn't seem to support () here, so using a u8 for now.
+pub type Status = Result<u8, RawString>;
+
+#[inline(always)]
+fn ok() -> Status {
+    Ok(0)
+}
+
+#[inline(always)]
+fn internal_error(message: impl Into<String>) -> Status {
+    Err(message.into().into())
+}
+
+#[inline(always)]
+fn invalid_argument_error(message: impl Into<String>) -> Status {
+    Err(message.into().into())
+}
 
 #[derive(Default, PartialEq, Clone)]
 pub struct SerdeJson {
@@ -268,63 +284,61 @@ impl SerdeJson {
     }
 
     /// Adds a field to the JSON object.
-    pub fn add_field<T: Serialize>(&mut self, raw_field_name: &[u8], value: T) -> StatusWrapper {
+    pub fn add_field<T: Serialize>(&mut self, raw_field_name: &[u8], value: T) -> Status {
         let field_name = match std::str::from_utf8(raw_field_name) {
             Ok(field) => field,
-            Err(err) => return status::invalid_argument(err.to_string()).into(),
+            Err(err) => return invalid_argument_error(err.to_string()),
         };
 
         if let serde_json::Value::Object(map) = &mut self.value {
             match serde_json::to_value(value) {
                 Ok(json_value) => {
                     map.insert(field_name.to_string(), json_value);
-                    status::OkStatus().into()
+                    ok()
                 }
-                Err(err) => {
-                    status::invalid_argument(format!("Failed to serialize value: {}", err)).into()
-                }
+                Err(err) => invalid_argument_error(format!("Failed to serialize value: {}", err)),
             }
         } else {
-            status::internal("JSON value is not an object").into()
+            internal_error("JSON value is not an object")
         }
     }
 
     /// Adds an integer field to the JSON object.
-    pub fn add_field_int(&mut self, raw_field_name: &[u8], value: i64) -> StatusWrapper {
+    pub fn add_field_int(&mut self, raw_field_name: &[u8], value: i64) -> Status {
         self.add_field(raw_field_name, value)
     }
 
     /// Adds a boolean field to the JSON object.
-    pub fn add_field_bool(&mut self, raw_field_name: &[u8], value: bool) -> StatusWrapper {
+    pub fn add_field_bool(&mut self, raw_field_name: &[u8], value: bool) -> Status {
         self.add_field(raw_field_name, value)
     }
 
     /// Adds a double field to the JSON object.
-    pub fn add_field_double(&mut self, raw_field_name: &[u8], value: f64) -> StatusWrapper {
+    pub fn add_field_double(&mut self, raw_field_name: &[u8], value: f64) -> Status {
         self.add_field(raw_field_name, value)
     }
 
     /// Adds a null field to the JSON object.
-    pub fn add_field_null(&mut self, raw_field_name: &[u8]) -> StatusWrapper {
+    pub fn add_field_null(&mut self, raw_field_name: &[u8]) -> Status {
         self.add_field(raw_field_name, serde_json::Value::Null)
     }
 
     /// Adds a string field to the JSON object.
-    pub fn add_field_string(&mut self, raw_field_name: &[u8], value_raw: &[u8]) -> StatusWrapper {
+    pub fn add_field_string(&mut self, raw_field_name: &[u8], value_raw: &[u8]) -> Status {
         let value = match std::str::from_utf8(value_raw) {
             Ok(value) => value,
-            Err(err) => return status::invalid_argument(err.to_string()).into(),
+            Err(err) => return invalid_argument_error(err.to_string()),
         };
         self.add_field(raw_field_name, value)
     }
 
     /// Adds an object field to the JSON object.
-    pub fn add_field_object(&mut self, raw_field_name: &[u8], obj: SerdeJson) -> StatusWrapper {
+    pub fn add_field_object(&mut self, raw_field_name: &[u8], obj: SerdeJson) -> Status {
         self.add_field(raw_field_name, obj.value)
     }
 
     /// Adds an array field to the JSON object.
-    pub fn add_field_array(&mut self, raw_field_name: &[u8], items: &[SerdeJson]) -> StatusWrapper {
+    pub fn add_field_array(&mut self, raw_field_name: &[u8], items: &[SerdeJson]) -> Status {
         self.add_field(
             raw_field_name,
             items.iter().map(|v| v.value.clone()).collect::<Vec<serde_json::Value>>(),
