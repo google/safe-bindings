@@ -12,7 +12,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        binding: [pixel_bridge, deflate, saphyr]
+        binding: [pixel_bridge, deflate, saphyr, serde_json]
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -23,6 +23,9 @@ jobs:
           # NOTE: b/514328084 - Crubit generates some code that causes unused-imports warnings. By
           # default rustflags is "-D warnings" causing the build to fail.
           rustflags: ""
+      - name: Install Protobuf
+        if: matrix.binding == 'serde_json'
+        run: sudo apt-get update && sudo apt-get install -y libprotobuf-dev protobuf-compiler
 
       - name: Configure CMake
         run: cmake -B build -S ${{ matrix.binding }}

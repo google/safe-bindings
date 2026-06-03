@@ -5,8 +5,8 @@
 #include <string>
 #include <vector>
 
-#include "google/protobuf/struct.pb.h"
-#include "rust/serde_json_bridge_rs.h"
+#include <google/protobuf/struct.pb.h>
+#include "crubit/rust.h"
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
 #include "absl/strings/string_view.h"
@@ -87,12 +87,12 @@ class SerdeJson final {
                              std::vector<SerdeJson> value);
 
  private:
-  explicit SerdeJson(serde_json_bridge_rs::json::SerdeJson);
+  explicit SerdeJson(rust::json::SerdeJson);
 
   static std::vector<SerdeJson> ConvertVecSerdeJsonToVector(
-      const serde_json_bridge_rs::json::VecSerdeJson& rs_vec_serde_json);
+      const rust::json::VecSerdeJson& rs_vec_serde_json);
 
-  serde_json_bridge_rs::json::SerdeJson json_obj_;
+  rust::json::SerdeJson json_obj_;
 };
 
 }  // namespace security::json::serde_json_bridge

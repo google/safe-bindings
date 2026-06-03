@@ -8,8 +8,8 @@
 #include <utility>
 #include <vector>
 
-#include "google/protobuf/struct.proto.h"
-#include "rust/serde_json_bridge_rs.h"
+#include <google/protobuf/struct.pb.h>
+#include "crubit/rust.h"
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
 #include "absl/strings/str_cat.h"
@@ -19,12 +19,12 @@
 namespace security::json::serde_json_bridge {
 
 static std::string FromRustRawString(
-    const serde_json_bridge_rs::raw_string::RawString& raw_string) {
+    const rust::raw_string::RawString& raw_string) {
   return std::string(reinterpret_cast<const char*>(raw_string.as_ptr()),
                      raw_string.len());
 }
 
-inline absl::Status ToStatus(serde_json_bridge_rs::json::Status status) {
+inline absl::Status ToStatus(rust::json::Status status) {
   if (!status.has_value()) {
     return absl::OkStatus();
   }
@@ -32,13 +32,13 @@ inline absl::Status ToStatus(serde_json_bridge_rs::json::Status status) {
       FromRustRawString(std::move(status).err()));
 }
 
-SerdeJson::SerdeJson(serde_json_bridge_rs::json::SerdeJson sj)
+SerdeJson::SerdeJson(rust::json::SerdeJson sj)
     : json_obj_(std::move(sj)) {}
 
 // This function has to be a member of `SerdeJson` class as it uses
-// private constructor `SerdeJson(serde_json_bridge_rs::json::SerdeJson)`.
+// private constructor `SerdeJson(rust::json::SerdeJson)`.
 std::vector<SerdeJson> SerdeJson::ConvertVecSerdeJsonToVector(
-    const serde_json_bridge_rs::json::VecSerdeJson& rs_vec_serde_json) {
+    const rust::json::VecSerdeJson& rs_vec_serde_json) {
   std::vector<SerdeJson> ret_vec;
   ret_vec.reserve(rs_vec_serde_json.len());
   for (size_t i = 0; i < rs_vec_serde_json.len(); ++i) {
@@ -48,17 +48,17 @@ std::vector<SerdeJson> SerdeJson::ConvertVecSerdeJsonToVector(
 }
 
 absl::StatusOr<SerdeJson> SerdeJson::CreateObject() {
-  return SerdeJson(serde_json_bridge_rs::json::SerdeJson::create_object());
+  return SerdeJson(rust::json::SerdeJson::create_object());
 }
 
 absl::StatusOr<SerdeJson> SerdeJson::CreateInt(int64_t value) {
-  return SerdeJson(serde_json_bridge_rs::json::SerdeJson::create_int(value));
+  return SerdeJson(rust::json::SerdeJson::create_int(value));
 }
 
 absl::StatusOr<SerdeJson> SerdeJson::CreateDouble(double value) {
-  rs_std::Result<serde_json_bridge_rs::json::SerdeJson,
-                 serde_json_bridge_rs::raw_string::RawString>
-      rs_result = serde_json_bridge_rs::json::SerdeJson::create_double(value);
+  rs_std::Result<rust::json::SerdeJson,
+                 rust::raw_string::RawString>
+      rs_result = rust::json::SerdeJson::create_double(value);
 
   if (!rs_result.has_value()) {
     return absl::InvalidArgumentError(
@@ -68,17 +68,17 @@ absl::StatusOr<SerdeJson> SerdeJson::CreateDouble(double value) {
 }
 
 absl::StatusOr<SerdeJson> SerdeJson::CreateBool(bool value) {
-  return SerdeJson(serde_json_bridge_rs::json::SerdeJson::create_bool(value));
+  return SerdeJson(rust::json::SerdeJson::create_bool(value));
 }
 
 absl::StatusOr<SerdeJson> SerdeJson::CreateNull() {
-  return SerdeJson(serde_json_bridge_rs::json::SerdeJson::create_null());
+  return SerdeJson(rust::json::SerdeJson::create_null());
 }
 
 absl::StatusOr<SerdeJson> SerdeJson::CreateString(absl::string_view value) {
-  rs_std::Result<serde_json_bridge_rs::json::SerdeJson,
-                 serde_json_bridge_rs::raw_string::RawString>
-      rs_result = serde_json_bridge_rs::json::SerdeJson::create_string(
+  rs_std::Result<rust::json::SerdeJson,
+                 rust::raw_string::RawString>
+      rs_result = rust::json::SerdeJson::create_string(
           absl::Span<const uint8_t>(
               reinterpret_cast<const uint8_t*>(value.data()), value.size()));
 
@@ -90,9 +90,9 @@ absl::StatusOr<SerdeJson> SerdeJson::CreateString(absl::string_view value) {
 }
 
 absl::StatusOr<SerdeJson> SerdeJson::Parse(absl::string_view data) {
-  rs_std::Result<serde_json_bridge_rs::json::SerdeJson,
-                 serde_json_bridge_rs::raw_string::RawString>
-      rs_result = serde_json_bridge_rs::json::SerdeJson::parse_string(
+  rs_std::Result<rust::json::SerdeJson,
+                 rust::raw_string::RawString>
+      rs_result = rust::json::SerdeJson::parse_string(
           absl::Span<const uint8_t>(
               reinterpret_cast<const uint8_t*>(data.data()), data.size()));
 
@@ -104,8 +104,8 @@ absl::StatusOr<SerdeJson> SerdeJson::Parse(absl::string_view data) {
 }
 
 absl::StatusOr<SerdeJson> SerdeJson::GetField(absl::string_view key) const {
-  rs_std::Result<serde_json_bridge_rs::json::SerdeJson,
-                 serde_json_bridge_rs::raw_string::RawString>
+  rs_std::Result<rust::json::SerdeJson,
+                 rust::raw_string::RawString>
       rs_result = json_obj_.get_field(absl::Span<const uint8_t>(
           reinterpret_cast<const uint8_t*>(key.data()), key.size()));
 
@@ -119,8 +119,8 @@ absl::StatusOr<SerdeJson> SerdeJson::GetField(absl::string_view key) const {
 
 absl::StatusOr<SerdeJson> SerdeJson::GetFieldObject(
     absl::string_view key) const {
-  rs_std::Result<serde_json_bridge_rs::json::SerdeJson,
-                 serde_json_bridge_rs::raw_string::RawString>
+  rs_std::Result<rust::json::SerdeJson,
+                 rust::raw_string::RawString>
       rs_result = json_obj_.get_field_object(absl::Span<const uint8_t>(
           reinterpret_cast<const uint8_t*>(key.data()), key.size()));
 
@@ -133,7 +133,7 @@ absl::StatusOr<SerdeJson> SerdeJson::GetFieldObject(
 }
 
 absl::StatusOr<bool> SerdeJson::GetBool() const {
-  rs_std::Result<bool, serde_json_bridge_rs::raw_string::RawString> rs_result =
+  rs_std::Result<bool, rust::raw_string::RawString> rs_result =
       json_obj_.get_bool();
 
   if (!rs_result.has_value()) {
@@ -145,8 +145,8 @@ absl::StatusOr<bool> SerdeJson::GetBool() const {
 }
 
 absl::StatusOr<std::string> SerdeJson::GetString() const {
-  rs_std::Result<serde_json_bridge_rs::raw_string::RawString,
-                 serde_json_bridge_rs::raw_string::RawString>
+  rs_std::Result<rust::raw_string::RawString,
+                 rust::raw_string::RawString>
       rs_result = json_obj_.get_string();
 
   if (!rs_result.has_value()) {
@@ -158,7 +158,7 @@ absl::StatusOr<std::string> SerdeJson::GetString() const {
 }
 
 absl::StatusOr<int64_t> SerdeJson::GetInt() const {
-  rs_std::Result<int64_t, serde_json_bridge_rs::raw_string::RawString>
+  rs_std::Result<int64_t, rust::raw_string::RawString>
       rs_result = json_obj_.get_int();
 
   if (!rs_result.has_value()) {
@@ -170,7 +170,7 @@ absl::StatusOr<int64_t> SerdeJson::GetInt() const {
 }
 
 absl::StatusOr<double> SerdeJson::GetDouble() const {
-  rs_std::Result<double, serde_json_bridge_rs::raw_string::RawString>
+  rs_std::Result<double, rust::raw_string::RawString>
       rs_result = json_obj_.get_double();
 
   if (!rs_result.has_value()) {
@@ -182,8 +182,8 @@ absl::StatusOr<double> SerdeJson::GetDouble() const {
 }
 
 absl::StatusOr<std::vector<SerdeJson>> SerdeJson::GetArray() const {
-  rs_std::Result<serde_json_bridge_rs::json::VecSerdeJson,
-                 serde_json_bridge_rs::raw_string::RawString>
+  rs_std::Result<rust::json::VecSerdeJson,
+                 rust::raw_string::RawString>
       rs_result = json_obj_.get_array();
 
   if (!rs_result.has_value()) {
@@ -196,8 +196,8 @@ absl::StatusOr<std::vector<SerdeJson>> SerdeJson::GetArray() const {
 
 absl::StatusOr<std::string> SerdeJson::GetFieldString(
     absl::string_view key) const {
-  rs_std::Result<serde_json_bridge_rs::raw_string::RawString,
-                 serde_json_bridge_rs::raw_string::RawString>
+  rs_std::Result<rust::raw_string::RawString,
+                 rust::raw_string::RawString>
       rs_result = json_obj_.get_field_string(absl::Span<const uint8_t>(
           reinterpret_cast<const uint8_t*>(key.data()), key.size()));
 
@@ -210,7 +210,7 @@ absl::StatusOr<std::string> SerdeJson::GetFieldString(
 }
 
 absl::StatusOr<bool> SerdeJson::GetFieldBool(absl::string_view key) const {
-  rs_std::Result<bool, serde_json_bridge_rs::raw_string::RawString> rs_result =
+  rs_std::Result<bool, rust::raw_string::RawString> rs_result =
       json_obj_.get_field_bool(absl::Span<const uint8_t>(
           reinterpret_cast<const uint8_t*>(key.data()), key.size()));
 
@@ -223,7 +223,7 @@ absl::StatusOr<bool> SerdeJson::GetFieldBool(absl::string_view key) const {
 }
 
 absl::StatusOr<int64_t> SerdeJson::GetFieldInt(absl::string_view key) const {
-  rs_std::Result<int64_t, serde_json_bridge_rs::raw_string::RawString>
+  rs_std::Result<int64_t, rust::raw_string::RawString>
       rs_result = json_obj_.get_field_int(absl::Span<const uint8_t>(
           reinterpret_cast<const uint8_t*>(key.data()), key.size()));
 
@@ -236,7 +236,7 @@ absl::StatusOr<int64_t> SerdeJson::GetFieldInt(absl::string_view key) const {
 }
 
 absl::StatusOr<double> SerdeJson::GetFieldDouble(absl::string_view key) const {
-  rs_std::Result<double, serde_json_bridge_rs::raw_string::RawString>
+  rs_std::Result<double, rust::raw_string::RawString>
       rs_result = json_obj_.get_field_double(absl::Span<const uint8_t>(
           reinterpret_cast<const uint8_t*>(key.data()), key.size()));
 
@@ -250,8 +250,8 @@ absl::StatusOr<double> SerdeJson::GetFieldDouble(absl::string_view key) const {
 
 absl::StatusOr<std::vector<SerdeJson>> SerdeJson::GetFieldArray(
     absl::string_view key) const {
-  rs_std::Result<serde_json_bridge_rs::json::VecSerdeJson,
-                 serde_json_bridge_rs::raw_string::RawString>
+  rs_std::Result<rust::json::VecSerdeJson,
+                 rust::raw_string::RawString>
       rs_result = json_obj_.get_field_array(absl::Span<const uint8_t>(
           reinterpret_cast<const uint8_t*>(key.data()), key.size()));
 
@@ -284,8 +284,8 @@ std::string SerdeJson::ToString(bool sort_keys) const {
 }
 
 absl::StatusOr<std::vector<std::string>> SerdeJson::GetKeys() const {
-  rs_std::Result<serde_json_bridge_rs::json::VecRawString,
-                 serde_json_bridge_rs::raw_string::RawString>
+  rs_std::Result<rust::json::VecRawString,
+                 rust::raw_string::RawString>
       rs_result = json_obj_.get_keys();
 
   if (!rs_result.has_value()) {
@@ -293,7 +293,7 @@ absl::StatusOr<std::vector<std::string>> SerdeJson::GetKeys() const {
         FromRustRawString(std::move(rs_result).err()));
   }
 
-  serde_json_bridge_rs::json::VecRawString rust_raw_strings =
+  rust::json::VecRawString rust_raw_strings =
       std::move(rs_result).value();
   std::vector<std::string> keys;
   keys.reserve(rust_raw_strings.len());
@@ -304,7 +304,7 @@ absl::StatusOr<std::vector<std::string>> SerdeJson::GetKeys() const {
 }
 
 absl::StatusOr<bool> SerdeJson::HasField(absl::string_view key) const {
-  rs_std::Result<bool, serde_json_bridge_rs::raw_string::RawString> rs_result =
+  rs_std::Result<bool, rust::raw_string::RawString> rs_result =
       json_obj_.has_field(absl::Span<const uint8_t>(
           reinterpret_cast<const uint8_t*>(key.data()), key.size()));
 
@@ -424,7 +424,7 @@ absl::Status SerdeJson::AddFieldArray(absl::string_view key,
 
 absl::Status SerdeJson::AddFieldArray(absl::string_view key,
                                       std::vector<SerdeJson> value) {
-  std::vector<serde_json_bridge_rs::json::SerdeJson> arr;
+  std::vector<rust::json::SerdeJson> arr;
   arr.reserve(value.size());
   for (auto& v : value) {
     arr.push_back(std::move(v.json_obj_));
