@@ -1,9 +1,7 @@
 // Crubit does not support generic type parameters, so we need to implement
 // BufferedZipFile and FsZipFile manually.
 
-use crate::{write::CompressionMethod, ResultVecU8};
-use cc_std::std::string;
-use rust_vec_u8::VecU8;
+use crate::{write::CompressionMethod, VecU8};
 use std::fmt::{Debug, Formatter};
 use std::fs::File;
 use std::io::{Cursor, Error, ErrorKind, Read};
@@ -44,7 +42,7 @@ impl<'a> BufferedZipFile<'a> {
 
     /// Returns the name of the file.
     /// The result only is valid if `is_none()` returns false.
-    pub fn get_file_name(&self) -> string {
+    pub fn get_file_name(&self) -> VecU8 {
         get_file_name_impl(&self.file)
     }
 
@@ -68,7 +66,7 @@ impl<'a> BufferedZipFile<'a> {
 
     /// Returns the data of the file.
     /// The result only is valid if `is_none()` returns false.
-    pub fn get_file_data(&mut self) -> ResultVecU8 {
+    pub fn get_file_data(&mut self) -> Result<VecU8, VecU8> {
         get_file_data_impl(&mut self.file)
     }
 }
@@ -115,7 +113,7 @@ impl<'a> FsZipFile<'a> {
 
     /// Returns the name of the file.
     /// The result only is valid if `is_none()` returns false.
-    pub fn get_file_name(&self) -> string {
+    pub fn get_file_name(&self) -> VecU8 {
         get_file_name_impl(&self.file)
     }
 
@@ -139,7 +137,7 @@ impl<'a> FsZipFile<'a> {
 
     /// Returns the data of the file.
     /// The result only is valid if `is_none()` returns false.
-    pub fn get_file_data(&mut self) -> ResultVecU8 {
+    pub fn get_file_data(&mut self) -> Result<VecU8, VecU8> {
         get_file_data_impl(&mut self.file)
     }
 }
@@ -153,10 +151,10 @@ impl<'a> Read for FsZipFile<'a> {
     }
 }
 
-fn get_file_name_impl<'a, R: Read>(file: &Option<WrappedZipFile<'a, R>>) -> string {
+fn get_file_name_impl<'a, R: Read>(file: &Option<WrappedZipFile<'a, R>>) -> VecU8 {
     match file.as_ref() {
-        Some(file) => string::from(file.name()),
-        None => string::from(""),
+        Some(file) => VecU8::from(file.name()),
+        None => VecU8::default(),
     }
 }
 
@@ -191,16 +189,17 @@ fn get_compression_method_impl<'a, R: Read>(
     }
 }
 
-fn get_file_data_impl<'a, R: Read>(file: &mut Option<WrappedZipFile<'a, R>>) -> ResultVecU8 {
-    let result: anyhow::Result<VecU8> = match file.as_mut() {
+fn get_file_data_impl<'a, R: Read>(
+    file: &mut Option<WrappedZipFile<'a, R>>,
+) -> Result<VecU8, VecU8> {
+    match file.as_mut() {
         Some(file) => {
             let mut buffer = Vec::new();
             match file.read_to_end(&mut buffer) {
                 Ok(_) => Ok(buffer.into()),
-                Err(e) => Err(e.into()),
+                Err(e) => Err(VecU8::from(e.to_string())),
             }
         }
         None => Ok(VecU8::default()),
-    };
-    result.into()
+    }
 }

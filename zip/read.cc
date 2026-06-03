@@ -4,20 +4,21 @@
 #include <utility>
 #include <variant>
 
-#include "base/rust/rust_vec_u8.h"
 #include "converters.h"
 #include "file.h"
 #include "rust/zip_wrapper.h"
 #include "absl/status/statusor.h"
 #include "absl/strings/string_view.h"
+#include "absl/types/span.h"
 #include "third_party/gloop/util/status/status_macros.h"
 
 namespace security::zip {
 
 absl::StatusOr<BufferedZipArchive> BufferedZipArchive::NewFromData(
     absl::string_view data) {
-  rust_vec_u8::VecU8 input_data = rust_vec_u8::VecU8::copy_from_raw(
-      reinterpret_cast<const unsigned char*>(data.data()), data.size());
+  zip_wrapper::VecU8 input_data =
+      zip_wrapper::VecU8::copy_from_slice(absl::Span<const uint8_t>(
+          reinterpret_cast<const uint8_t*>(data.data()), data.size()));
   ASSIGN_OR_RETURN(
       zip_wrapper::BufferedZipArchive archive,
       FromRustBufferedZipArchive(
@@ -45,7 +46,9 @@ absl::StatusOr<ZipFile> BufferedZipArchive::GetFileByIndexRaw(uintptr_t index) {
 absl::StatusOr<FsZipArchive> FsZipArchive::NewFromPath(absl::string_view path) {
   ASSIGN_OR_RETURN(
       zip_wrapper::FsZipArchive archive,
-      FromRustFsZipArchive(zip_wrapper::FsZipArchive::new_from_path(path)));
+      FromRustFsZipArchive(
+          zip_wrapper::FsZipArchive::new_from_path(absl::Span<const uint8_t>(
+              reinterpret_cast<const uint8_t*>(path.data()), path.size()))));
   return FsZipArchive(std::move(archive));
 }
 

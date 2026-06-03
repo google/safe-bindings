@@ -9,3 +9,9 @@ impl From<&str> for RawString {
         item.as_bytes().into()
     }
 }
+
+impl From<String> for RawString {
+    fn from(item: String) -> Self {
+        item.into_bytes().into()
+    }
+}

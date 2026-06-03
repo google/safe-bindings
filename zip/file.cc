@@ -3,6 +3,7 @@
 #include <string>
 #include <variant>
 
+#include "crubit_helpers/string_conversions.h"
 #include "converters.h"
 #include "rust/zip_wrapper.h"
 #include "absl/status/status.h"
@@ -54,7 +55,8 @@ absl::StatusOr<bool> BufferedZipFile::IsDir() const {
 }
 absl::StatusOr<std::string> BufferedZipFile::GetFileName() const {
   RETURN_IF_ERROR(CheckNone());
-  return zip_.get_file_name();
+  zip_wrapper::VecU8 name_vec = zip_.get_file_name();
+  return std::string(security::crubit_helpers::StringViewFromVecU8(name_vec));
 }
 absl::StatusOr<CompressionMethod> BufferedZipFile::GetCompressionMethod()
     const {
@@ -84,7 +86,8 @@ absl::StatusOr<bool> FsZipFile::IsDir() const {
 }
 absl::StatusOr<std::string> FsZipFile::GetFileName() const {
   RETURN_IF_ERROR(CheckNone());
-  return zip_.get_file_name();
+  zip_wrapper::VecU8 name_vec = zip_.get_file_name();
+  return std::string(security::crubit_helpers::StringViewFromVecU8(name_vec));
 }
 absl::StatusOr<CompressionMethod> FsZipFile::GetCompressionMethod() const {
   RETURN_IF_ERROR(CheckNone());

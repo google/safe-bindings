@@ -1,18 +1,13 @@
 // Crubit does not support generic type parameters, so we need to implement
 // BufferedZipWriter and FsZipWriter manually.
 
-use cc_std::std::string_view;
-use rust_vec_u8::VecU8;
+use crate::{BufferedZipFile, FsZipFile, VecU8};
 use std::fmt::{Debug, Formatter};
 use std::fs::{File, OpenOptions};
 use std::io::{copy, Cursor, Read, Seek, Write};
 use zip::{
     write::FileOptions, CompressionMethod as ZipCrateCompressionMethod,
     ZipWriter as WrappedZipWriter,
-};
-
-use crate::{
-    BufferedZipFile, FsZipFile, ResultBufferedZipWriter, ResultFsZipWriter, ResultUnit, ResultVecU8,
 };
 
 // Expose some of the options for writing files to the zip archive.
@@ -81,9 +76,9 @@ pub struct ZipWriterFileOptions {
 }
 
 impl TryFrom<&ZipWriterFileOptions> for FileOptions<'static, ()> {
-    type Error = anyhow::Error;
+    type Error = String;
 
-    fn try_from(val: &ZipWriterFileOptions) -> anyhow::Result<Self> {
+    fn try_from(val: &ZipWriterFileOptions) -> Result<Self, Self::Error> {
         let mut options = FileOptions::<()>::default();
         if let Some(method) = val.compression_method {
             options = options.compression_method(method.into());
@@ -113,10 +108,9 @@ impl TryFrom<&ZipWriterFileOptions> for FileOptions<'static, ()> {
                 _ => false,
             };
             if !in_range {
-                return Err(anyhow::anyhow!(
+                return Err(format!(
                     "Compression level {} is out of range for method {:?}",
-                    level,
-                    method
+                    level, method
                 ));
             }
             options = options.compression_level(Some(level));
@@ -186,19 +180,16 @@ impl BufferedZipWriter {
     }
 
     /// Creates a new `BufferedZipWriter` from a byte vector.
-    pub fn new_from_data(data: VecU8, append: bool) -> ResultBufferedZipWriter {
+    pub fn new_from_data(data: VecU8, append: bool) -> Result<BufferedZipWriter, VecU8> {
         let mut writer = Self::default();
         if let Err(e) = writer.open(data, append) {
-            return ResultBufferedZipWriter::from(anyhow::anyhow!(
-                "Failed to open zip buffer: {}",
-                e
-            ));
+            return Err(VecU8::from(format!("Failed to open zip buffer: {}", e)));
         }
-        ResultBufferedZipWriter::from_ok(writer)
+        Ok(writer)
     }
 
     /// Opens a zip archive from a byte vector.
-    fn open(&mut self, data: VecU8, append: bool) -> anyhow::Result<()> {
+    fn open(&mut self, data: VecU8, append: bool) -> Result<(), String> {
         let cursor = Cursor::new(data.into_vec());
         if append {
             match WrappedZipWriter::new_append(cursor) {
@@ -206,7 +197,7 @@ impl BufferedZipWriter {
                     self.writer = Some(writer);
                     Ok(())
                 }
-                Err(e) => Err(e.into()),
+                Err(e) => Err(e.to_string()),
             }
         } else {
             self.writer = Some(WrappedZipWriter::new(cursor));
@@ -221,51 +212,33 @@ impl BufferedZipWriter {
     }
 
     /// Finishes writing the zip archive and returns the buffered data.
-    pub fn finish(&mut self) -> ResultVecU8 {
+    pub fn finish(&mut self) -> Result<VecU8, VecU8> {
         if let Some(writer) = self.writer.take() {
             match writer.finish() {
-                Ok(cursor) => ResultVecU8::from_ok(cursor.into_inner().into()),
-                Err(e) => Err(anyhow::Error::from(e)).into(),
+                Ok(cursor) => Ok(cursor.into_inner().into()),
+                Err(e) => Err(VecU8::from(e.to_string())),
             }
         } else {
-            ResultVecU8::from(anyhow::anyhow!("Zip writer is not open"))
+            Err(VecU8::from("writer is not open"))
         }
     }
 
     /// Creates a new file in the zip archive and start writing to it.
-    ///
-    /// # Safety
-    ///
-    /// The memory viewed by `name` must not be mutated by any C++ code during
-    /// the execution of this function. While C++ `std::string_view` provides
-    /// read-only access, the C++ code owning `name` must not modify it via
-    /// other aliases.
-    pub unsafe fn start_file(
-        &mut self,
-        name: string_view,
-        options: ZipWriterFileOptions,
-    ) -> ResultUnit {
+    pub fn start_file(&mut self, name: &[u8], options: ZipWriterFileOptions) -> Result<u8, VecU8> {
         start_file_impl(&mut self.writer, name, options)
     }
 
     /// Adds a directory to the zip archive.
-    ///
-    /// # Safety
-    ///
-    /// The memory viewed by `name` must not be mutated by any C++ code during
-    /// the execution of this function. While C++ `std::string_view` provides
-    /// read-only access, the C++ code owning `name` must not modify it via
-    /// other aliases.
-    pub unsafe fn add_directory(
+    pub fn add_directory(
         &mut self,
-        name: string_view,
+        name: &[u8],
         options: ZipWriterFileOptions,
-    ) -> ResultUnit {
+    ) -> Result<u8, VecU8> {
         add_directory_impl(&mut self.writer, name, options)
     }
 
     /// Writes data to the current file in the zip archive.
-    pub fn write_data(&mut self, data: VecU8) -> ResultUnit {
+    pub fn write_data(&mut self, data: VecU8) -> Result<u8, VecU8> {
         write_data_impl(&mut self.writer, data)
     }
 
@@ -273,24 +246,20 @@ impl BufferedZipWriter {
     // helpers for a set of types instead of a generic method.
 
     /// Writes file content from a `BufferedZipFile` to the current file in the zip archive.
-    pub fn write_buffered_zip_file_content(&mut self, file: &mut BufferedZipFile) -> ResultUnit {
+    pub fn write_buffered_zip_file_content(
+        &mut self,
+        file: &mut BufferedZipFile,
+    ) -> Result<u8, VecU8> {
         do_copy_impl(&mut self.writer, file)
     }
 
     /// Writes file content from a `FsZipFile` to the current file in the zip archive.
-    pub fn write_fs_zip_file_content(&mut self, file: &mut FsZipFile) -> ResultUnit {
+    pub fn write_fs_zip_file_content(&mut self, file: &mut FsZipFile) -> Result<u8, VecU8> {
         do_copy_impl(&mut self.writer, file)
     }
 
     /// Writes file content from a path to the current file in the zip archive.
-    ///
-    /// # Safety
-    ///
-    /// The memory viewed by `path` must not be mutated by any C++ code during
-    /// the execution of this function. While C++ `std::string_view` provides
-    /// read-only access, the C++ code owning `path` must not modify it via
-    /// other aliases.
-    pub unsafe fn write_file_content(&mut self, path: string_view) -> ResultUnit {
+    pub fn write_file_content(&mut self, path: &[u8]) -> Result<u8, VecU8> {
         write_file_content_impl(&mut self.writer, path)
     }
 }
@@ -316,58 +285,42 @@ impl FsZipWriter {
     }
 
     /// Creates a new `FsZipWriter` from a path.
-    ///
-    /// # Safety
-    ///
-    /// The memory viewed by `path` must not be mutated by any C++ code during
-    /// the execution of this function. While C++ `std::string_view` provides
-    /// read-only access, the C++ code owning `path` must not modify it via
-    /// other aliases.
-    pub unsafe fn new_from_path(path: string_view, append: bool) -> ResultFsZipWriter {
+    pub fn new_from_path(path: &[u8], append: bool) -> Result<FsZipWriter, VecU8> {
         let mut writer = Self::default();
         if let Err(e) = writer.open(path, append) {
-            return ResultFsZipWriter::from(anyhow::anyhow!("Failed to open zip archive: {}", e));
+            return Err(VecU8::from(format!("Failed to open zip archive: {}", e)));
         }
-        ResultFsZipWriter::from_ok(writer)
+        Ok(writer)
     }
 
     /// Opens a zip archive from a path.
-    ///
-    /// # Safety
-    ///
-    /// The memory viewed by `path` must not be mutated by any C++ code during
-    /// the execution of this function. While C++ `std::string_view` provides
-    /// read-only access, the C++ code owning `path` must not modify it via
-    /// other aliases.
-    unsafe fn open(&mut self, path: string_view, append: bool) -> anyhow::Result<()> {
-        // SAFETY: The caller of `open` must ensure that `path` is valid for
-        // the duration of the call.
-        let path_str = String::from_utf8_lossy(unsafe { path.as_bytes() });
+    fn open(&mut self, path: &[u8], append: bool) -> Result<(), String> {
+        let path_lossy = String::from_utf8_lossy(path);
+        let path_str = path_lossy.as_ref();
         if append {
             match OpenOptions::new()
                 .read(true)
                 .write(true)
                 .create(true)
                 .truncate(false)
-                .open(path_str.as_ref())
+                .open(path_str)
             {
                 Ok(file) => match WrappedZipWriter::new_append(file) {
                     Ok(writer) => {
                         self.writer = Some(writer);
                         Ok(())
                     }
-                    Err(e) => Err(anyhow::Error::from(e)),
+                    Err(e) => Err(e.to_string()),
                 },
-                Err(e) => Err(anyhow::Error::from(e)),
+                Err(e) => Err(e.to_string()),
             }
         } else {
-            match OpenOptions::new().write(true).create(true).truncate(true).open(path_str.as_ref())
-            {
+            match OpenOptions::new().write(true).create(true).truncate(true).open(path_str) {
                 Ok(file) => {
                     self.writer = Some(WrappedZipWriter::new(file));
                     Ok(())
                 }
-                Err(e) => Err(anyhow::Error::from(e)),
+                Err(e) => Err(e.to_string()),
             }
         }
     }
@@ -379,51 +332,34 @@ impl FsZipWriter {
     }
 
     /// Finishes writing the zip archive to file.
-    pub fn finish(&mut self) -> ResultUnit {
+    // NOTE: b/517030085 - Crubit doesn't seem to support the unit type here, so using a u8 for now.
+    pub fn finish(&mut self) -> Result<u8, VecU8> {
         if let Some(writer) = self.writer.take() {
             match writer.finish() {
-                Ok(_) => ResultUnit::from_ok(()),
-                Err(e) => Err(anyhow::Error::from(e)).into(),
+                Ok(_) => Ok(0),
+                Err(e) => Err(VecU8::from(e.to_string())),
             }
         } else {
-            ResultUnit::from(anyhow::anyhow!("Zip writer is not open"))
+            Err(VecU8::from("writer is not open"))
         }
     }
 
     /// Creates a new file in the zip archive and start writing to it.
-    ///
-    /// # Safety
-    ///
-    /// The memory viewed by `name` must not be mutated by any C++ code during
-    /// the execution of this function. While C++ `std::string_view` provides
-    /// read-only access, the C++ code owning `name` must not modify it via
-    /// other aliases.
-    pub unsafe fn start_file(
-        &mut self,
-        name: string_view,
-        options: ZipWriterFileOptions,
-    ) -> ResultUnit {
+    pub fn start_file(&mut self, name: &[u8], options: ZipWriterFileOptions) -> Result<u8, VecU8> {
         start_file_impl(&mut self.writer, name, options)
     }
 
     /// Adds a directory to the zip archive.
-    ///
-    /// # Safety
-    ///
-    /// The memory viewed by `name` must not be mutated by any C++ code during
-    /// the execution of this function. While C++ `std::string_view` provides
-    /// read-only access, the C++ code owning `name` must not modify it via
-    /// other aliases.
-    pub unsafe fn add_directory(
+    pub fn add_directory(
         &mut self,
-        name: string_view,
+        name: &[u8],
         options: ZipWriterFileOptions,
-    ) -> ResultUnit {
+    ) -> Result<u8, VecU8> {
         add_directory_impl(&mut self.writer, name, options)
     }
 
     /// Writes data to the current file in the zip archive.
-    pub fn write_data(&mut self, data: VecU8) -> ResultUnit {
+    pub fn write_data(&mut self, data: VecU8) -> Result<u8, VecU8> {
         write_data_impl(&mut self.writer, data)
     }
 
@@ -431,132 +367,112 @@ impl FsZipWriter {
     // helpers for a set of types instead of a generic method.
 
     /// Writes file content from a `BufferedZipFile` to the current file in the zip archive.
-    pub fn write_buffered_zip_file_content(&mut self, file: &mut BufferedZipFile) -> ResultUnit {
+    pub fn write_buffered_zip_file_content(
+        &mut self,
+        file: &mut BufferedZipFile,
+    ) -> Result<u8, VecU8> {
         do_copy_impl(&mut self.writer, file)
     }
 
     /// Writes file content from a `FsZipFile` to the current file in the zip archive.
-    pub fn write_fs_zip_file_content(&mut self, file: &mut FsZipFile) -> ResultUnit {
+    pub fn write_fs_zip_file_content(&mut self, file: &mut FsZipFile) -> Result<u8, VecU8> {
         do_copy_impl(&mut self.writer, file)
     }
 
     /// Writes file content from a path to the current file in the zip archive.
-    ///
-    /// # Safety
-    ///
-    /// The memory viewed by `path` must not be mutated by any C++ code during
-    /// the execution of this function. While C++ `std::string_view` provides
-    /// read-only access, the C++ code owning `path` must not modify it via
-    /// other aliases.
-    pub unsafe fn write_file_content(&mut self, path: string_view) -> ResultUnit {
+    pub fn write_file_content(&mut self, path: &[u8]) -> Result<u8, VecU8> {
         write_file_content_impl(&mut self.writer, path)
     }
 }
 
-/// # Safety
-///
-/// The memory viewed by `name` must not be mutated by any C++ code during
-/// the execution of this function. While C++ `std::string_view` provides
-/// read-only access, the C++ code owning `name` must not modify it via
-/// other aliases.
-unsafe fn start_file_impl<W: Write + Seek>(
+// NOTE: b/517030085 - Crubit doesn't seem to support the unit type here, so using a u8 for now.
+fn start_file_impl<W: Write + Seek>(
     writer: &mut Option<WrappedZipWriter<W>>,
-    name: string_view,
+    name: &[u8],
     options: ZipWriterFileOptions,
-) -> ResultUnit {
+) -> Result<u8, VecU8> {
     if let Some(writer) = writer.as_mut() {
-        // SAFETY: The caller of `start_file` must ensure that `name` is valid for
-        // the duration of the call.
-        let name_str = String::from_utf8_lossy(unsafe { name.as_bytes() });
+        let name_lossy = String::from_utf8_lossy(name);
+        let name_str = name_lossy.as_ref();
         match FileOptions::try_from(&options) {
-            Ok(file_options) => match writer.start_file(name_str.as_ref(), file_options) {
-                Ok(_) => ResultUnit::from_ok(()),
-                Err(e) => Err(anyhow::Error::from(e)).into(),
+            Ok(file_options) => match writer.start_file(name_str, file_options) {
+                Ok(_) => Ok(0),
+                Err(e) => Err(VecU8::from(e.to_string())),
             },
-            Err(e) => Err(anyhow::Error::from(e)).into(),
+            Err(e) => Err(VecU8::from(e.to_string())),
         }
     } else {
-        ResultUnit::from(anyhow::anyhow!("Zip writer is not open"))
+        Err(VecU8::from("writer is not open"))
     }
 }
 
-/// # Safety
-///
-/// The memory viewed by `name` must not be mutated by any C++ code during
-/// the execution of this function. While C++ `std::string_view` provides
-/// read-only access, the C++ code owning `name` must not modify it via
-/// other aliases.
-unsafe fn add_directory_impl<W: Write + Seek>(
+// NOTE: b/517030085 - Crubit doesn't seem to support the unit type here, so using a u8 for now.
+fn add_directory_impl<W: Write + Seek>(
     writer: &mut Option<WrappedZipWriter<W>>,
-    name: string_view,
+    name: &[u8],
     options: ZipWriterFileOptions,
-) -> ResultUnit {
+) -> Result<u8, VecU8> {
     if let Some(writer) = writer.as_mut() {
-        // SAFETY: The caller of `add_directory` must ensure that `name` is valid for
-        // the duration of the call.
-        let name_str = String::from_utf8_lossy(unsafe { name.as_bytes() });
+        let name_lossy = String::from_utf8_lossy(name);
+        let name_str = name_lossy.as_ref();
         match FileOptions::try_from(&options) {
-            Ok(file_options) => match writer.add_directory(name_str.as_ref(), file_options) {
-                Ok(_) => ResultUnit::from_ok(()),
-                Err(e) => Err(anyhow::Error::from(e)).into(),
+            Ok(file_options) => match writer.add_directory(name_str, file_options) {
+                Ok(_) => Ok(0),
+                Err(e) => Err(VecU8::from(e.to_string())),
             },
-            Err(e) => Err(anyhow::Error::from(e)).into(),
+            Err(e) => Err(VecU8::from(e.to_string())),
         }
     } else {
-        ResultUnit::from(anyhow::anyhow!("Zip writer is not open"))
+        Err(VecU8::from("writer is not open"))
     }
 }
 
+// NOTE: b/517030085 - Crubit doesn't seem to support the unit type here, so using a u8 for now.
 fn write_data_impl<W: Write + Seek>(
     writer: &mut Option<WrappedZipWriter<W>>,
     data: VecU8,
-) -> ResultUnit {
+) -> Result<u8, VecU8> {
     if let Some(writer) = writer.as_mut() {
         match writer.write_all(data.as_slice()) {
-            Ok(_) => ResultUnit::from_ok(()),
-            Err(e) => Err(anyhow::Error::from(e)).into(),
+            Ok(_) => Ok(0),
+            Err(e) => Err(VecU8::from(e.to_string())),
         }
     } else {
-        ResultUnit::from(anyhow::anyhow!("Zip writer is not open"))
+        Err(VecU8::from("writer is not open"))
     }
 }
 
+// NOTE: b/517030085 - Crubit doesn't seem to support the unit type here, so using a u8 for now.
 fn do_copy_impl<W: Write + Seek, R: Read>(
     writer: &mut Option<WrappedZipWriter<W>>,
     reader: &mut R,
-) -> ResultUnit {
+) -> Result<u8, VecU8> {
     if let Some(writer) = writer.as_mut() {
         match copy(reader, writer) {
-            Ok(_) => ResultUnit::from_ok(()),
-            Err(e) => Err(anyhow::Error::from(e)).into(),
+            Ok(_) => Ok(0),
+            Err(e) => Err(VecU8::from(e.to_string())),
         }
     } else {
-        ResultUnit::from(anyhow::anyhow!("Zip writer is not open"))
+        Err(VecU8::from("writer is not open"))
     }
 }
 
-/// # Safety
-///
-/// The memory viewed by `path` must not be mutated by any C++ code during
-/// the execution of this function. While C++ `std::string_view` provides
-/// read-only access, the C++ code owning `path` must not modify it via
-/// other aliases.
-unsafe fn write_file_content_impl<W: Write + Seek>(
+// NOTE: b/517030085 - Crubit doesn't seem to support the unit type here, so using a u8 for now.
+fn write_file_content_impl<W: Write + Seek>(
     writer: &mut Option<WrappedZipWriter<W>>,
-    path: string_view,
-) -> ResultUnit {
+    path: &[u8],
+) -> Result<u8, VecU8> {
     if let Some(writer) = writer.as_mut() {
-        // SAFETY: The caller of `write_file_content` must ensure that `path` is valid for
-        // the duration of the call.
-        let path_str = String::from_utf8_lossy(unsafe { path.as_bytes() });
-        match File::open(path_str.as_ref()) {
+        let path_lossy = String::from_utf8_lossy(path);
+        let path_str = path_lossy.as_ref();
+        match File::open(path_str) {
             Ok(mut file) => match copy(&mut file, writer) {
-                Ok(_) => ResultUnit::from_ok(()),
-                Err(e) => Err(anyhow::Error::from(e)).into(),
+                Ok(_) => Ok(0),
+                Err(e) => Err(VecU8::from(e.to_string())),
             },
-            Err(e) => Err(anyhow::Error::from(e)).into(),
+            Err(e) => Err(VecU8::from(e.to_string())),
         }
     } else {
-        ResultUnit::from(anyhow::anyhow!("Zip writer is not open"))
+        Err(VecU8::from("writer is not open"))
     }
 }

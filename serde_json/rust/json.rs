@@ -1,7 +1,5 @@
-use crate::make_result_type;
 use crate::make_vec_type;
 use crate::raw_string::RawString;
-use anyhow::anyhow;
 use serde::Serialize;
 use status_wrapper::StatusWrapper;
 
@@ -24,15 +22,15 @@ impl From<&Vec<serde_json::Value>> for VecSerdeJson {
 
 impl SerdeJson {
     /// Creates a new [SerdeJson] from provided string buffer `raw_data`.
-    pub fn parse_string(raw_data: cc_std::std::string_view) -> ResultSerdeJson {
-        let data = match raw_data.to_str() {
+    pub fn parse_string(raw_data: &[u8]) -> Result<SerdeJson, RawString> {
+        let data = match std::str::from_utf8(raw_data) {
             Ok(data) => data,
-            Err(err) => return Err(anyhow::Error::new(err)).into(),
+            Err(err) => return Err(err.to_string().into()),
         };
 
         match serde_json::from_str(data) {
-            Ok(value) => Ok(Self { value }).into(),
-            Err(err) => Err(anyhow!(err)).into(),
+            Ok(value) => Ok(Self { value }),
+            Err(err) => Err(err.to_string().into()),
         }
     }
 
@@ -48,10 +46,10 @@ impl SerdeJson {
 
     /// Creates a new [SerdeJson] of type double
     /// Returns error if value is NaN or infinity.
-    pub fn create_double(v: f64) -> ResultSerdeJson {
+    pub fn create_double(v: f64) -> Result<SerdeJson, RawString> {
         match serde_json::Number::from_f64(v) {
-            Some(n) => Ok(SerdeJson { value: serde_json::Value::Number(n) }).into(),
-            None => Err(anyhow::anyhow!("Invalid JSON number: {}", v)).into(),
+            Some(n) => Ok(SerdeJson { value: serde_json::Value::Number(n) }),
+            None => Err(format!("Invalid JSON number: {}", v).into()),
         }
     }
 
@@ -66,139 +64,139 @@ impl SerdeJson {
     }
 
     /// Creates a new [SerdeJson] of type string
-    pub fn create_string(raw_value: cc_std::std::string_view) -> ResultSerdeJson {
-        let value = match raw_value.to_str() {
+    pub fn create_string(raw_value: &[u8]) -> Result<SerdeJson, RawString> {
+        let value = match std::str::from_utf8(raw_value) {
             Ok(data) => data,
-            Err(err) => return Err(anyhow::Error::new(err)).into(),
+            Err(err) => return Err(err.to_string().into()),
         };
-        SerdeJson { value: serde_json::json!(value) }.into()
+        Ok(SerdeJson { value: serde_json::json!(value) })
     }
 
     /// Returns a new [SerdeJson] for a given field name in the JSON.
     /// The type of the underlying data is unknown, and has to be tested using
     /// is_{bool,string,int,double} functions, and value can be obtained
     /// using get_{bool,string,int,double} functions.
-    pub fn get_field(&self, raw_field_name: cc_std::std::string_view) -> ResultSerdeJson {
-        let field_name = match raw_field_name.to_str() {
+    pub fn get_field(&self, raw_field_name: &[u8]) -> Result<SerdeJson, RawString> {
+        let field_name = match std::str::from_utf8(raw_field_name) {
             Ok(field_name) => field_name,
-            Err(err) => return Err(anyhow::Error::new(err)).into(),
+            Err(err) => return Err(err.to_string().into()),
         };
         match self.value.get(field_name) {
-            Some(value) => Ok(Self { value: value.clone() }).into(),
-            None => Err(anyhow::anyhow!("Field '{}' not found in JSON object", field_name)).into(),
+            Some(value) => Ok(Self { value: value.clone() }),
+            None => Err(format!("Field '{}' not found in JSON object", field_name).into()),
         }
     }
 
     /// Returns a string for a given field name in the JSON.
-    pub fn get_field_string(&self, raw_field_name: cc_std::std::string_view) -> ResultString {
-        let field_name = match raw_field_name.to_str() {
+    pub fn get_field_string(&self, raw_field_name: &[u8]) -> Result<RawString, RawString> {
+        let field_name = match std::str::from_utf8(raw_field_name) {
             Ok(field_name) => field_name,
-            Err(err) => return Err(anyhow::Error::new(err)).into(),
+            Err(err) => return Err(err.to_string().into()),
         };
         match self.value[field_name].as_str() {
-            Some(s) => cc_std::std::string::from(s.to_string()).into(),
-            None => Err(anyhow::anyhow!("Field '{}' is not string", field_name)).into(),
+            Some(s) => Ok(s.into()),
+            None => Err(format!("Field '{}' is not string", field_name).into()),
         }
     }
 
     /// Returns a boolean for a given field name in the JSON.
-    pub fn get_field_bool(&self, raw_field_name: cc_std::std::string_view) -> ResultBool {
-        let field_name = match raw_field_name.to_str() {
+    pub fn get_field_bool(&self, raw_field_name: &[u8]) -> Result<bool, RawString> {
+        let field_name = match std::str::from_utf8(raw_field_name) {
             Ok(field_name) => field_name,
-            Err(err) => return Err(anyhow::Error::new(err)).into(),
+            Err(err) => return Err(err.to_string().into()),
         };
         match self.value[field_name].as_bool() {
-            Some(b) => b.into(),
-            None => Err(anyhow::anyhow!("Field '{}' is not boolean", field_name)).into(),
+            Some(b) => Ok(b),
+            None => Err(format!("Field '{}' is not boolean", field_name).into()),
         }
     }
 
     /// Returns a int for a given field name in the JSON.
-    pub fn get_field_int(&self, raw_field_name: cc_std::std::string_view) -> Resulti64 {
-        let field_name = match raw_field_name.to_str() {
+    pub fn get_field_int(&self, raw_field_name: &[u8]) -> Result<i64, RawString> {
+        let field_name = match std::str::from_utf8(raw_field_name) {
             Ok(field_name) => field_name,
-            Err(err) => return Err(anyhow::Error::new(err)).into(),
+            Err(err) => return Err(err.to_string().into()),
         };
         match self.value[field_name].as_i64() {
-            Some(i) => i.into(),
-            None => Err(anyhow::anyhow!("Field '{}' is not integer", field_name)).into(),
+            Some(i) => Ok(i),
+            None => Err(format!("Field '{}' is not integer", field_name).into()),
         }
     }
 
     /// Returns a JSON object (represented by the [SerdeJson]) for a given field name in
     /// the JSON.
-    pub fn get_field_object(&self, raw_field_name: cc_std::std::string_view) -> ResultSerdeJson {
-        let field_name = match raw_field_name.to_str() {
+    pub fn get_field_object(&self, raw_field_name: &[u8]) -> Result<SerdeJson, RawString> {
+        let field_name = match std::str::from_utf8(raw_field_name) {
             Ok(field_name) => field_name,
-            Err(err) => return Err(anyhow::Error::new(err)).into(),
+            Err(err) => return Err(err.to_string().into()),
         };
         match &self.value[field_name] {
-            o @ serde_json::Value::Object(_) => Ok(Self { value: o.clone() }).into(),
-            _ => Err(anyhow::anyhow!("Field '{}' is not object", field_name)).into(),
+            o @ serde_json::Value::Object(_) => Ok(Self { value: o.clone() }),
+            _ => Err(format!("Field '{}' is not object", field_name).into()),
         }
     }
 
     /// Returns a double for a given field name in the JSON.
-    pub fn get_field_double(&self, raw_field_name: cc_std::std::string_view) -> ResultDouble {
-        let field_name = match raw_field_name.to_str() {
+    pub fn get_field_double(&self, raw_field_name: &[u8]) -> Result<f64, RawString> {
+        let field_name = match std::str::from_utf8(raw_field_name) {
             Ok(field_name) => field_name,
-            Err(err) => return Err(anyhow::Error::new(err)).into(),
+            Err(err) => return Err(err.to_string().into()),
         };
         match self.value[field_name].as_f64() {
-            Some(f) => f.into(),
-            None => Err(anyhow::anyhow!("Field '{}' is not double", field_name)).into(),
+            Some(f) => Ok(f),
+            None => Err(format!("Field '{}' is not double", field_name).into()),
         }
     }
 
     /// Returns an array of [SerdeJson] for a given field name in the JSON.
-    pub fn get_field_array(&self, raw_field_name: cc_std::std::string_view) -> ResultVecSerdeJson {
-        let field_name = match raw_field_name.to_str() {
+    pub fn get_field_array(&self, raw_field_name: &[u8]) -> Result<VecSerdeJson, RawString> {
+        let field_name = match std::str::from_utf8(raw_field_name) {
             Ok(field_name) => field_name,
-            Err(err) => return Err(anyhow::Error::new(err)).into(),
+            Err(err) => return Err(err.to_string().into()),
         };
         match self.value[field_name].as_array() {
-            Some(a) => std::convert::Into::<VecSerdeJson>::into(a).into(),
-            None => Err(anyhow::anyhow!("Field '{}' is not array", field_name)).into(),
+            Some(a) => Ok(std::convert::Into::<VecSerdeJson>::into(a)),
+            None => Err(format!("Field '{}' is not array", field_name).into()),
         }
     }
 
     /// Returns the boolean value of this [SerdeJson] if it is a boolean.
-    pub fn get_bool(&self) -> ResultBool {
+    pub fn get_bool(&self) -> Result<bool, RawString> {
         match self.value.as_bool() {
-            Some(b) => b.into(),
-            None => Err(anyhow::anyhow!("This object is not boolean")).into(),
+            Some(b) => Ok(b),
+            None => Err("This object is not boolean".into()),
         }
     }
 
     /// Returns the int value of this [SerdeJson] if it is a int.
-    pub fn get_int(&self) -> Resulti64 {
+    pub fn get_int(&self) -> Result<i64, RawString> {
         match self.value.as_i64() {
-            Some(i) => i.into(),
-            None => Err(anyhow::anyhow!("This object is not integer")).into(),
+            Some(i) => Ok(i),
+            None => Err("This object is not integer".into()),
         }
     }
 
     /// Returns the double value of this [SerdeJson] if it is a double.
-    pub fn get_double(&self) -> ResultDouble {
+    pub fn get_double(&self) -> Result<f64, RawString> {
         match self.value.as_f64() {
-            Some(f) => f.into(),
-            None => Err(anyhow::anyhow!("This object is not double")).into(),
+            Some(f) => Ok(f),
+            None => Err("This object is not double".into()),
         }
     }
 
     /// Returns the string value of this [SerdeJson] if it is a string.
-    pub fn get_string(&self) -> ResultString {
+    pub fn get_string(&self) -> Result<RawString, RawString> {
         match self.value.as_str() {
-            Some(s) => cc_std::std::string::from(s.to_string()).into(),
-            None => Err(anyhow::anyhow!("This object is not string")).into(),
+            Some(s) => Ok(s.into()),
+            None => Err("This object is not string".into()),
         }
     }
 
     /// Returns the array of [SerdeJson] if the object is an array.
-    pub fn get_array(&self) -> ResultVecSerdeJson {
+    pub fn get_array(&self) -> Result<VecSerdeJson, RawString> {
         match self.value.as_array() {
-            Some(a) => std::convert::Into::<VecSerdeJson>::into(a).into(),
-            None => Err(anyhow::anyhow!("This object is not array")).into(),
+            Some(a) => Ok(std::convert::Into::<VecSerdeJson>::into(a)),
+            None => Err("This object is not array".into()),
         }
     }
 
@@ -243,7 +241,7 @@ impl SerdeJson {
     }
 
     /// Converts a [SerdeJson] to a string.
-    pub fn to_string(&self, sort_keys: bool) -> cc_std::std::string {
+    pub fn to_string(&self, sort_keys: bool) -> RawString {
         if sort_keys {
             let mut value = self.value.clone();
             value.sort_all_objects();
@@ -252,30 +250,26 @@ impl SerdeJson {
         self.value.to_string().into()
     }
 
-    pub fn get_keys(&self) -> ResultVecRawString {
+    pub fn get_keys(&self) -> Result<VecRawString, RawString> {
         let object = match self.value.as_object() {
             Some(o) => o,
-            None => return Err(anyhow::anyhow!("This isn't a object")).into(),
+            None => return Err("This isn't a object".into()),
         };
 
-        Ok(object.keys().map(|k| k.as_str().into()).collect::<Vec<RawString>>().into()).into()
+        Ok(object.keys().map(|k| k.as_str().into()).collect::<Vec<RawString>>().into())
     }
 
     /// Returns true if the JSON object contains the given field.
-    pub fn has_field(&self, raw_field_name: cc_std::std::string_view) -> ResultBool {
-        raw_field_name.to_str().map_or_else(
-            |err| Err(anyhow::Error::new(err)).into(),
-            |field_name| Ok(self.value.get(field_name).is_some()).into(),
-        )
+    pub fn has_field(&self, raw_field_name: &[u8]) -> Result<bool, RawString> {
+        match std::str::from_utf8(raw_field_name) {
+            Ok(field_name) => Ok(self.value.get(field_name).is_some()),
+            Err(err) => Err(err.to_string().into()),
+        }
     }
 
     /// Adds a field to the JSON object.
-    pub fn add_field<T: Serialize>(
-        &mut self,
-        raw_field_name: cc_std::std::string_view,
-        value: T,
-    ) -> StatusWrapper {
-        let field_name = match raw_field_name.to_str() {
+    pub fn add_field<T: Serialize>(&mut self, raw_field_name: &[u8], value: T) -> StatusWrapper {
+        let field_name = match std::str::from_utf8(raw_field_name) {
             Ok(field) => field,
             Err(err) => return status::invalid_argument(err.to_string()).into(),
         };
@@ -296,44 +290,28 @@ impl SerdeJson {
     }
 
     /// Adds an integer field to the JSON object.
-    pub fn add_field_int(
-        &mut self,
-        raw_field_name: cc_std::std::string_view,
-        value: i64,
-    ) -> StatusWrapper {
+    pub fn add_field_int(&mut self, raw_field_name: &[u8], value: i64) -> StatusWrapper {
         self.add_field(raw_field_name, value)
     }
 
     /// Adds a boolean field to the JSON object.
-    pub fn add_field_bool(
-        &mut self,
-        raw_field_name: cc_std::std::string_view,
-        value: bool,
-    ) -> StatusWrapper {
+    pub fn add_field_bool(&mut self, raw_field_name: &[u8], value: bool) -> StatusWrapper {
         self.add_field(raw_field_name, value)
     }
 
     /// Adds a double field to the JSON object.
-    pub fn add_field_double(
-        &mut self,
-        raw_field_name: cc_std::std::string_view,
-        value: f64,
-    ) -> StatusWrapper {
+    pub fn add_field_double(&mut self, raw_field_name: &[u8], value: f64) -> StatusWrapper {
         self.add_field(raw_field_name, value)
     }
 
     /// Adds a null field to the JSON object.
-    pub fn add_field_null(&mut self, raw_field_name: cc_std::std::string_view) -> StatusWrapper {
+    pub fn add_field_null(&mut self, raw_field_name: &[u8]) -> StatusWrapper {
         self.add_field(raw_field_name, serde_json::Value::Null)
     }
 
     /// Adds a string field to the JSON object.
-    pub fn add_field_string(
-        &mut self,
-        raw_field_name: cc_std::std::string_view,
-        value_raw: cc_std::std::string_view,
-    ) -> StatusWrapper {
-        let value = match value_raw.to_str() {
+    pub fn add_field_string(&mut self, raw_field_name: &[u8], value_raw: &[u8]) -> StatusWrapper {
+        let value = match std::str::from_utf8(value_raw) {
             Ok(value) => value,
             Err(err) => return status::invalid_argument(err.to_string()).into(),
         };
@@ -341,20 +319,12 @@ impl SerdeJson {
     }
 
     /// Adds an object field to the JSON object.
-    pub fn add_field_object(
-        &mut self,
-        raw_field_name: cc_std::std::string_view,
-        obj: SerdeJson,
-    ) -> StatusWrapper {
+    pub fn add_field_object(&mut self, raw_field_name: &[u8], obj: SerdeJson) -> StatusWrapper {
         self.add_field(raw_field_name, obj.value)
     }
 
     /// Adds an array field to the JSON object.
-    pub fn add_field_array(
-        &mut self,
-        raw_field_name: cc_std::std::string_view,
-        items: &[SerdeJson],
-    ) -> StatusWrapper {
+    pub fn add_field_array(&mut self, raw_field_name: &[u8], items: &[SerdeJson]) -> StatusWrapper {
         self.add_field(
             raw_field_name,
             items.iter().map(|v| v.value.clone()).collect::<Vec<serde_json::Value>>(),
@@ -367,15 +337,5 @@ impl SerdeJson {
     }
 }
 
-// NOTE: b/367916605 - Remove make_result_type and make_vec_type macros.
-make_result_type!(SerdeJson);
-make_result_type!(cc_std::std::string, ResultString);
-make_result_type!(bool, ResultBool);
-make_result_type!(i64, Resulti64);
-make_result_type!(f64, ResultDouble);
-
 make_vec_type!(RawString, VecRawString);
-make_result_type!(VecRawString, ResultVecRawString);
-
 make_vec_type!(SerdeJson, VecSerdeJson);
-make_result_type!(VecSerdeJson, ResultVecSerdeJson);

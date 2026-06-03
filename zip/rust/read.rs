@@ -1,15 +1,11 @@
 // Crubit does not support generic type parameters, so we need to implement
 // BufferedZipArchive and FsZipArchive manually.
 
-use cc_std::std::string_view;
-use rust_vec_u8::VecU8;
+use crate::{BufferedZipFile, FsZipFile, VecU8};
 use std::fmt::{Debug, Formatter};
 use std::fs::File;
 use std::io::{Cursor, Read, Seek};
 use zip::ZipArchive as WrappedZipArchive;
-
-use crate::{BufferedZipFile, FsZipFile};
-use crate::{ResultBufferedZipArchive, ResultBufferedZipFile, ResultFsZipArchive, ResultFsZipFile};
 
 #[derive(Default)]
 pub struct BufferedZipArchive {
@@ -39,28 +35,25 @@ impl BufferedZipArchive {
     /// Creates a new `BufferedZipArchive` from data.
     ///
     /// Returns an error if `data` is not a valid zip archive.
-    pub fn new_from_data(data: VecU8) -> ResultBufferedZipArchive {
+    pub fn new_from_data(data: VecU8) -> Result<BufferedZipArchive, VecU8> {
         let mut archive = Self::default();
         if let Err(e) = archive.open(data) {
-            return ResultBufferedZipArchive::from(anyhow::anyhow!(
-                "Failed to open zip buffer: {}",
-                e
-            ));
+            return Err(VecU8::from(format!("Failed to open zip buffer: {}", e)));
         }
-        ResultBufferedZipArchive::from_ok(archive)
+        Ok(archive)
     }
 
     /// Opens a zip archive from data.
     ///
     /// Returns an error if `data` is not a valid zip archive.
-    fn open(&mut self, data: VecU8) -> anyhow::Result<()> {
+    fn open(&mut self, data: VecU8) -> Result<(), String> {
         let cursor = Cursor::new(data.into_vec());
         match WrappedZipArchive::new(cursor) {
             Ok(reader) => {
                 self.reader = Some(reader);
                 Ok(())
             }
-            Err(e) => Err(e.into()),
+            Err(e) => Err(e.to_string()),
         }
     }
 
@@ -79,13 +72,13 @@ impl BufferedZipArchive {
     ///
     /// Returns an empty zip file if archive is not open.
     /// Returns an error if `index` is out of bounds.
-    pub fn get_file_by_index(&mut self, index: usize) -> ResultBufferedZipFile<'_> {
+    pub fn get_file_by_index(&mut self, index: usize) -> Result<BufferedZipFile<'_>, VecU8> {
         match self.reader.as_mut() {
             Some(reader) => match reader.by_index(index) {
-                Ok(file) => ResultBufferedZipFile::from_ok(BufferedZipFile::new(file)),
-                Err(e) => ResultBufferedZipFile::from(anyhow::Error::from(e)),
+                Ok(file) => Ok(BufferedZipFile::new(file)),
+                Err(e) => Err(VecU8::from(e.to_string())),
             },
-            None => ResultBufferedZipFile::from_ok(BufferedZipFile::default()),
+            None => Ok(BufferedZipFile::default()),
         }
     }
 
@@ -96,13 +89,13 @@ impl BufferedZipArchive {
     ///
     /// Returns an empty zip file if archive is not open.
     /// Returns an error if `index` is out of bounds.
-    pub fn get_file_by_index_raw(&mut self, index: usize) -> ResultBufferedZipFile<'_> {
+    pub fn get_file_by_index_raw(&mut self, index: usize) -> Result<BufferedZipFile<'_>, VecU8> {
         match self.reader.as_mut() {
             Some(reader) => match reader.by_index_raw(index) {
-                Ok(file) => ResultBufferedZipFile::from_ok(BufferedZipFile::new(file)),
-                Err(e) => ResultBufferedZipFile::from(anyhow::Error::from(e)),
+                Ok(file) => Ok(BufferedZipFile::new(file)),
+                Err(e) => Err(VecU8::from(e.to_string())),
             },
-            None => ResultBufferedZipFile::from_ok(BufferedZipFile::default()),
+            None => Ok(BufferedZipFile::default()),
         }
     }
 }
@@ -132,47 +125,35 @@ impl FsZipArchive {
     ///
     /// Returns an error if `path` cannot be opened or is not a valid zip
     /// archive.
-    ///
-    /// # Safety
-    ///
-    /// The memory viewed by `path` must not be mutated by any C++ code during
-    /// the execution of this function. While C++ `std::string_view` provides
-    /// read-only access, the C++ code owning `path` must not modify it via
-    /// other aliases.
-    pub unsafe fn new_from_path(path: string_view) -> ResultFsZipArchive {
+    pub fn new_from_path(path: &[u8]) -> Result<FsZipArchive, VecU8> {
         let mut archive = Self::default();
         if let Err(e) = archive.open(path) {
-            return ResultFsZipArchive::from(anyhow::anyhow!("Failed to open zip archive: {}", e));
+            return Err(VecU8::from(format!("Failed to open zip archive: {}", e)));
         }
-        ResultFsZipArchive::from_ok(archive)
+        Ok(archive)
     }
 
     /// Opens a zip archive from a path.
     ///
     /// Returns an error if the archive is already open, if `path` cannot be
     /// opened, or if `path` does not point to a valid zip archive.
-    ///
-    /// # Safety
-    ///
-    /// The memory viewed by `path` must not be mutated by any C++ code during
-    /// the execution of this function. While C++ `std::string_view` provides
-    /// read-only access, the C++ code owning `path` must not modify it via
-    /// other aliases.
-    unsafe fn open(&mut self, path: string_view) -> anyhow::Result<()> {
+    fn open(&mut self, path: &[u8]) -> Result<(), String> {
         if self.reader.is_some() {
-            return Err(anyhow::anyhow!("Zip archive is already open"));
+            return Err("Zip archive is already open".into());
         }
-        // SAFETY: The caller of `open` must ensure that `path` is valid for
-        // the duration of the call. All borrows in `open` do not outlive `path`.
-        match File::open(String::from_utf8_lossy(unsafe { path.as_bytes() }).as_ref()) {
+        let path_str = match std::str::from_utf8(path) {
+            Ok(s) => s,
+            Err(e) => return Err(e.to_string()),
+        };
+        match File::open(path_str) {
             Ok(file) => match WrappedZipArchive::new(file) {
                 Ok(reader) => {
                     self.reader = Some(reader);
                     Ok(())
                 }
-                Err(e) => Err(e.into()),
+                Err(e) => Err(e.to_string()),
             },
-            Err(e) => Err(e.into()),
+            Err(e) => Err(e.to_string()),
         }
     }
 
@@ -191,13 +172,13 @@ impl FsZipArchive {
     ///
     /// Returns an empty zip file if archive is not open.
     /// Returns an error if `index` is out of bounds.
-    pub fn get_file_by_index(&mut self, index: usize) -> ResultFsZipFile<'_> {
+    pub fn get_file_by_index(&mut self, index: usize) -> Result<FsZipFile<'_>, VecU8> {
         match self.reader.as_mut() {
             Some(reader) => match reader.by_index(index) {
-                Ok(file) => ResultFsZipFile::from_ok(FsZipFile::new(file)),
-                Err(e) => ResultFsZipFile::from(anyhow::Error::from(e)),
+                Ok(file) => Ok(FsZipFile::new(file)),
+                Err(e) => Err(VecU8::from(e.to_string())),
             },
-            None => ResultFsZipFile::from_ok(FsZipFile::default()),
+            None => Ok(FsZipFile::default()),
         }
     }
 
@@ -208,13 +189,13 @@ impl FsZipArchive {
     ///
     /// Returns an empty zip file if archive is not open.
     /// Returns an error if `index` is out of bounds.
-    pub fn get_file_by_index_raw(&mut self, index: usize) -> ResultFsZipFile<'_> {
+    pub fn get_file_by_index_raw(&mut self, index: usize) -> Result<FsZipFile<'_>, VecU8> {
         match self.reader.as_mut() {
             Some(reader) => match reader.by_index_raw(index) {
-                Ok(file) => ResultFsZipFile::from_ok(FsZipFile::new(file)),
-                Err(e) => ResultFsZipFile::from(anyhow::Error::from(e)),
+                Ok(file) => Ok(FsZipFile::new(file)),
+                Err(e) => Err(VecU8::from(e.to_string())),
             },
-            None => ResultFsZipFile::from_ok(FsZipFile::default()),
+            None => Ok(FsZipFile::default()),
         }
     }
 }
