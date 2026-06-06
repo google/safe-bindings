@@ -56,7 +56,7 @@ class NodeView {
   NodeView operator[](const char* key) const {
     return operator[](rs_std::StrRef::FromUtf8Unchecked(key));
   }
-  NodeView operator[](const std::string& key) const {
+  NodeView operator[](absl::string_view key) const {
     return operator[](rs_std::StrRef::FromUtf8Unchecked(key));
   }
 
