@@ -341,7 +341,7 @@ absl::StatusOr<::google::protobuf::Value> SerdeJson::ToProtoValue() const {
   } else if (IsString()) {
     absl::StatusOr<std::string> string_or = GetString();
     if (!string_or.ok()) return string_or.status();
-    *result.mutable_string_value() = std::move(*string_or);
+    result.set_string_value(std::move(*string_or));
   } else if (IsInt()) {
     absl::StatusOr<int64_t> int_or = GetInt();
     if (!int_or.ok()) return int_or.status();
