@@ -7,7 +7,7 @@
 
 #include "converters.h"
 #include "file.h"
-#include "rust/zip_wrapper.h"
+#include "crubit/rust.h"
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
 #include "absl/strings/string_view.h"
@@ -20,7 +20,7 @@ class FsZipWriter;
 class ZipWriterFileOptions {
  public:
   ZipWriterFileOptions()
-      : options_(zip_wrapper::ZipWriterFileOptions::new_()) {}
+      : options_(rust::ZipWriterFileOptions::new_()) {}
 
   absl::Status SetCompressionMethod(CompressionMethod method);
 
@@ -37,7 +37,7 @@ class ZipWriterFileOptions {
   }
 
  private:
-  zip_wrapper::ZipWriterFileOptions options_;
+  rust::ZipWriterFileOptions options_;
   friend class BufferedZipWriter;
   friend class FsZipWriter;
 };
@@ -56,9 +56,9 @@ class BufferedZipWriter final {
   absl::Status WriteFileContent(absl::string_view path);
 
  private:
-  explicit BufferedZipWriter(zip_wrapper::BufferedZipWriter writer)
+  explicit BufferedZipWriter(rust::BufferedZipWriter writer)
       : writer_(std::move(writer)) {}
-  zip_wrapper::BufferedZipWriter writer_;
+  rust::BufferedZipWriter writer_;
 };
 
 class FsZipWriter final {
@@ -75,9 +75,9 @@ class FsZipWriter final {
   absl::Status WriteFileContent(absl::string_view path);
 
  private:
-  explicit FsZipWriter(zip_wrapper::FsZipWriter writer)
+  explicit FsZipWriter(rust::FsZipWriter writer)
       : writer_(std::move(writer)) {}
-  zip_wrapper::FsZipWriter writer_;
+  rust::FsZipWriter writer_;
 };
 
 class ZipWriter final {

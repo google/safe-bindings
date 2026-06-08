@@ -5,7 +5,7 @@
 #include <utility>
 
 #include "crubit_helpers/string_conversions.h"
-#include "rust/zip_wrapper.h"
+#include "crubit/rust.h"
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
 #include "absl/strings/match.h"
@@ -25,7 +25,7 @@ enum class RustCallSite {
   kResultUnit,
 };
 
-std::string FromRustVecU8(const zip_wrapper::VecU8& vec) {
+std::string FromRustVecU8(const rust::VecU8& vec) {
   return std::string(security::crubit_helpers::StringViewFromVecU8(vec));
 }
 
@@ -73,7 +73,7 @@ absl::Status RustErrorToStatus(std::string err_str, RustCallSite call_site) {
 }  // namespace
 
 absl::StatusOr<RustVecU8Wrapper> FromRustResultVecU8(
-    rs_std::Result<zip_wrapper::VecU8, zip_wrapper::VecU8> result_vec_u8) {
+    rs_std::Result<rust::VecU8, rust::VecU8> result_vec_u8) {
   if (!result_vec_u8.has_value()) {
     return RustErrorToStatus(FromRustVecU8(std::move(result_vec_u8).err()),
                              RustCallSite::kResultVecU8);
@@ -82,7 +82,7 @@ absl::StatusOr<RustVecU8Wrapper> FromRustResultVecU8(
 }
 
 absl::Status FromRustResultUnit(
-    rs_std::Result<uint8_t, zip_wrapper::VecU8> result_unit) {
+    rs_std::Result<uint8_t, rust::VecU8> result_unit) {
   if (!result_unit.has_value()) {
     return RustErrorToStatus(FromRustVecU8(std::move(result_unit).err()),
                              RustCallSite::kResultUnit);
@@ -90,8 +90,8 @@ absl::Status FromRustResultUnit(
   return absl::OkStatus();
 }
 
-absl::StatusOr<zip_wrapper::BufferedZipArchive> FromRustBufferedZipArchive(
-    rs_std::Result<zip_wrapper::BufferedZipArchive, zip_wrapper::VecU8>
+absl::StatusOr<rust::BufferedZipArchive> FromRustBufferedZipArchive(
+    rs_std::Result<rust::BufferedZipArchive, rust::VecU8>
         result_buffered_zip_archive) {
   if (!result_buffered_zip_archive.has_value()) {
     return RustErrorToStatus(
@@ -101,8 +101,8 @@ absl::StatusOr<zip_wrapper::BufferedZipArchive> FromRustBufferedZipArchive(
   return std::move(result_buffered_zip_archive).value();
 }
 
-absl::StatusOr<zip_wrapper::FsZipArchive> FromRustFsZipArchive(
-    rs_std::Result<zip_wrapper::FsZipArchive, zip_wrapper::VecU8>
+absl::StatusOr<rust::FsZipArchive> FromRustFsZipArchive(
+    rs_std::Result<rust::FsZipArchive, rust::VecU8>
         result_fs_zip_archive) {
   if (!result_fs_zip_archive.has_value()) {
     return RustErrorToStatus(
@@ -112,8 +112,8 @@ absl::StatusOr<zip_wrapper::FsZipArchive> FromRustFsZipArchive(
   return std::move(result_fs_zip_archive).value();
 }
 
-absl::StatusOr<zip_wrapper::BufferedZipFile> FromRustBufferedZipFile(
-    rs_std::Result<zip_wrapper::BufferedZipFile, zip_wrapper::VecU8>
+absl::StatusOr<rust::BufferedZipFile> FromRustBufferedZipFile(
+    rs_std::Result<rust::BufferedZipFile, rust::VecU8>
         result_buffered_zip_file) {
   if (!result_buffered_zip_file.has_value()) {
     return RustErrorToStatus(
@@ -123,8 +123,8 @@ absl::StatusOr<zip_wrapper::BufferedZipFile> FromRustBufferedZipFile(
   return std::move(result_buffered_zip_file).value();
 }
 
-absl::StatusOr<zip_wrapper::FsZipFile> FromRustFsZipFile(
-    rs_std::Result<zip_wrapper::FsZipFile, zip_wrapper::VecU8>
+absl::StatusOr<rust::FsZipFile> FromRustFsZipFile(
+    rs_std::Result<rust::FsZipFile, rust::VecU8>
         result_fs_zip_file) {
   if (!result_fs_zip_file.has_value()) {
     return RustErrorToStatus(FromRustVecU8(std::move(result_fs_zip_file).err()),
@@ -133,8 +133,8 @@ absl::StatusOr<zip_wrapper::FsZipFile> FromRustFsZipFile(
   return std::move(result_fs_zip_file).value();
 }
 
-absl::StatusOr<zip_wrapper::BufferedZipWriter> FromRustBufferedZipWriter(
-    rs_std::Result<zip_wrapper::BufferedZipWriter, zip_wrapper::VecU8>
+absl::StatusOr<rust::BufferedZipWriter> FromRustBufferedZipWriter(
+    rs_std::Result<rust::BufferedZipWriter, rust::VecU8>
         result_buffered_zip_writer) {
   if (!result_buffered_zip_writer.has_value()) {
     return RustErrorToStatus(
@@ -144,8 +144,8 @@ absl::StatusOr<zip_wrapper::BufferedZipWriter> FromRustBufferedZipWriter(
   return std::move(result_buffered_zip_writer).value();
 }
 
-absl::StatusOr<zip_wrapper::FsZipWriter> FromRustFsZipWriter(
-    rs_std::Result<zip_wrapper::FsZipWriter, zip_wrapper::VecU8>
+absl::StatusOr<rust::FsZipWriter> FromRustFsZipWriter(
+    rs_std::Result<rust::FsZipWriter, rust::VecU8>
         result_fs_zip_writer) {
   if (!result_fs_zip_writer.has_value()) {
     return RustErrorToStatus(

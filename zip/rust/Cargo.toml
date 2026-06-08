@@ -1,0 +1,12 @@
+[package]
+name = "rust"
+version = "0.1.0"
+edition = "2024"
+license-file = "../../LICENSE"
+
+[lib]
+path = "lib.rs"
+doctest = false
+
+[dependencies]
+zip = { version = "6.0", features = ["deflate", "bzip2", "time", "zstd", "lzma", "xz"] }

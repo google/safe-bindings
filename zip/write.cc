@@ -6,7 +6,7 @@
 
 #include "converters.h"
 #include "file.h"
-#include "rust/zip_wrapper.h"
+#include "crubit/rust.h"
 #include "absl/functional/overload.h"
 #include "absl/status/status.h"
 #include "absl/status/status_macros.h"
@@ -17,16 +17,16 @@ namespace security::zip {
 
 namespace {
 
-absl::StatusOr<zip_wrapper::CompressionMethod> ToZipWrapperCompressionMethod(
+absl::StatusOr<rust::CompressionMethod> ToZipWrapperCompressionMethod(
     CompressionMethod method) {
-  return zip_wrapper::CompressionMethod::from_i32(static_cast<int32_t>(method));
+  return rust::CompressionMethod::from_i32(static_cast<int32_t>(method));
 }
 
 }  // namespace
 
 absl::Status ZipWriterFileOptions::SetCompressionMethod(
     CompressionMethod method) {
-  absl::StatusOr<zip_wrapper::CompressionMethod> rust_method =
+  absl::StatusOr<rust::CompressionMethod> rust_method =
       ToZipWrapperCompressionMethod(method);
   if (!rust_method.ok()) return rust_method.status();
   options_ = options_.compression_method(*rust_method);
@@ -35,13 +35,13 @@ absl::Status ZipWriterFileOptions::SetCompressionMethod(
 
 absl::StatusOr<BufferedZipWriter> BufferedZipWriter::NewFromData(
     absl::string_view data, bool append) {
-  zip_wrapper::VecU8 input_data =
-      zip_wrapper::VecU8::copy_from_slice(absl::Span<const uint8_t>(
+  rust::VecU8 input_data =
+      rust::VecU8::copy_from_slice(absl::Span<const uint8_t>(
           reinterpret_cast<const uint8_t*>(data.data()), data.size()));
   ASSIGN_OR_RETURN(
-      zip_wrapper::BufferedZipWriter writer,
+      rust::BufferedZipWriter writer,
       FromRustBufferedZipWriter(
-          zip_wrapper::BufferedZipWriter::new_from_data(input_data, append)));
+          rust::BufferedZipWriter::new_from_data(input_data, append)));
   return BufferedZipWriter(std::move(writer));
 }
 
@@ -66,8 +66,8 @@ absl::Status BufferedZipWriter::AddDirectory(
 }
 
 absl::Status BufferedZipWriter::WriteData(absl::string_view data) {
-  zip_wrapper::VecU8 input_data =
-      zip_wrapper::VecU8::copy_from_slice(absl::Span<const uint8_t>(
+  rust::VecU8 input_data =
+      rust::VecU8::copy_from_slice(absl::Span<const uint8_t>(
           reinterpret_cast<const uint8_t*>(data.data()), data.size()));
   return FromRustResultUnit(writer_.write_data(input_data));
 }
@@ -94,8 +94,8 @@ absl::Status BufferedZipWriter::WriteFileContent(absl::string_view path) {
 absl::StatusOr<FsZipWriter> FsZipWriter::NewFromPath(absl::string_view path,
                                                      bool append) {
   ASSIGN_OR_RETURN(
-      zip_wrapper::FsZipWriter writer,
-      FromRustFsZipWriter(zip_wrapper::FsZipWriter::new_from_path(
+      rust::FsZipWriter writer,
+      FromRustFsZipWriter(rust::FsZipWriter::new_from_path(
           absl::Span<const uint8_t>(
               reinterpret_cast<const uint8_t*>(path.data()), path.size()),
           append)));
@@ -123,8 +123,8 @@ absl::Status FsZipWriter::AddDirectory(absl::string_view file_name,
 }
 
 absl::Status FsZipWriter::WriteData(absl::string_view data) {
-  zip_wrapper::VecU8 input_data =
-      zip_wrapper::VecU8::copy_from_slice(absl::Span<const uint8_t>(
+  rust::VecU8 input_data =
+      rust::VecU8::copy_from_slice(absl::Span<const uint8_t>(
           reinterpret_cast<const uint8_t*>(data.data()), data.size()));
   return FromRustResultUnit(writer_.write_data(input_data));
 }

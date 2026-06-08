@@ -5,7 +5,7 @@
 
 #include "crubit_helpers/string_conversions.h"
 #include "converters.h"
-#include "rust/zip_wrapper.h"
+#include "crubit/rust.h"
 #include "absl/status/status.h"
 #include "absl/status/status_macros.h"
 #include "absl/status/statusor.h"
@@ -14,21 +14,21 @@ namespace security::zip {
 namespace {
 
 absl::StatusOr<CompressionMethod> ToSecurityZipCompressionMethod(
-    zip_wrapper::CompressionMethod rust_method) {
+    rust::CompressionMethod rust_method) {
   switch (rust_method.tag) {
-    case zip_wrapper::CompressionMethod::Tag::Stored:
+    case rust::CompressionMethod::Tag::Stored:
       return CompressionMethod::kStored;
-    case zip_wrapper::CompressionMethod::Tag::Deflated:
+    case rust::CompressionMethod::Tag::Deflated:
       return CompressionMethod::kDeflated;
-    case zip_wrapper::CompressionMethod::Tag::Bzip2:
+    case rust::CompressionMethod::Tag::Bzip2:
       return CompressionMethod::kBzip2;
-    case zip_wrapper::CompressionMethod::Tag::Zstd:
+    case rust::CompressionMethod::Tag::Zstd:
       return CompressionMethod::kZstd;
-    case zip_wrapper::CompressionMethod::Tag::Lzma:
+    case rust::CompressionMethod::Tag::Lzma:
       return CompressionMethod::kLzma;
-    case zip_wrapper::CompressionMethod::Tag::Xz:
+    case rust::CompressionMethod::Tag::Xz:
       return CompressionMethod::kXz;
-    case zip_wrapper::CompressionMethod::Tag::Unsupported:
+    case rust::CompressionMethod::Tag::Unsupported:
       return absl::InvalidArgumentError("Unsupported compression method");
   }
   return absl::InvalidArgumentError("Unknown compression method");
@@ -54,7 +54,7 @@ absl::StatusOr<bool> BufferedZipFile::IsDir() const {
 }
 absl::StatusOr<std::string> BufferedZipFile::GetFileName() const {
   ABSL_RETURN_IF_ERROR(CheckNone());
-  zip_wrapper::VecU8 name_vec = zip_.get_file_name();
+  rust::VecU8 name_vec = zip_.get_file_name();
   return std::string(security::crubit_helpers::StringViewFromVecU8(name_vec));
 }
 absl::StatusOr<CompressionMethod> BufferedZipFile::GetCompressionMethod()
@@ -85,7 +85,7 @@ absl::StatusOr<bool> FsZipFile::IsDir() const {
 }
 absl::StatusOr<std::string> FsZipFile::GetFileName() const {
   ABSL_RETURN_IF_ERROR(CheckNone());
-  zip_wrapper::VecU8 name_vec = zip_.get_file_name();
+  rust::VecU8 name_vec = zip_.get_file_name();
   return std::string(security::crubit_helpers::StringViewFromVecU8(name_vec));
 }
 absl::StatusOr<CompressionMethod> FsZipFile::GetCompressionMethod() const {

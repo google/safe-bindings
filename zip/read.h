@@ -6,7 +6,7 @@
 #include <variant>
 
 #include "file.h"
-#include "rust/zip_wrapper.h"
+#include "crubit/rust.h"
 #include "absl/status/statusor.h"
 #include "absl/strings/string_view.h"
 
@@ -26,8 +26,8 @@ class BufferedZipArchive final {
   absl::StatusOr<ZipFile> GetFileByIndexRaw(uintptr_t index);
 
  private:
-  zip_wrapper::BufferedZipArchive archive_;
-  explicit BufferedZipArchive(zip_wrapper::BufferedZipArchive archive)
+  rust::BufferedZipArchive archive_;
+  explicit BufferedZipArchive(rust::BufferedZipArchive archive)
       : archive_(std::move(archive)) {}
 };
 
@@ -45,8 +45,8 @@ class FsZipArchive final {
   absl::StatusOr<ZipFile> GetFileByIndexRaw(uintptr_t index);
 
  private:
-  zip_wrapper::FsZipArchive archive_;
-  explicit FsZipArchive(zip_wrapper::FsZipArchive archive)
+  rust::FsZipArchive archive_;
+  explicit FsZipArchive(rust::FsZipArchive archive)
       : archive_(std::move(archive)) {}
 };
 

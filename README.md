@@ -10,6 +10,7 @@ C++ wrappers (using Crubit) for Rust libraries.
 | pixel_bridge | [image](https://crates.io/crates/image)           | Compiles |
 | saphyr       | [saphyr](https://crates.io/crates/saphyr)         | Compiles |
 | serde_json   | [serde_json](https://crates.io/crates/serde_json) | Compiles |
+| zip          | [zip](https://crates.io/crates/zip)               | Compiles |
 
 ## Contributing
 

@@ -7,7 +7,7 @@
 #include <variant>
 
 #include "converters.h"
-#include "rust/zip_wrapper.h"
+#include "crubit/rust.h"
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
 
@@ -27,7 +27,7 @@ enum class CompressionMethod : int32_t {
 
 class BufferedZipFile final {
  public:
-  explicit BufferedZipFile(zip_wrapper::BufferedZipFile zip)
+  explicit BufferedZipFile(rust::BufferedZipFile zip)
       : zip_(std::move(zip)) {}
   absl::StatusOr<bool> IsFile() const;
   absl::StatusOr<bool> IsDir() const;
@@ -38,14 +38,14 @@ class BufferedZipFile final {
 
  private:
   absl::Status CheckNone() const;
-  zip_wrapper::BufferedZipFile zip_;
+  rust::BufferedZipFile zip_;
   friend class BufferedZipWriter;
   friend class FsZipWriter;
 };
 
 class FsZipFile final {
  public:
-  explicit FsZipFile(zip_wrapper::FsZipFile zip) : zip_(std::move(zip)) {}
+  explicit FsZipFile(rust::FsZipFile zip) : zip_(std::move(zip)) {}
   absl::StatusOr<bool> IsFile() const;
   absl::StatusOr<bool> IsDir() const;
   bool IsNone() const;
@@ -55,18 +55,18 @@ class FsZipFile final {
 
  private:
   absl::Status CheckNone() const;
-  zip_wrapper::FsZipFile zip_;
+  rust::FsZipFile zip_;
   friend class BufferedZipWriter;
   friend class FsZipWriter;
 };
 
 class ZipFile final {
  public:
-  static ZipFile FromFile(zip_wrapper::FsZipFile zip) {
+  static ZipFile FromFile(rust::FsZipFile zip) {
     return ZipFile(FsZipFile(std::move(zip)));
   }
 
-  static ZipFile FromBuffer(zip_wrapper::BufferedZipFile zip) {
+  static ZipFile FromBuffer(rust::BufferedZipFile zip) {
     return ZipFile(BufferedZipFile(std::move(zip)));
   }
 
