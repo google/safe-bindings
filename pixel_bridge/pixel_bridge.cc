@@ -1,6 +1,7 @@
 #include "pixel_bridge.h"
 
 #include <array>
+#include <cstddef>
 #include <cstdint>
 #include <optional>
 #include <string>
@@ -356,6 +357,55 @@ absl::StatusOr<ImageDecoder> ImageReader::IntoDecoder() && {
         StringViewFromVecU8(std::move(decoder).err()));
   }
   return ImageDecoder(std::move(decoder).value());
+}
+absl::StatusOr<std::vector<std::pair<std::string, std::string>>>
+ImageReader::ExtractPngTextMetadata(absl::string_view png_string) {
+  absl::Span<const uint8_t> span(
+      reinterpret_cast<const uint8_t*>(png_string.data()), png_string.size());
+  rs_std::Result<rust::vec_u8::VecU8, rust::vec_u8::VecU8>
+      result = rust::reader::extract_png_text_metadata(span);
+  if (!result.has_value()) {
+    return absl::InvalidArgumentError(
+        StringViewFromVecU8(std::move(result).err()));
+  }
+  rust::vec_u8::VecU8 vec = std::move(result).value();
+  absl::string_view serialized = StringViewFromVecU8(vec);
+  std::vector<std::pair<std::string, std::string>> metadata;
+  size_t idx = 0;
+  auto decode_le32 = [](const char* data) -> uint32_t {
+    return static_cast<uint8_t>(data[0]) |
+           (static_cast<uint8_t>(data[1]) << 8) |
+           (static_cast<uint8_t>(data[2]) << 16) |
+           (static_cast<uint8_t>(data[3]) << 24);
+  };
+  while (serialized.size() - idx >= 4) {
+    uint32_t key_len = decode_le32(serialized.data() + idx);
+    idx += 4;
+    if (key_len > serialized.size() - idx) {
+      return absl::InvalidArgumentError("Truncated serialized metadata key");
+    }
+    std::string key(serialized.substr(idx, key_len));
+    idx += key_len;
+
+    if (serialized.size() - idx < 4) {
+      return absl::InvalidArgumentError(
+          "Missing serialized metadata value length");
+    }
+    uint32_t val_len = decode_le32(serialized.data() + idx);
+    idx += 4;
+    if (val_len > serialized.size() - idx) {
+      return absl::InvalidArgumentError("Truncated serialized metadata value");
+    }
+    std::string val(serialized.substr(idx, val_len));
+    idx += val_len;
+
+    metadata.push_back({std::move(key), std::move(val)});
+  }
+  if (idx < serialized.size()) {
+    return absl::InvalidArgumentError(
+        "Trailing unparsed bytes in serialized metadata");
+  }
+  return metadata;
 }
 
 }  // namespace security::pixel_bridge
