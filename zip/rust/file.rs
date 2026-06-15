@@ -1,7 +1,7 @@
 // Crubit does not support generic type parameters, so we need to implement
 // BufferedZipFile and FsZipFile manually.
 
-use crate::{write::CompressionMethod, VecU8};
+use crate::{write::CompressionMethod, VecU8, ZipError};
 use std::fmt::{Debug, Formatter};
 use std::fs::File;
 use std::io::{Cursor, Error, ErrorKind, Read};
@@ -66,7 +66,7 @@ impl<'a> BufferedZipFile<'a> {
 
     /// Returns the data of the file.
     /// The result only is valid if `is_none()` returns false.
-    pub fn get_file_data(&mut self) -> Result<VecU8, VecU8> {
+    pub fn get_file_data(&mut self) -> Result<VecU8, ZipError> {
         get_file_data_impl(&mut self.file)
     }
 }
@@ -137,7 +137,7 @@ impl<'a> FsZipFile<'a> {
 
     /// Returns the data of the file.
     /// The result only is valid if `is_none()` returns false.
-    pub fn get_file_data(&mut self) -> Result<VecU8, VecU8> {
+    pub fn get_file_data(&mut self) -> Result<VecU8, ZipError> {
         get_file_data_impl(&mut self.file)
     }
 }
@@ -191,13 +191,13 @@ fn get_compression_method_impl<'a, R: Read>(
 
 fn get_file_data_impl<'a, R: Read>(
     file: &mut Option<WrappedZipFile<'a, R>>,
-) -> Result<VecU8, VecU8> {
+) -> Result<VecU8, ZipError> {
     match file.as_mut() {
         Some(file) => {
             let mut buffer = Vec::new();
             match file.read_to_end(&mut buffer) {
                 Ok(_) => Ok(buffer.into()),
-                Err(e) => Err(VecU8::from(e.to_string())),
+                Err(e) => Err(ZipError::internal(e.to_string())),
             }
         }
         None => Ok(VecU8::default()),

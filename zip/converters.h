@@ -1,6 +1,7 @@
 #ifndef SECURITY_ZIP_CONVERTERS_H_
 #define SECURITY_ZIP_CONVERTERS_H_
 
+#include <cstdint>
 #include <utility>
 
 #include "crubit_helpers/string_conversions.h"
@@ -37,29 +38,29 @@ class RustVecU8Wrapper {
 };
 
 absl::StatusOr<RustVecU8Wrapper> FromRustResultVecU8(
-    rs_std::Result<rust::VecU8, rust::VecU8> result_vec_u8);
+    rs_std::Result<rust::VecU8, rust::ZipError> result_vec_u8);
 absl::Status FromRustResultUnit(
-    rs_std::Result<uint8_t, rust::VecU8> result_unit);
+    rs_std::Result<uint8_t, rust::ZipError> result_unit);
 
 absl::StatusOr<rust::BufferedZipArchive> FromRustBufferedZipArchive(
-    rs_std::Result<rust::BufferedZipArchive, rust::VecU8>
+    rs_std::Result<rust::BufferedZipArchive, rust::ZipError>
         result_buffered_zip_archive);
 absl::StatusOr<rust::FsZipArchive> FromRustFsZipArchive(
-    rs_std::Result<rust::FsZipArchive, rust::VecU8>
+    rs_std::Result<rust::FsZipArchive, rust::ZipError>
         result_fs_zip_archive);
 
 absl::StatusOr<rust::BufferedZipFile> FromRustBufferedZipFile(
-    rs_std::Result<rust::BufferedZipFile, rust::VecU8>
+    rs_std::Result<rust::BufferedZipFile, rust::ZipError>
         result_buffered_zip_file);
 absl::StatusOr<rust::FsZipFile> FromRustFsZipFile(
-    rs_std::Result<rust::FsZipFile, rust::VecU8>
+    rs_std::Result<rust::FsZipFile, rust::ZipError>
         result_fs_zip_file);
 
 absl::StatusOr<rust::BufferedZipWriter> FromRustBufferedZipWriter(
-    rs_std::Result<rust::BufferedZipWriter, rust::VecU8>
+    rs_std::Result<rust::BufferedZipWriter, rust::ZipError>
         result_buffered_zip_writer);
 absl::StatusOr<rust::FsZipWriter> FromRustFsZipWriter(
-    rs_std::Result<rust::FsZipWriter, rust::VecU8>
+    rs_std::Result<rust::FsZipWriter, rust::ZipError>
         result_fs_zip_writer);
 
 }  // namespace security::zip

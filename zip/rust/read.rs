@@ -1,7 +1,7 @@
 // Crubit does not support generic type parameters, so we need to implement
 // BufferedZipArchive and FsZipArchive manually.
 
-use crate::{BufferedZipFile, FsZipFile, VecU8};
+use crate::{BufferedZipFile, FsZipFile, VecU8, ZipError};
 use std::fmt::{Debug, Formatter};
 use std::fs::File;
 use std::io::{Cursor, Read, Seek};
@@ -35,10 +35,10 @@ impl BufferedZipArchive {
     /// Creates a new `BufferedZipArchive` from data.
     ///
     /// Returns an error if `data` is not a valid zip archive.
-    pub fn new_from_data(data: VecU8) -> Result<BufferedZipArchive, VecU8> {
+    pub fn new_from_data(data: VecU8) -> Result<BufferedZipArchive, ZipError> {
         let mut archive = Self::default();
         if let Err(e) = archive.open(data) {
-            return Err(VecU8::from(format!("Failed to open zip buffer: {}", e)));
+            return Err(ZipError::invalid_argument(format!("Failed to open zip buffer: {}", e)));
         }
         Ok(archive)
     }
@@ -72,11 +72,11 @@ impl BufferedZipArchive {
     ///
     /// Returns an empty zip file if archive is not open.
     /// Returns an error if `index` is out of bounds.
-    pub fn get_file_by_index(&mut self, index: usize) -> Result<BufferedZipFile<'_>, VecU8> {
+    pub fn get_file_by_index(&mut self, index: usize) -> Result<BufferedZipFile<'_>, ZipError> {
         match self.reader.as_mut() {
             Some(reader) => match reader.by_index(index) {
                 Ok(file) => Ok(BufferedZipFile::new(file)),
-                Err(e) => Err(VecU8::from(e.to_string())),
+                Err(e) => Err(ZipError::out_of_range(e.to_string())),
             },
             None => Ok(BufferedZipFile::default()),
         }
@@ -89,11 +89,11 @@ impl BufferedZipArchive {
     ///
     /// Returns an empty zip file if archive is not open.
     /// Returns an error if `index` is out of bounds.
-    pub fn get_file_by_index_raw(&mut self, index: usize) -> Result<BufferedZipFile<'_>, VecU8> {
+    pub fn get_file_by_index_raw(&mut self, index: usize) -> Result<BufferedZipFile<'_>, ZipError> {
         match self.reader.as_mut() {
             Some(reader) => match reader.by_index_raw(index) {
                 Ok(file) => Ok(BufferedZipFile::new(file)),
-                Err(e) => Err(VecU8::from(e.to_string())),
+                Err(e) => Err(ZipError::out_of_range(e.to_string())),
             },
             None => Ok(BufferedZipFile::default()),
         }
@@ -125,10 +125,10 @@ impl FsZipArchive {
     ///
     /// Returns an error if `path` cannot be opened or is not a valid zip
     /// archive.
-    pub fn new_from_path(path: &[u8]) -> Result<FsZipArchive, VecU8> {
+    pub fn new_from_path(path: &[u8]) -> Result<FsZipArchive, ZipError> {
         let mut archive = Self::default();
         if let Err(e) = archive.open(path) {
-            return Err(VecU8::from(format!("Failed to open zip archive: {}", e)));
+            return Err(ZipError::invalid_argument(format!("Failed to open zip archive: {}", e)));
         }
         Ok(archive)
     }
@@ -172,11 +172,11 @@ impl FsZipArchive {
     ///
     /// Returns an empty zip file if archive is not open.
     /// Returns an error if `index` is out of bounds.
-    pub fn get_file_by_index(&mut self, index: usize) -> Result<FsZipFile<'_>, VecU8> {
+    pub fn get_file_by_index(&mut self, index: usize) -> Result<FsZipFile<'_>, ZipError> {
         match self.reader.as_mut() {
             Some(reader) => match reader.by_index(index) {
                 Ok(file) => Ok(FsZipFile::new(file)),
-                Err(e) => Err(VecU8::from(e.to_string())),
+                Err(e) => Err(ZipError::out_of_range(e.to_string())),
             },
             None => Ok(FsZipFile::default()),
         }
@@ -189,11 +189,11 @@ impl FsZipArchive {
     ///
     /// Returns an empty zip file if archive is not open.
     /// Returns an error if `index` is out of bounds.
-    pub fn get_file_by_index_raw(&mut self, index: usize) -> Result<FsZipFile<'_>, VecU8> {
+    pub fn get_file_by_index_raw(&mut self, index: usize) -> Result<FsZipFile<'_>, ZipError> {
         match self.reader.as_mut() {
             Some(reader) => match reader.by_index_raw(index) {
                 Ok(file) => Ok(FsZipFile::new(file)),
-                Err(e) => Err(VecU8::from(e.to_string())),
+                Err(e) => Err(ZipError::out_of_range(e.to_string())),
             },
             None => Ok(FsZipFile::default()),
         }

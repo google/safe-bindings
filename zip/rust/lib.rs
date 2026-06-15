@@ -15,3 +15,6 @@ pub use write::{BufferedZipWriter, CompressionMethod, FsZipWriter, ZipWriterFile
 
 mod vec_u8;
 pub use vec_u8::VecU8;
+
+mod error;
+pub use error::{ZipError, ZipErrorCode};

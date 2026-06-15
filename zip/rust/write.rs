@@ -1,7 +1,7 @@
 // Crubit does not support generic type parameters, so we need to implement
 // BufferedZipWriter and FsZipWriter manually.
 
-use crate::{BufferedZipFile, FsZipFile, VecU8};
+use crate::{BufferedZipFile, FsZipFile, VecU8, ZipError};
 use std::fmt::{Debug, Formatter};
 use std::fs::{File, OpenOptions};
 use std::io::{copy, Cursor, Read, Seek, Write};
@@ -180,10 +180,10 @@ impl BufferedZipWriter {
     }
 
     /// Creates a new `BufferedZipWriter` from a byte vector.
-    pub fn new_from_data(data: VecU8, append: bool) -> Result<BufferedZipWriter, VecU8> {
+    pub fn new_from_data(data: VecU8, append: bool) -> Result<BufferedZipWriter, ZipError> {
         let mut writer = Self::default();
         if let Err(e) = writer.open(data, append) {
-            return Err(VecU8::from(format!("Failed to open zip buffer: {}", e)));
+            return Err(ZipError::invalid_argument(format!("Failed to open zip buffer: {}", e)));
         }
         Ok(writer)
     }
@@ -212,19 +212,23 @@ impl BufferedZipWriter {
     }
 
     /// Finishes writing the zip archive and returns the buffered data.
-    pub fn finish(&mut self) -> Result<VecU8, VecU8> {
+    pub fn finish(&mut self) -> Result<VecU8, ZipError> {
         if let Some(writer) = self.writer.take() {
             match writer.finish() {
                 Ok(cursor) => Ok(cursor.into_inner().into()),
-                Err(e) => Err(VecU8::from(e.to_string())),
+                Err(e) => Err(ZipError::internal(e.to_string())),
             }
         } else {
-            Err(VecU8::from("writer is not open"))
+            Err(ZipError::failed_precondition("writer is not open"))
         }
     }
 
     /// Creates a new file in the zip archive and start writing to it.
-    pub fn start_file(&mut self, name: &[u8], options: ZipWriterFileOptions) -> Result<u8, VecU8> {
+    pub fn start_file(
+        &mut self,
+        name: &[u8],
+        options: ZipWriterFileOptions,
+    ) -> Result<u8, ZipError> {
         start_file_impl(&mut self.writer, name, options)
     }
 
@@ -233,12 +237,12 @@ impl BufferedZipWriter {
         &mut self,
         name: &[u8],
         options: ZipWriterFileOptions,
-    ) -> Result<u8, VecU8> {
+    ) -> Result<u8, ZipError> {
         add_directory_impl(&mut self.writer, name, options)
     }
 
     /// Writes data to the current file in the zip archive.
-    pub fn write_data(&mut self, data: VecU8) -> Result<u8, VecU8> {
+    pub fn write_data(&mut self, data: VecU8) -> Result<u8, ZipError> {
         write_data_impl(&mut self.writer, data)
     }
 
@@ -249,17 +253,17 @@ impl BufferedZipWriter {
     pub fn write_buffered_zip_file_content(
         &mut self,
         file: &mut BufferedZipFile,
-    ) -> Result<u8, VecU8> {
+    ) -> Result<u8, ZipError> {
         do_copy_impl(&mut self.writer, file)
     }
 
     /// Writes file content from a `FsZipFile` to the current file in the zip archive.
-    pub fn write_fs_zip_file_content(&mut self, file: &mut FsZipFile) -> Result<u8, VecU8> {
+    pub fn write_fs_zip_file_content(&mut self, file: &mut FsZipFile) -> Result<u8, ZipError> {
         do_copy_impl(&mut self.writer, file)
     }
 
     /// Writes file content from a path to the current file in the zip archive.
-    pub fn write_file_content(&mut self, path: &[u8]) -> Result<u8, VecU8> {
+    pub fn write_file_content(&mut self, path: &[u8]) -> Result<u8, ZipError> {
         write_file_content_impl(&mut self.writer, path)
     }
 }
@@ -285,10 +289,10 @@ impl FsZipWriter {
     }
 
     /// Creates a new `FsZipWriter` from a path.
-    pub fn new_from_path(path: &[u8], append: bool) -> Result<FsZipWriter, VecU8> {
+    pub fn new_from_path(path: &[u8], append: bool) -> Result<FsZipWriter, ZipError> {
         let mut writer = Self::default();
         if let Err(e) = writer.open(path, append) {
-            return Err(VecU8::from(format!("Failed to open zip archive: {}", e)));
+            return Err(ZipError::invalid_argument(format!("Failed to open zip archive: {}", e)));
         }
         Ok(writer)
     }
@@ -333,19 +337,23 @@ impl FsZipWriter {
 
     /// Finishes writing the zip archive to file.
     // NOTE: b/517030085 - Crubit doesn't seem to support the unit type here, so using a u8 for now.
-    pub fn finish(&mut self) -> Result<u8, VecU8> {
+    pub fn finish(&mut self) -> Result<u8, ZipError> {
         if let Some(writer) = self.writer.take() {
             match writer.finish() {
                 Ok(_) => Ok(0),
-                Err(e) => Err(VecU8::from(e.to_string())),
+                Err(e) => Err(ZipError::internal(e.to_string())),
             }
         } else {
-            Err(VecU8::from("writer is not open"))
+            Err(ZipError::failed_precondition("writer is not open"))
         }
     }
 
     /// Creates a new file in the zip archive and start writing to it.
-    pub fn start_file(&mut self, name: &[u8], options: ZipWriterFileOptions) -> Result<u8, VecU8> {
+    pub fn start_file(
+        &mut self,
+        name: &[u8],
+        options: ZipWriterFileOptions,
+    ) -> Result<u8, ZipError> {
         start_file_impl(&mut self.writer, name, options)
     }
 
@@ -354,12 +362,12 @@ impl FsZipWriter {
         &mut self,
         name: &[u8],
         options: ZipWriterFileOptions,
-    ) -> Result<u8, VecU8> {
+    ) -> Result<u8, ZipError> {
         add_directory_impl(&mut self.writer, name, options)
     }
 
     /// Writes data to the current file in the zip archive.
-    pub fn write_data(&mut self, data: VecU8) -> Result<u8, VecU8> {
+    pub fn write_data(&mut self, data: VecU8) -> Result<u8, ZipError> {
         write_data_impl(&mut self.writer, data)
     }
 
@@ -370,17 +378,17 @@ impl FsZipWriter {
     pub fn write_buffered_zip_file_content(
         &mut self,
         file: &mut BufferedZipFile,
-    ) -> Result<u8, VecU8> {
+    ) -> Result<u8, ZipError> {
         do_copy_impl(&mut self.writer, file)
     }
 
     /// Writes file content from a `FsZipFile` to the current file in the zip archive.
-    pub fn write_fs_zip_file_content(&mut self, file: &mut FsZipFile) -> Result<u8, VecU8> {
+    pub fn write_fs_zip_file_content(&mut self, file: &mut FsZipFile) -> Result<u8, ZipError> {
         do_copy_impl(&mut self.writer, file)
     }
 
     /// Writes file content from a path to the current file in the zip archive.
-    pub fn write_file_content(&mut self, path: &[u8]) -> Result<u8, VecU8> {
+    pub fn write_file_content(&mut self, path: &[u8]) -> Result<u8, ZipError> {
         write_file_content_impl(&mut self.writer, path)
     }
 }
@@ -390,19 +398,19 @@ fn start_file_impl<W: Write + Seek>(
     writer: &mut Option<WrappedZipWriter<W>>,
     name: &[u8],
     options: ZipWriterFileOptions,
-) -> Result<u8, VecU8> {
+) -> Result<u8, ZipError> {
     if let Some(writer) = writer.as_mut() {
         let name_lossy = String::from_utf8_lossy(name);
         let name_str = name_lossy.as_ref();
         match FileOptions::try_from(&options) {
             Ok(file_options) => match writer.start_file(name_str, file_options) {
                 Ok(_) => Ok(0),
-                Err(e) => Err(VecU8::from(e.to_string())),
+                Err(e) => Err(ZipError::internal(e.to_string())),
             },
-            Err(e) => Err(VecU8::from(e.to_string())),
+            Err(e) => Err(ZipError::invalid_argument(e.to_string())),
         }
     } else {
-        Err(VecU8::from("writer is not open"))
+        Err(ZipError::failed_precondition("writer is not open"))
     }
 }
 
@@ -411,19 +419,19 @@ fn add_directory_impl<W: Write + Seek>(
     writer: &mut Option<WrappedZipWriter<W>>,
     name: &[u8],
     options: ZipWriterFileOptions,
-) -> Result<u8, VecU8> {
+) -> Result<u8, ZipError> {
     if let Some(writer) = writer.as_mut() {
         let name_lossy = String::from_utf8_lossy(name);
         let name_str = name_lossy.as_ref();
         match FileOptions::try_from(&options) {
             Ok(file_options) => match writer.add_directory(name_str, file_options) {
                 Ok(_) => Ok(0),
-                Err(e) => Err(VecU8::from(e.to_string())),
+                Err(e) => Err(ZipError::internal(e.to_string())),
             },
-            Err(e) => Err(VecU8::from(e.to_string())),
+            Err(e) => Err(ZipError::invalid_argument(e.to_string())),
         }
     } else {
-        Err(VecU8::from("writer is not open"))
+        Err(ZipError::failed_precondition("writer is not open"))
     }
 }
 
@@ -431,14 +439,14 @@ fn add_directory_impl<W: Write + Seek>(
 fn write_data_impl<W: Write + Seek>(
     writer: &mut Option<WrappedZipWriter<W>>,
     data: VecU8,
-) -> Result<u8, VecU8> {
+) -> Result<u8, ZipError> {
     if let Some(writer) = writer.as_mut() {
         match writer.write_all(data.as_slice()) {
             Ok(_) => Ok(0),
-            Err(e) => Err(VecU8::from(e.to_string())),
+            Err(e) => Err(ZipError::internal(e.to_string())),
         }
     } else {
-        Err(VecU8::from("writer is not open"))
+        Err(ZipError::failed_precondition("writer is not open"))
     }
 }
 
@@ -446,14 +454,14 @@ fn write_data_impl<W: Write + Seek>(
 fn do_copy_impl<W: Write + Seek, R: Read>(
     writer: &mut Option<WrappedZipWriter<W>>,
     reader: &mut R,
-) -> Result<u8, VecU8> {
+) -> Result<u8, ZipError> {
     if let Some(writer) = writer.as_mut() {
         match copy(reader, writer) {
             Ok(_) => Ok(0),
-            Err(e) => Err(VecU8::from(e.to_string())),
+            Err(e) => Err(ZipError::internal(e.to_string())),
         }
     } else {
-        Err(VecU8::from("writer is not open"))
+        Err(ZipError::failed_precondition("writer is not open"))
     }
 }
 
@@ -461,18 +469,18 @@ fn do_copy_impl<W: Write + Seek, R: Read>(
 fn write_file_content_impl<W: Write + Seek>(
     writer: &mut Option<WrappedZipWriter<W>>,
     path: &[u8],
-) -> Result<u8, VecU8> {
+) -> Result<u8, ZipError> {
     if let Some(writer) = writer.as_mut() {
         let path_lossy = String::from_utf8_lossy(path);
         let path_str = path_lossy.as_ref();
         match File::open(path_str) {
             Ok(mut file) => match copy(&mut file, writer) {
                 Ok(_) => Ok(0),
-                Err(e) => Err(VecU8::from(e.to_string())),
+                Err(e) => Err(ZipError::internal(e.to_string())),
             },
-            Err(e) => Err(VecU8::from(e.to_string())),
+            Err(e) => Err(ZipError::internal(e.to_string())),
         }
     } else {
-        Err(VecU8::from("writer is not open"))
+        Err(ZipError::failed_precondition("writer is not open"))
     }
 }

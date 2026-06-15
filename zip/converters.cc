@@ -8,149 +8,98 @@
 #include "crubit/rust.h"
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
-#include "absl/strings/match.h"
 
 namespace security::zip {
 
 namespace {
 
-enum class RustCallSite {
-  kBufferedZipArchive,
-  kFsZipArchive,
-  kBufferedZipFile,
-  kFsZipFile,
-  kBufferedZipWriter,
-  kFsZipWriter,
-  kResultVecU8,
-  kResultUnit,
-};
-
 std::string FromRustVecU8(const rust::VecU8& vec) {
   return std::string(security::crubit_helpers::StringViewFromVecU8(vec));
 }
 
-// NOTE: b/351976355 - Send the code from Rust to return a more
-// concrete & informative status.
-absl::Status RustErrorToStatus(std::string err_str, RustCallSite call_site) {
-  switch (call_site) {
-    // From: read.rs:BufferedZipArchive::new_from_data
-    case RustCallSite::kBufferedZipArchive:
-    // From: read.rs:FsZipArchive::new_from_path
-    case RustCallSite::kFsZipArchive:
-      return absl::InvalidArgumentError(err_str);
-    // From: read.rs:BufferedZipArchive::get_file_by_index
-    case RustCallSite::kBufferedZipFile:
-    // From: read.rs:FsZipArchive::get_file_by_index
-    case RustCallSite::kFsZipFile:
-      return absl::OutOfRangeError(err_str);
-    // From: write.rs:BufferedZipWriter::new_from_data
-    case RustCallSite::kBufferedZipWriter:
-    // From: write.rs:FsZipWriter::new_from_path
-    case RustCallSite::kFsZipWriter:
-      return absl::InvalidArgumentError(err_str);
-    case RustCallSite::kResultVecU8:
-      // From: write.rs:BufferedZipWriter::finish
-      if (absl::StrContains(err_str, "writer is not open")) {
-        return absl::FailedPreconditionError(err_str);
-      }
-      return absl::InternalError(err_str);
-    case RustCallSite::kResultUnit:
-      // From: write.rs:FsZipWriter::finish
-      // From: write.rs:add_directory_impl
-      // From: write.rs:start_file_impl
-      // From: write.rs:write_data_impl
-      // From: write.rs:do_copy_impl
-      // From: write.rs:write_file_content_impl
-      if (absl::StrContains(err_str, "writer is not open")) {
-        return absl::FailedPreconditionError(err_str);
-      }
-      return absl::InternalError(err_str);
-    default:
-      return absl::InternalError(err_str);
+absl::Status ZipErrorToStatus(rust::ZipError err) {
+  std::string msg = FromRustVecU8(err.message);
+  switch (err.code.tag) {
+    case rust::ZipErrorCode::Tag::InvalidArgument:
+      return absl::InvalidArgumentError(msg);
+    case rust::ZipErrorCode::Tag::OutOfRange:
+      return absl::OutOfRangeError(msg);
+    case rust::ZipErrorCode::Tag::FailedPrecondition:
+      return absl::FailedPreconditionError(msg);
+    case rust::ZipErrorCode::Tag::Internal:
+      return absl::InternalError(msg);
   }
+  return absl::InternalError(msg);
 }
 
 }  // namespace
 
 absl::StatusOr<RustVecU8Wrapper> FromRustResultVecU8(
-    rs_std::Result<rust::VecU8, rust::VecU8> result_vec_u8) {
+    rs_std::Result<rust::VecU8, rust::ZipError> result_vec_u8) {
   if (!result_vec_u8.has_value()) {
-    return RustErrorToStatus(FromRustVecU8(std::move(result_vec_u8).err()),
-                             RustCallSite::kResultVecU8);
+    return ZipErrorToStatus(std::move(result_vec_u8).err());
   }
   return RustVecU8Wrapper(std::move(result_vec_u8).value());
 }
 
 absl::Status FromRustResultUnit(
-    rs_std::Result<uint8_t, rust::VecU8> result_unit) {
+    rs_std::Result<uint8_t, rust::ZipError> result_unit) {
   if (!result_unit.has_value()) {
-    return RustErrorToStatus(FromRustVecU8(std::move(result_unit).err()),
-                             RustCallSite::kResultUnit);
+    return ZipErrorToStatus(std::move(result_unit).err());
   }
   return absl::OkStatus();
 }
 
 absl::StatusOr<rust::BufferedZipArchive> FromRustBufferedZipArchive(
-    rs_std::Result<rust::BufferedZipArchive, rust::VecU8>
+    rs_std::Result<rust::BufferedZipArchive, rust::ZipError>
         result_buffered_zip_archive) {
   if (!result_buffered_zip_archive.has_value()) {
-    return RustErrorToStatus(
-        FromRustVecU8(std::move(result_buffered_zip_archive).err()),
-        RustCallSite::kBufferedZipArchive);
+    return ZipErrorToStatus(std::move(result_buffered_zip_archive).err());
   }
   return std::move(result_buffered_zip_archive).value();
 }
 
 absl::StatusOr<rust::FsZipArchive> FromRustFsZipArchive(
-    rs_std::Result<rust::FsZipArchive, rust::VecU8>
+    rs_std::Result<rust::FsZipArchive, rust::ZipError>
         result_fs_zip_archive) {
   if (!result_fs_zip_archive.has_value()) {
-    return RustErrorToStatus(
-        FromRustVecU8(std::move(result_fs_zip_archive).err()),
-        RustCallSite::kFsZipArchive);
+    return ZipErrorToStatus(std::move(result_fs_zip_archive).err());
   }
   return std::move(result_fs_zip_archive).value();
 }
 
 absl::StatusOr<rust::BufferedZipFile> FromRustBufferedZipFile(
-    rs_std::Result<rust::BufferedZipFile, rust::VecU8>
+    rs_std::Result<rust::BufferedZipFile, rust::ZipError>
         result_buffered_zip_file) {
   if (!result_buffered_zip_file.has_value()) {
-    return RustErrorToStatus(
-        FromRustVecU8(std::move(result_buffered_zip_file).err()),
-        RustCallSite::kBufferedZipFile);
+    return ZipErrorToStatus(std::move(result_buffered_zip_file).err());
   }
   return std::move(result_buffered_zip_file).value();
 }
 
 absl::StatusOr<rust::FsZipFile> FromRustFsZipFile(
-    rs_std::Result<rust::FsZipFile, rust::VecU8>
+    rs_std::Result<rust::FsZipFile, rust::ZipError>
         result_fs_zip_file) {
   if (!result_fs_zip_file.has_value()) {
-    return RustErrorToStatus(FromRustVecU8(std::move(result_fs_zip_file).err()),
-                             RustCallSite::kFsZipFile);
+    return ZipErrorToStatus(std::move(result_fs_zip_file).err());
   }
   return std::move(result_fs_zip_file).value();
 }
 
 absl::StatusOr<rust::BufferedZipWriter> FromRustBufferedZipWriter(
-    rs_std::Result<rust::BufferedZipWriter, rust::VecU8>
+    rs_std::Result<rust::BufferedZipWriter, rust::ZipError>
         result_buffered_zip_writer) {
   if (!result_buffered_zip_writer.has_value()) {
-    return RustErrorToStatus(
-        FromRustVecU8(std::move(result_buffered_zip_writer).err()),
-        RustCallSite::kBufferedZipWriter);
+    return ZipErrorToStatus(std::move(result_buffered_zip_writer).err());
   }
   return std::move(result_buffered_zip_writer).value();
 }
 
 absl::StatusOr<rust::FsZipWriter> FromRustFsZipWriter(
-    rs_std::Result<rust::FsZipWriter, rust::VecU8>
+    rs_std::Result<rust::FsZipWriter, rust::ZipError>
         result_fs_zip_writer) {
   if (!result_fs_zip_writer.has_value()) {
-    return RustErrorToStatus(
-        FromRustVecU8(std::move(result_fs_zip_writer).err()),
-        RustCallSite::kFsZipWriter);
+    return ZipErrorToStatus(std::move(result_fs_zip_writer).err());
   }
   return std::move(result_fs_zip_writer).value();
 }
