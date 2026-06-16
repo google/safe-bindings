@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <optional>
 #include <string>
+#include <utility>
 #include <variant>
 #include <vector>
 
@@ -230,6 +231,11 @@ class ImageReader final {
   //
   // Guesses the format and constructs the correct decoder for the format.
   absl::StatusOr<ImageDecoder> IntoDecoder() &&;
+
+  // Extracts all PNG text chunks (tEXt, zTXt, iTXt) as key-value pairs.
+  // Returns an error if parsing fails.
+  static absl::StatusOr<std::vector<std::pair<std::string, std::string>>>
+  ExtractPngTextMetadata(absl::string_view png_string);
 
  private:
   explicit ImageReader(rust::reader::ImageReader reader);

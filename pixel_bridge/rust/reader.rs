@@ -8,6 +8,7 @@ use image::{
     codecs::png::PngDecoder as RustPngDecoder, codecs::tiff::TiffDecoder as RustTiffDecoder,
     codecs::webp::WebPDecoder as RustWebPDecoder, ImageFormat, ImageReader as RustImageReader,
 };
+use png as png_crate;
 use std::fs::File;
 use std::io::{BufRead, BufReader, Cursor, Read, Seek};
 
@@ -199,4 +200,92 @@ fn ico(d: RustImageReader<Box<dyn ReadSeek>>) -> Result<ImageDecoder, String> {
     Ok(ImageDecoder::new(GenericImageDecoder::Ico(Box::new(
         RustIcoDecoder::new(d.into_inner()).map_err(|e| e.to_string())?,
     ))))
+}
+
+pub fn extract_png_text_metadata(
+    png_data: &[u8],
+) -> Result<crate::vec_u8::VecU8, crate::vec_u8::VecU8> {
+    let decoder = png_crate::Decoder::new(std::io::Cursor::new(png_data));
+    let reader = decoder.read_info().map_err(|e| crate::vec_u8::VecU8::from(e.to_string()))?;
+    let info = reader.info();
+
+    let mut serialized = Vec::new();
+
+    let mut append_entry = |key: &str, text: &str| {
+        let key_bytes = key.as_bytes();
+        let val_bytes = text.as_bytes();
+        serialized.extend_from_slice(&(key_bytes.len() as u32).to_le_bytes());
+        serialized.extend_from_slice(key_bytes);
+        serialized.extend_from_slice(&(val_bytes.len() as u32).to_le_bytes());
+        serialized.extend_from_slice(val_bytes);
+    };
+
+    for text_chunk in &info.uncompressed_latin1_text {
+        append_entry(&text_chunk.keyword, &text_chunk.text);
+    }
+
+    for text_chunk in &info.compressed_latin1_text {
+        if let Ok(val_str) = text_chunk.get_text() {
+            append_entry(&text_chunk.keyword, &val_str);
+        }
+    }
+
+    for text_chunk in &info.utf8_text {
+        if let Ok(val_str) = text_chunk.get_text() {
+            append_entry(&text_chunk.keyword, &val_str);
+        }
+    }
+
+    Ok(crate::vec_u8::VecU8::from(serialized))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_extract_metadata_with_null_bytes() {
+        let mut buffer = Vec::new();
+        {
+            let mut encoder = png_crate::Encoder::new(&mut buffer, 1, 1);
+            encoder.set_color(png_crate::ColorType::Grayscale);
+            encoder.set_depth(png_crate::BitDepth::Eight);
+
+            // Add a text chunk with null bytes in the value
+            let key = "Owner";
+            let val = "G\0O\0O\0G\0L\0E";
+            encoder.add_text_chunk(key.to_string(), val.to_string()).unwrap();
+
+            let mut writer = encoder.write_header().unwrap();
+            writer.write_image_data(&[0]).unwrap();
+        }
+
+        let result = extract_png_text_metadata(&buffer).unwrap();
+        let serialized = &*result;
+
+        // Under length-prefixed encoding (4-byte LE length), parse keys & values:
+        let mut idx = 0;
+        let mut parsed = Vec::new();
+        while idx + 4 <= serialized.len() {
+            let key_len = u32::from_le_bytes(serialized[idx..idx + 4].try_into().unwrap()) as usize;
+            idx += 4;
+            assert!(idx + key_len <= serialized.len());
+            let key = std::str::from_utf8(&serialized[idx..idx + key_len]).unwrap().to_string();
+            idx += key_len;
+
+            assert!(idx + 4 <= serialized.len());
+            let val_len = u32::from_le_bytes(serialized[idx..idx + 4].try_into().unwrap()) as usize;
+            idx += 4;
+            assert!(idx + val_len <= serialized.len());
+            let val = std::str::from_utf8(&serialized[idx..idx + val_len]).unwrap().to_string();
+            idx += val_len;
+
+            parsed.push((key, val));
+        }
+        assert_eq!(idx, serialized.len());
+
+        assert_eq!(parsed.len(), 1);
+        assert_eq!(parsed[0].0, "Owner");
+        assert_eq!(parsed[0].1, "G\0O\0O\0G\0L\0E");
+    }
 }

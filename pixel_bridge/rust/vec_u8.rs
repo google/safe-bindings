@@ -17,6 +17,13 @@ impl VecU8 {
     }
 }
 
+impl std::ops::Deref for VecU8 {
+    type Target = [u8];
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
 impl From<Vec<u8>> for VecU8 {
     fn from(val: Vec<u8>) -> Self {
         Self(val)
