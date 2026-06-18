@@ -149,6 +149,33 @@ class Value final {
   std::optional<uint32_t> get_uint(size_t index) const;
 
   /**
+   * Returns the integer at the given position, supporting both signed and
+   * unsigned types. None is returned if the value type is not an integer or the
+   * position is out of bounds.
+   */
+  std::optional<int64_t> get_int(size_t index) const;
+
+  /**
+   * Returns the float at the given position, supporting all numeric types
+   * (including rationals). None is returned if the value type is not numeric or
+   * the position is out of bounds.
+   */
+  std::optional<float> get_float(size_t index) const;
+
+  /**
+   * Returns the double at the given position, supporting all numeric types
+   * (including rationals). None is returned if the value type is not numeric or
+   * the position is out of bounds.
+   */
+  std::optional<double> get_double(size_t index) const;
+
+  /**
+   * Returns the bytes representation for byte, ASCII, or undefined tags.
+   * None is returned if the tag type is not byte/ASCII/undefined.
+   */
+  std::optional<std::vector<uint8_t>> get_bytes() const;
+
+  /**
    * Returns an u32 iterator over the unsigned integers (BYTE, SHORT, or LONG).
    * `None` is returned if the value is not an unsigned integer type.
    */
@@ -357,6 +384,11 @@ class Tag final {
    */
   std::optional<Value> default_value() const;
 
+  /**
+   * Creates a tag from the context and tag number.
+   */
+  static Tag from_u16(Context context, uint16_t number);
+
  private:
   friend class Value;
   friend class Field;
@@ -481,6 +513,11 @@ class Exif final {
   absl::Span<const Field> fields() const ABSL_ATTRIBUTE_LIFETIME_BOUND;
 
   /**
+   * Returns a span of MakerNote fields.
+   */
+  absl::Span<const Field> mnote_fields() const ABSL_ATTRIBUTE_LIFETIME_BOUND;
+
+  /**
    * Returns true if the Exif data (TIFF structure) is in the
    * little-endian byte order.
    */
@@ -491,6 +528,16 @@ class Exif final {
    */
   std::optional<Field> get_field(Tag tag, In in) const;
 
+  /**
+   * Returns the MakerNotes type (0=None, 1=Unknown, 2=Canon, etc.).
+   */
+  uint32_t get_mnote_type() const;
+
+  /**
+   * Returns the MakerNotes field specified by the tag, if found.
+   */
+  std::optional<Field> get_mnote_field(uint32_t tag_num) const;
+
  private:
   friend class Reader;
 
@@ -500,6 +547,8 @@ class Exif final {
   // exif_.fields(). Note that this only works because Exif fields is immutable
   // in this library.
   std::vector<Field> fields_;
+  // Internal cached MakerNote fields.
+  std::vector<Field> mnote_fields_;
   // Internal cached buffer. When exif is created, this is populated from
   // exif_.buf().
   std::vector<uint8_t> buf_;

@@ -86,6 +86,11 @@ impl Tag {
     pub fn less_than(&self, other: &Tag) -> bool {
         self.0 < other.0
     }
+
+    /// Create a Tag from context and u16.
+    pub fn from_u16(context: Context, number: u16) -> Self {
+        Self(KamadakTag(context, number))
+    }
 }
 
 /// This is only for completeness and debugging as the original Tag implements Display as well.

@@ -7,6 +7,7 @@ mod crubit_vec_util;
 pub use exif::Context;
 
 pub mod error;
+pub mod mnote;
 pub mod reader;
 pub mod reexport;
 pub mod tag;

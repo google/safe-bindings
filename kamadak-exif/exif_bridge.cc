@@ -166,12 +166,40 @@ std::optional<std::uint32_t> Value::get_uint(std::uintptr_t index) const {
   return value_.get_uint(index);
 }
 
+std::optional<int64_t> Value::get_int(size_t index) const {
+  return value_.get_int(index);
+}
+
+std::optional<float> Value::get_float(size_t index) const {
+  return value_.get_float(index);
+}
+
+std::optional<double> Value::get_double(size_t index) const {
+  return value_.get_double(index);
+}
+
+std::optional<std::vector<uint8_t>> Value::get_bytes() const {
+  std::optional<exif_bridge_rs::types::VecU8> result = value_.get_bytes();
+  if (result.has_value()) {
+    const size_t len = result.value().len();
+    std::vector<uint8_t> bytes;
+    bytes.reserve(len);
+    bytes.insert(bytes.end(), result.value().as_ptr(),
+                 result.value().as_ptr() + len);
+    return bytes;
+  }
+  return std::nullopt;
+}
+
 std::optional<std::vector<uint32_t>> Value::iter_uint() const {
   std::optional<exif_bridge_rs::types::VecU32> result = value_.iter_uint();
   if (result.has_value()) {
-    return std::vector<uint32_t>(
-        result.value().as_ptr(),
-        result.value().as_ptr() + result.value().len());
+    const size_t len = result.value().len();
+    std::vector<uint32_t> vec;
+    vec.reserve(len);
+    vec.insert(vec.end(), result.value().as_ptr(),
+               result.value().as_ptr() + len);
+    return vec;
   }
   return std::nullopt;
 }
@@ -438,6 +466,10 @@ std::optional<Value> Tag::default_value() const {
   return std::nullopt;
 }
 
+Tag Tag::from_u16(Context context, uint16_t number) {
+  return Tag(exif_bridge_rs::tag::Tag::from_u16(context, number));
+}
+
 // Field
 Field::Field(Tag tag, In ifd_num, Value value)
     : field_(exif_bridge_rs::tiff::Field::new_(tag.tag_, ifd_num.in_,
@@ -483,6 +515,16 @@ Exif::Exif(exif_bridge_rs::reader::Exif exif) : exif_(std::move(exif)) {
       std::back_inserter(fields),
       [](exif_bridge_rs::tiff::Field& f) { return Field(std::move(f)); });
   fields_ = std::move(fields);
+
+  // Initialize cached mnote fields.
+  exif_bridge_rs::tiff::VecField mnote_vec = exif_.mnote_fields();
+  std::vector<Field> mnote_fields;
+  mnote_fields.reserve(mnote_vec.len());
+  std::transform(
+      mnote_vec.as_mut_ptr(), mnote_vec.as_mut_ptr() + mnote_vec.len(),
+      std::back_inserter(mnote_fields),
+      [](exif_bridge_rs::tiff::Field& f) { return Field(std::move(f)); });
+  mnote_fields_ = std::move(mnote_fields);
 }
 
 absl::Span<const uint8_t> Exif::buf() const {
@@ -493,10 +535,24 @@ absl::Span<const Field> Exif::fields() const {
   return absl::Span<const Field>(fields_);
 }
 
+absl::Span<const Field> Exif::mnote_fields() const {
+  return absl::Span<const Field>(mnote_fields_);
+}
+
 bool Exif::little_endian() const { return exif_.little_endian(); }
 
 std::optional<Field> Exif::get_field(Tag tag, In in) const {
   exif_bridge_rs::tiff::OptionField result = exif_.get_field(tag.tag_, in.in_);
+  if (result.is_some()) {
+    return Field(std::move(result).unwrap());
+  }
+  return std::nullopt;
+}
+
+uint32_t Exif::get_mnote_type() const { return exif_.get_mnote_type(); }
+
+std::optional<Field> Exif::get_mnote_field(uint32_t tag_num) const {
+  exif_bridge_rs::tiff::OptionField result = exif_.get_mnote_field(tag_num);
   if (result.is_some()) {
     return Field(std::move(result).unwrap());
   }

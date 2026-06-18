@@ -149,7 +149,7 @@ macro_rules! export_value_constructors {
 /// A type and values of a TIFF/Exif field.
 #[derive(Debug, Clone)]
 #[repr(transparent)]
-pub struct Value(KamadakValue);
+pub struct Value(pub(crate) KamadakValue);
 
 impl Value {
     export_value_constructors!(
@@ -215,6 +215,72 @@ impl Value {
     /// (BYTE, SHORT, or LONG) or the position is out of bounds.
     pub fn get_uint(&self, index: usize) -> Option<u32> {
         self.0.get_uint(index)
+    }
+
+    /// Returns the integer at the given position, supporting both signed and unsigned types.
+    pub fn get_int(&self, index: usize) -> Option<i64> {
+        match self.0 {
+            KamadakValue::Byte(ref v) => v.get(index).map(|&x| x.into()),
+            KamadakValue::Short(ref v) => v.get(index).map(|&x| x.into()),
+            KamadakValue::Long(ref v) => v.get(index).map(|&x| x.into()),
+            KamadakValue::SByte(ref v) => v.get(index).map(|&x| x.into()),
+            KamadakValue::SShort(ref v) => v.get(index).map(|&x| x.into()),
+            KamadakValue::SLong(ref v) => v.get(index).map(|&x| x.into()),
+            _ => None,
+        }
+    }
+
+    /// Returns the float at the given position, supporting all numeric types (including rationals).
+    pub fn get_float(&self, index: usize) -> Option<f32> {
+        match self.0 {
+            KamadakValue::Byte(ref v) => v.get(index).map(|&x| x.into()),
+            KamadakValue::Short(ref v) => v.get(index).map(|&x| x.into()),
+            KamadakValue::Long(ref v) => v.get(index).map(|&x| x as f32),
+            KamadakValue::SByte(ref v) => v.get(index).map(|&x| x.into()),
+            KamadakValue::SShort(ref v) => v.get(index).map(|&x| x.into()),
+            KamadakValue::SLong(ref v) => v.get(index).map(|&x| x as f32),
+            KamadakValue::Rational(ref v) => v.get(index).map(|&x| x.to_f32()),
+            KamadakValue::SRational(ref v) => v.get(index).map(|&x| x.to_f32()),
+            KamadakValue::Float(ref v) => v.get(index).copied(),
+            KamadakValue::Double(ref v) => v.get(index).map(|&x| x as f32),
+            _ => None,
+        }
+    }
+
+    /// Returns the double at the given position, supporting all numeric types (including rationals).
+    pub fn get_double(&self, index: usize) -> Option<f64> {
+        match self.0 {
+            KamadakValue::Byte(ref v) => v.get(index).map(|&x| x.into()),
+            KamadakValue::Short(ref v) => v.get(index).map(|&x| x.into()),
+            KamadakValue::Long(ref v) => v.get(index).map(|&x| x.into()),
+            KamadakValue::SByte(ref v) => v.get(index).map(|&x| x.into()),
+            KamadakValue::SShort(ref v) => v.get(index).map(|&x| x.into()),
+            KamadakValue::SLong(ref v) => v.get(index).map(|&x| x.into()),
+            KamadakValue::Rational(ref v) => v.get(index).map(|&x| x.to_f64()),
+            KamadakValue::SRational(ref v) => v.get(index).map(|&x| x.to_f64()),
+            KamadakValue::Float(ref v) => v.get(index).map(|&x| x.into()),
+            KamadakValue::Double(ref v) => v.get(index).copied(),
+            _ => None,
+        }
+    }
+
+    /// Returns the bytes for byte, ASCII, or undefined tags.
+    pub fn get_bytes(&self) -> Option<VecU8> {
+        match &self.0 {
+            KamadakValue::Byte(v) => Some(VecU8::from(v.clone())),
+            KamadakValue::Ascii(v) => {
+                let mut bytes = Vec::new();
+                for (i, s) in v.iter().enumerate() {
+                    if i > 0 {
+                        bytes.push(0);
+                    }
+                    bytes.extend_from_slice(s);
+                }
+                Some(VecU8::from(bytes))
+            }
+            KamadakValue::Undefined(v, _) => Some(VecU8::from(v.clone())),
+            _ => None,
+        }
     }
 
     /// Compare two exif::Value objects.
