@@ -33,7 +33,14 @@ FetchContent_MakeAvailable(absl)
 
 add_library(pixel_bridge pixel_bridge.cc pixel_bridge.h)
 target_include_directories(pixel_bridge PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/..")
-target_link_libraries(pixel_bridge PRIVATE rust)
+target_link_libraries(pixel_bridge PRIVATE
+  rust
+  absl::check
+  absl::status
+  absl::statusor
+  absl::strings
+  absl::span
+)
 
 add_executable(pixel_bridge_example main.cc)
 target_link_libraries(pixel_bridge_example PRIVATE rust pixel_bridge absl::statusor)
