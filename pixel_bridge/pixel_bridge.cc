@@ -357,5 +357,4 @@ absl::StatusOr<ImageDecoder> ImageReader::IntoDecoder() && {
   }
   return ImageDecoder(std::move(decoder).value());
 }
-
 }  // namespace security::pixel_bridge

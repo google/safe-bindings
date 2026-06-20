@@ -40,7 +40,7 @@ target_link_libraries(pixel_bridge PRIVATE
   absl::statusor
   absl::strings
   absl::span
-)
+ absl::check absl::status absl::statusor absl::strings absl::span)
 
 add_executable(pixel_bridge_example main.cc)
 target_link_libraries(pixel_bridge_example PRIVATE rust pixel_bridge absl::statusor)
