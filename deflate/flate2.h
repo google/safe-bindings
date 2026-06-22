@@ -5,6 +5,7 @@
 #include <optional>
 
 #include "crubit/rust.h"
+#include "absl/base/attributes.h"
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
 #include "absl/strings/cord.h"
@@ -109,7 +110,7 @@ class GzHeader final {
 class VecU8Wrapper {
  public:
   explicit VecU8Wrapper(rust::vec_u8::VecU8 vec_u8);
-  absl::string_view as_string_view() const;
+  absl::string_view as_string_view() const ABSL_ATTRIBUTE_LIFETIME_BOUND;
   absl::Cord as_cord() &&;
 
  private:
