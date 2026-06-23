@@ -38,7 +38,7 @@ absl::StatusOr<BufferedZipWriter> BufferedZipWriter::NewFromData(
   rust::VecU8 input_data =
       rust::VecU8::copy_from_slice(absl::Span<const uint8_t>(
           reinterpret_cast<const uint8_t*>(data.data()), data.size()));
-  ASSIGN_OR_RETURN(
+  ABSL_ASSIGN_OR_RETURN(
       rust::BufferedZipWriter writer,
       FromRustBufferedZipWriter(
           rust::BufferedZipWriter::new_from_data(input_data, append)));
@@ -93,7 +93,7 @@ absl::Status BufferedZipWriter::WriteFileContent(absl::string_view path) {
 
 absl::StatusOr<FsZipWriter> FsZipWriter::NewFromPath(absl::string_view path,
                                                      bool append) {
-  ASSIGN_OR_RETURN(
+  ABSL_ASSIGN_OR_RETURN(
       rust::FsZipWriter writer,
       FromRustFsZipWriter(rust::FsZipWriter::new_from_path(
           absl::Span<const uint8_t>(
@@ -150,14 +150,15 @@ absl::Status FsZipWriter::WriteFileContent(absl::string_view path) {
 
 absl::StatusOr<ZipWriter> ZipWriter::FromFile(absl::string_view path,
                                               bool append) {
-  ASSIGN_OR_RETURN(FsZipWriter writer, FsZipWriter::NewFromPath(path, append));
+  ABSL_ASSIGN_OR_RETURN(FsZipWriter writer,
+                        FsZipWriter::NewFromPath(path, append));
   return ZipWriter(std::move(writer));
 }
 
 absl::StatusOr<ZipWriter> ZipWriter::FromBuffer(absl::string_view data,
                                                 bool append) {
-  ASSIGN_OR_RETURN(BufferedZipWriter writer,
-                   BufferedZipWriter::NewFromData(data, append));
+  ABSL_ASSIGN_OR_RETURN(BufferedZipWriter writer,
+                        BufferedZipWriter::NewFromData(data, append));
   return ZipWriter(std::move(writer));
 }
 
@@ -168,7 +169,7 @@ absl::StatusOr<RustVecU8Wrapper> ZipWriter::Finish() {
             return writer.Finish();
           },
           [](FsZipWriter& writer) -> absl::StatusOr<RustVecU8Wrapper> {
-            RETURN_IF_ERROR(writer.Finish());
+            ABSL_RETURN_IF_ERROR(writer.Finish());
             // Empty RustVecU8Wrapper for FsZipWriter.
             // This is because FsZipWriter writes to a file on the filesystem
             // and doesn't return an owned buffer.
