@@ -1,7 +1,6 @@
 // Copy over some private structs that Crubit cannot generate bindings for
 // but is necessary for other public structs/funcs.
 use crate::error::Error;
-use crate::make_result_type;
 use exif::{Error as KamadakError, Value};
 use std::fmt;
 
@@ -21,12 +20,12 @@ impl<'a> fmt::Display for Display<'a> {
 }
 
 impl Display<'_> {
-    /// Returns the display as a cc_std::string.
+    /// Returns the display as a VecU8.
     ///
     /// Since Crubit does not auto generate to_string() for io::Display trait,
     /// we implement this function manually.
-    pub fn to_string(&self) -> cc_std::std::string {
-        cc_std::std::string::from(<Self as ToString>::to_string(self))
+    pub fn to_string(&self) -> crate::types::VecU8 {
+        crate::types::VecU8(<Self as ToString>::to_string(self).into_bytes())
     }
 }
 
@@ -67,4 +66,3 @@ impl Default for UIntValue {
         Self::new(Value::Byte(Vec::<u8>::new()))
     }
 }
-make_result_type!(UIntValue, ResultUIntValue, Error);

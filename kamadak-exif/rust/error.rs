@@ -1,12 +1,11 @@
 use crubit_annotate::cpp_enum;
 use exif::Error as KamadakError;
-use std::error;
 use std::fmt;
 use std::io;
 
 #[cpp_enum(kind = "enum class")]
 #[repr(transparent)]
-#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+#[derive(Default, Copy, Clone, Debug, PartialEq, Eq)]
 pub struct ErrorStatus(i32);
 
 impl ErrorStatus {
@@ -33,15 +32,29 @@ impl ErrorStatus {
     pub const UNKNOWN: ErrorStatus = ErrorStatus(8);
 }
 
-#[derive(Debug)]
-#[repr(transparent)]
-pub struct Error(KamadakError);
+#[repr(C)]
+#[derive(Default, Debug, Clone, PartialEq)]
+pub struct Error {
+    status: ErrorStatus,
+    message: crate::types::VecU8,
+}
 
 /// An error returned when parsing of Exif data fails.
 impl Error {
     /// Returns the status of the error as an ErrorStatus enum.
     pub fn status(&self) -> ErrorStatus {
-        match self.0 {
+        self.status
+    }
+
+    /// Returns the message of the error.
+    pub fn message(&self) -> crate::types::VecU8 {
+        self.message.clone()
+    }
+}
+
+impl From<KamadakError> for Error {
+    fn from(error: KamadakError) -> Self {
+        let status = match error {
             KamadakError::InvalidFormat(_) => ErrorStatus::INVALID_FORMAT,
             KamadakError::Io(_) => ErrorStatus::IO,
             KamadakError::NotFound(_) => ErrorStatus::NOT_FOUND,
@@ -51,35 +64,20 @@ impl Error {
             KamadakError::UnexpectedValue(_) => ErrorStatus::UNEXPECTED_VALUE,
             KamadakError::PartialResult(_) => ErrorStatus::PARTIAL_RESULT,
             _ => ErrorStatus::UNKNOWN,
-        }
-    }
-
-    /// Returns the message of the error.
-    pub fn message(&self) -> cc_std::std::string {
-        cc_std::std::string::from(self.0.to_string())
-    }
-}
-
-impl error::Error for Error {
-    fn source(&self) -> Option<&(dyn error::Error + 'static)> {
-        self.0.source()
-    }
-}
-
-impl From<KamadakError> for Error {
-    fn from(error: KamadakError) -> Self {
-        Self(error)
+        };
+        Self { status, message: crate::types::VecU8(error.to_string().into_bytes()) }
     }
 }
 
 impl From<io::Error> for Error {
     fn from(err: io::Error) -> Error {
-        Error(KamadakError::Io(err))
+        Error::from(KamadakError::Io(err))
     }
 }
 
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.0.fmt(f)
+        let s = std::str::from_utf8(self.message.as_slice()).unwrap_or("Unknown error");
+        write!(f, "{}", s)
     }
 }

@@ -1,11 +1,9 @@
 use crate::error::Error;
 use crate::tag::Tag;
+use crate::types::TiffExifDataRs;
 use crate::value::Value;
-use crate::{make_option_type, make_result_type, make_vec_type};
 use crubit_annotate::cpp_enum;
-use exif::{
-    parse_exif as kamadak_parse_exif, Error as KamadakError, Field as KamadakField, In as KamadakIn,
-};
+use exif::{parse_exif as kamadak_parse_exif, Field as KamadakField, In as KamadakIn};
 
 /// An IFD number.
 ///
@@ -21,7 +19,7 @@ use exif::{
 /// ```
 #[cpp_enum(kind = "enum class")]
 #[repr(transparent)]
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Default, Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct In(pub i32);
 
 impl In {
@@ -51,30 +49,24 @@ impl From<In> for KamadakIn {
     }
 }
 
-make_option_type!(Field);
-make_vec_type!(Field);
-make_result_type!((VecField, bool), ResultVecFieldBool, Error);
-
 /// Parse the Exif attributes in the TIFF format.
 ///
 /// Returns a Vec of Exif fields and a bool.
 /// The boolean value is true if the data is little endian.
 /// If an error occurred, `exif_bridge_rs::Error` is returned.
-pub fn parse_exif(data: &[u8]) -> ResultVecFieldBool {
-    let result: Result<(VecField, bool), KamadakError> =
-        kamadak_parse_exif(data).map(|(fields, is_little_endian)| {
-            (fields.into_iter().map(Field::from).collect::<Vec<Field>>().into(), is_little_endian)
-        });
-    match result {
-        Ok((fields, is_little_endian)) => ResultVecFieldBool::from_ok((fields, is_little_endian)),
-        Err(e) => ResultVecFieldBool::from(Error::from(e)),
-    }
+pub fn parse_exif(data: &[u8]) -> Result<TiffExifDataRs, Error> {
+    kamadak_parse_exif(data)
+        .map(|(fields, is_little_endian)| TiffExifDataRs {
+            fields: fields.into_iter().map(Field::from).collect::<Vec<Field>>().into(),
+            is_little_endian,
+        })
+        .map_err(Error::from)
 }
 
 /// A TIFF/Exif field.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct Field {
-    pub(crate) inner: KamadakField,
+    pub(crate) inner: Option<KamadakField>,
     pub(crate) tag: Tag,
     pub(crate) ifd_num: In,
 }
@@ -85,7 +77,11 @@ impl Field {
         Self {
             tag,
             ifd_num,
-            inner: KamadakField { tag: tag.into(), ifd_num: ifd_num.into(), value: value.into() },
+            inner: Some(KamadakField {
+                tag: tag.into(),
+                ifd_num: ifd_num.into(),
+                value: value.into(),
+            }),
         }
     }
 
@@ -101,7 +97,7 @@ impl Field {
 
     /// Return value as the wrapped type `Value`.
     pub fn get_value(&self) -> Value {
-        self.inner.value.clone().into()
+        self.inner.as_ref().unwrap().value.clone().into()
     }
 }
 
@@ -109,18 +105,28 @@ impl PartialEq for Field {
     fn eq(&self, other: &Field) -> bool {
         self.tag == other.tag
             && self.ifd_num == other.ifd_num
-            && Value::value_eq(&self.inner.value, &other.inner.value)
+            && match (self.inner.as_ref(), other.inner.as_ref()) {
+                (Some(a), Some(b)) => Value::value_eq(&a.value, &b.value),
+                (None, None) => true,
+                _ => false,
+            }
     }
 }
 
 impl From<KamadakField> for Field {
     fn from(f: KamadakField) -> Self {
-        Self { tag: Tag::from(f.tag), ifd_num: In::from(f.ifd_num), inner: f }
+        Self { tag: Tag::from(f.tag), ifd_num: In::from(f.ifd_num), inner: Some(f) }
     }
 }
 
 impl From<Field> for KamadakField {
     fn from(f: Field) -> Self {
-        f.inner
+        f.inner.unwrap()
+    }
+}
+
+impl AsRef<KamadakField> for Field {
+    fn as_ref(&self) -> &KamadakField {
+        self.inner.as_ref().unwrap()
     }
 }

@@ -1,4 +1,4 @@
-use crate::types::OptionString;
+use crate::types::{OptionString, VecU8};
 use crate::value::Value;
 use exif::{Context, Tag as KamadakTag};
 use std::fmt;
@@ -31,6 +31,12 @@ use std::fmt;
 #[repr(transparent)]
 pub struct Tag(KamadakTag);
 
+impl Default for Tag {
+    fn default() -> Self {
+        Self(KamadakTag::Acceleration)
+    }
+}
+
 impl Tag {
     /// Returns the context of the tag.
     ///
@@ -58,10 +64,7 @@ impl Tag {
 
     /// Returns the description of the tag.
     pub fn description(&self) -> OptionString {
-        match self.0.description() {
-            Some(desc) => OptionString::from(cc_std::std::string::from(desc)),
-            None => None.into(),
-        }
+        self.0.description().map(|desc| VecU8(desc.as_bytes().to_vec()))
     }
 
     /// Returns the default value of the tag.  `None` is returned if

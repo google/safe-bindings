@@ -1,5 +1,4 @@
 use crate::error::Error;
-use crate::make_result_type;
 use crate::tiff::{Field, In};
 use crate::types::VecU8;
 use exif::experimental::Writer as KamadakWriter;
@@ -36,8 +35,6 @@ use std::io::Cursor;
 #[derive(Debug)]
 pub struct Writer<'a>(pub(crate) KamadakWriter<'a>);
 
-make_result_type!(VecU8, ResultVecU8, Error);
-
 impl<'a> Writer<'a> {
     /// Constructs an empty `Writer`.
     pub fn new() -> Self {
@@ -54,7 +51,7 @@ impl<'a> Writer<'a> {
     /// StripOffsets, StripByteCounts, TileOffsets, TileByteCounts,
     /// JPEGInterchangeFormat, and JPEGInterchangeFormatLength.
     pub fn push_field(&mut self, field: &'a Field) {
-        self.0.push_field(&field.inner)
+        self.0.push_field(field.as_ref())
     }
 
     /// Sets TIFF strips for the specified IFD.
@@ -76,12 +73,12 @@ impl<'a> Writer<'a> {
     }
 
     /// Encodes Exif data and returns it in `VecU8`.
-    pub fn write(&mut self, little_endian: bool) -> ResultVecU8 {
+    pub fn write(&mut self, little_endian: bool) -> Result<VecU8, Error> {
         let mut out = VecU8::new();
         let mut w = Cursor::new(out.as_mut_vec());
         match self.0.write(&mut w, little_endian) {
-            Ok(_) => ResultVecU8::from_ok(out),
-            Err(e) => ResultVecU8::from(Error::from(e)),
+            Ok(_) => Ok(out),
+            Err(e) => Err(Error::from(e)),
         }
     }
 }

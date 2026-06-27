@@ -1,10 +1,9 @@
 use crate::error::Error;
-use crate::make_result_type;
 use crate::tag::Tag;
-use crate::tiff::{Field, In, OptionField, VecField};
-use crate::types::VecU8;
+use crate::tiff::{Field, In};
+use crate::types::{OptionField, VecField, VecU8};
 use exif::{Exif as KamadakExif, Reader as KamadakReader};
-use std::fmt::{Debug, Formatter, Result};
+use std::fmt::{Debug, Formatter};
 use std::io::Cursor;
 
 ///
@@ -114,11 +113,10 @@ impl Exif {
     /// and the IFD number.
     pub fn get_field(&self, tag: Tag, ifd_num: In) -> OptionField {
         match &self.inner {
-            Some(exif) => match exif.get_field(tag.into_inner(), ifd_num.into()) {
-                Some(field) => OptionField::from_some(Field::from(field.clone())),
-                None => OptionField::from(None),
-            },
-            None => OptionField::from(None),
+            Some(exif) => exif
+                .get_field(tag.into_inner(), ifd_num.into())
+                .map(|field| Field::from(field.clone())),
+            None => None,
         }
     }
 
@@ -136,10 +134,10 @@ impl Exif {
                     ifd_num: exif::In(0),
                     value: field.value.0.clone(),
                 };
-                return OptionField::from_some(Field::from(synthetic_field));
+                return Some(Field::from(synthetic_field));
             }
         }
-        OptionField::from(None)
+        None
     }
 }
 
@@ -150,7 +148,7 @@ impl From<KamadakExif> for Exif {
 }
 
 impl Debug for Exif {
-    fn fmt(&self, f: &mut Formatter<'_>) -> Result {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match &self.inner {
             Some(exif) => {
                 let mut make_str = String::new();
@@ -178,8 +176,6 @@ impl Debug for Exif {
         }
     }
 }
-
-make_result_type!(Exif, ResultExif, Error);
 
 #[repr(transparent)]
 pub struct Reader(KamadakReader);
@@ -210,10 +206,10 @@ impl Reader {
 
     /// Parses the Exif attributes from raw Exif data.
     /// If an error occurred, `exif_bridge_rs::Error` is returned.
-    pub fn read_raw(&self, data: VecU8) -> ResultExif {
+    pub fn read_raw(&self, data: VecU8) -> Result<Exif, Error> {
         match self.0.read_raw(data.into_vec()) {
-            Ok(exif) => ResultExif::from(Ok(Exif::from(exif))),
-            Err(error) => ResultExif::from(Error::from(error)),
+            Ok(exif) => Ok(Exif::from(exif)),
+            Err(error) => Err(Error::from(error)),
         }
     }
 
@@ -231,11 +227,11 @@ impl Reader {
     // std::fs::File, so we are just using VecU8 for now, and leave reading file to the C++ side.
     // This makes the method largely similar to read_raw(), except for some minor preprocessing
     // at the start based on file type.
-    pub fn read_from_container(&self, data: VecU8) -> ResultExif {
+    pub fn read_from_container(&self, data: VecU8) -> Result<Exif, Error> {
         let mut reader = Cursor::new(data.into_vec());
         match self.0.read_from_container(&mut reader) {
-            Ok(exif) => ResultExif::from_ok(Exif::from(exif)),
-            Err(error) => ResultExif::from(Error::from(error)),
+            Ok(exif) => Ok(Exif::from(exif)),
+            Err(error) => Err(Error::from(error)),
         }
     }
 }

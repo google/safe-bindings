@@ -14,6 +14,7 @@
 #include "file/base/helpers.h"
 #include "file/base/options.h"
 #include "rust/exif_bridge_rs.h"
+#include "crubit_helpers/string_conversions.h"
 #include "tech/file/proto/types.proto.h"
 #include "absl/algorithm/container.h"
 #include "absl/status/status.h"
@@ -23,6 +24,8 @@
 
 namespace security::exif_bridge {
 namespace {
+
+using ::security::crubit_helpers::StringViewFromVecU8;
 
 absl::StatusOr<std::vector<uint8_t>> ReadFileContents(File& file) {
   tech::file::StatProto stat;
@@ -40,23 +43,23 @@ absl::StatusOr<std::vector<uint8_t>> ReadFileContents(File& file) {
 absl::Status FromRustError(exif_bridge_rs::error::Error error) {
   switch (error.status()) {
     case exif_bridge_rs::error::ErrorStatus::INVALID_FORMAT:
-      return absl::InvalidArgumentError(error.message());
+      return absl::InvalidArgumentError(StringViewFromVecU8(error.message()));
     case exif_bridge_rs::error::ErrorStatus::IO:
-      return absl::InternalError(error.message());
+      return absl::InternalError(StringViewFromVecU8(error.message()));
     case exif_bridge_rs::error::ErrorStatus::NOT_FOUND:
-      return absl::NotFoundError(error.message());
+      return absl::NotFoundError(StringViewFromVecU8(error.message()));
     case exif_bridge_rs::error::ErrorStatus::BLANK_VALUE:
-      return absl::NotFoundError(error.message());
+      return absl::NotFoundError(StringViewFromVecU8(error.message()));
     case exif_bridge_rs::error::ErrorStatus::TOO_BIG:
-      return absl::OutOfRangeError(error.message());
+      return absl::OutOfRangeError(StringViewFromVecU8(error.message()));
     case exif_bridge_rs::error::ErrorStatus::NOT_SUPPORTED:
-      return absl::UnimplementedError(error.message());
+      return absl::UnimplementedError(StringViewFromVecU8(error.message()));
     case exif_bridge_rs::error::ErrorStatus::UNEXPECTED_VALUE:
-      return absl::InvalidArgumentError(error.message());
+      return absl::InvalidArgumentError(StringViewFromVecU8(error.message()));
     case exif_bridge_rs::error::ErrorStatus::PARTIAL_RESULT:
-      return absl::DataLossError(error.message());
+      return absl::DataLossError(StringViewFromVecU8(error.message()));
     default:
-      return absl::UnknownError(error.message());
+      return absl::UnknownError(StringViewFromVecU8(error.message()));
   }
 }
 }  // namespace
@@ -70,80 +73,71 @@ bool Value::operator==(const Value& other) const {
 
 Value Value::Byte(absl::Span<const uint8_t> value) {
   return Value(exif_bridge_rs::value::Value::Byte(
-      exif_bridge_rs::types::VecU8::copy_from_raw(value.data(), value.size())));
+      exif_bridge_rs::types::VecU8::copy_from_slice(value)));
 }
 
 Value Value::Ascii(absl::Span<const std::string> value) {
   std::vector<exif_bridge_rs::types::VecU8> rust_vec;
   rust_vec.reserve(value.size());
-  absl::c_transform(value, std::back_inserter(rust_vec),
-                    [](const std::string& s) {
-                      return exif_bridge_rs::types::VecU8::copy_from_raw(
-                          reinterpret_cast<const uint8_t*>(s.data()), s.size());
-                    });
+  absl::c_transform(
+      value, std::back_inserter(rust_vec), [](const std::string& s) {
+        return exif_bridge_rs::types::VecU8::copy_from_slice(
+            absl::MakeConstSpan(reinterpret_cast<const uint8_t*>(s.data()),
+                                s.size()));
+      });
   return Value(exif_bridge_rs::value::Value::Ascii(
-      exif_bridge_rs::types::VecVecU8::copy_from_raw(rust_vec.data(),
-                                                     rust_vec.size())));
+      exif_bridge_rs::types::VecVecU8::copy_from_slice(rust_vec)));
 }
 
 Value Value::Short(absl::Span<const uint16_t> value) {
   return Value(exif_bridge_rs::value::Value::Short(
-      exif_bridge_rs::types::VecU16::copy_from_raw(value.data(),
-                                                   value.size())));
+      exif_bridge_rs::types::VecU16::copy_from_slice(value)));
 }
 
 Value Value::Long(absl::Span<const uint32_t> value) {
   return Value(exif_bridge_rs::value::Value::Long(
-      exif_bridge_rs::types::VecU32::copy_from_raw(value.data(),
-                                                   value.size())));
+      exif_bridge_rs::types::VecU32::copy_from_slice(value)));
 }
 
 Value Value::Rational(absl::Span<const exif_bridge_rs::value::Rational> value) {
   return Value(exif_bridge_rs::value::Value::Rational(
-      exif_bridge_rs::value::VecRational::copy_from_raw(value.data(),
-                                                        value.size())));
+      exif_bridge_rs::value::VecRational::copy_from_slice(value)));
 }
 
 Value Value::SByte(absl::Span<const int8_t> value) {
   return Value(exif_bridge_rs::value::Value::SByte(
-      exif_bridge_rs::types::VecI8::copy_from_raw(value.data(), value.size())));
+      exif_bridge_rs::types::VecI8::copy_from_slice(value)));
 }
 
 Value Value::Undefined(absl::Span<const uint8_t> value, uint32_t offset) {
   return Value(exif_bridge_rs::value::Value::Undefined(
-      exif_bridge_rs::types::VecU8::copy_from_raw(value.data(), value.size()),
-      offset));
+      exif_bridge_rs::types::VecU8::copy_from_slice(value), offset));
 }
 
 Value Value::SShort(absl::Span<const int16_t> value) {
   return Value(exif_bridge_rs::value::Value::SShort(
-      exif_bridge_rs::types::VecI16::copy_from_raw(value.data(),
-                                                   value.size())));
+      exif_bridge_rs::types::VecI16::copy_from_slice(value)));
 }
 
 Value Value::SLong(absl::Span<const int32_t> value) {
   return Value(exif_bridge_rs::value::Value::SLong(
-      exif_bridge_rs::types::VecI32::copy_from_raw(value.data(),
-                                                   value.size())));
+      exif_bridge_rs::types::VecI32::copy_from_slice(value)));
 }
 
 Value Value::SRational(
     absl::Span<const exif_bridge_rs::value::SRational> value) {
   return Value(exif_bridge_rs::value::Value::SRational(
-      exif_bridge_rs::value::VecSRational::copy_from_raw(value.data(),
-                                                         value.size())));
+      exif_bridge_rs::value::VecSRational::copy_from_slice(value)));
 }
 
 Value Value::Float(absl::Span<const float> value) {
   return Value(exif_bridge_rs::value::Value::Float(
-      exif_bridge_rs::types::VecF32::copy_from_raw(value.data(),
-                                                   value.size())));
+      exif_bridge_rs::types::VecF32::copy_from_slice(value)));
 }
 
 Value Value::Double(absl::Span<const double> value) {
   return Value(exif_bridge_rs::value::Value::Double(
-      exif_bridge_rs::types::VecF64::copy_from_raw(value.data(),
-                                                   value.size())));
+      exif_bridge_rs::types::VecF64::copy_from_slice(value)));
 }
 
 Value Value::Unknown(uint16_t type, uint32_t count, uint32_t offset) {
@@ -155,11 +149,13 @@ exif_bridge_rs::reexport::Display Value::display_as(Tag tag) const {
 }
 
 absl::StatusOr<exif_bridge_rs::reexport::UIntValue> Value::as_uint() const {
-  exif_bridge_rs::reexport::ResultUIntValue result = value_.as_uint();
-  if (result.is_ok()) {
-    return std::move(result).unwrap();
+  rs_std::Result<exif_bridge_rs::reexport::UIntValue,
+                 exif_bridge_rs::error::Error>
+      result = value_.as_uint();
+  if (result.has_value()) {
+    return std::move(result).value();
   }
-  return FromRustError(std::move(result).unwrap_err());
+  return FromRustError(std::move(result).err());
 }
 
 std::optional<std::uint32_t> Value::get_uint(std::uintptr_t index) const {
@@ -451,9 +447,10 @@ Context Tag::context() const { return tag_.context(); }
 std::uint16_t Tag::number() const { return tag_.number(); }
 
 std::optional<std::string> Tag::description() const {
-  exif_bridge_rs::types::OptionString desc = tag_.description();
-  if (desc.is_some()) {
-    return std::optional<std::string>(std::move(desc).unwrap());
+  std::optional<exif_bridge_rs::types::VecU8> desc = tag_.description();
+  if (desc.has_value()) {
+    return std::string(reinterpret_cast<const char*>(desc->as_ptr()),
+                       desc->len());
   }
   return std::nullopt;
 }
@@ -485,12 +482,15 @@ Field::Field(exif_bridge_rs::tiff::Field field)
       value_(field_.get_value()) {}
 
 absl::StatusOr<TiffExifData> parse_exif(absl::Span<const uint8_t> data) {
-  exif_bridge_rs::tiff::ResultVecFieldBool result =
-      exif_bridge_rs::tiff::parse_exif(data);
-  if (!result.is_ok()) {
-    return FromRustError(std::move(result).unwrap_err());
+  rs_std::Result<exif_bridge_rs::types::TiffExifDataRs,
+                 exif_bridge_rs::error::Error>
+      result = exif_bridge_rs::tiff::parse_exif(data);
+  if (!result.has_value()) {
+    return FromRustError(std::move(result).err());
   }
-  auto [fields_vec, is_little_endian] = std::move(result).unwrap();
+  exif_bridge_rs::types::TiffExifDataRs val = std::move(result).value();
+  auto fields_vec = std::move(val.fields);
+  bool is_little_endian = val.is_little_endian;
   std::vector<Field> fields;
   fields.reserve(fields_vec.len());
   std::transform(
@@ -507,7 +507,7 @@ Exif::Exif(exif_bridge_rs::reader::Exif exif) : exif_(std::move(exif)) {
   buf_ = std::vector<uint8_t>(buf_view.as_mut_ptr(),
                               buf_view.as_mut_ptr() + buf_view.len());
   // Initialize cached fields.
-  exif_bridge_rs::tiff::VecField fields_vec = exif_.fields();
+  exif_bridge_rs::types::VecField fields_vec = exif_.fields();
   std::vector<Field> fields;
   fields.reserve(fields_vec.len());
   std::transform(
@@ -517,7 +517,7 @@ Exif::Exif(exif_bridge_rs::reader::Exif exif) : exif_(std::move(exif)) {
   fields_ = std::move(fields);
 
   // Initialize cached mnote fields.
-  exif_bridge_rs::tiff::VecField mnote_vec = exif_.mnote_fields();
+  exif_bridge_rs::types::VecField mnote_vec = exif_.mnote_fields();
   std::vector<Field> mnote_fields;
   mnote_fields.reserve(mnote_vec.len());
   std::transform(
@@ -542,9 +542,10 @@ absl::Span<const Field> Exif::mnote_fields() const {
 bool Exif::little_endian() const { return exif_.little_endian(); }
 
 std::optional<Field> Exif::get_field(Tag tag, In in) const {
-  exif_bridge_rs::tiff::OptionField result = exif_.get_field(tag.tag_, in.in_);
-  if (result.is_some()) {
-    return Field(std::move(result).unwrap());
+  std::optional<exif_bridge_rs::tiff::Field> result =
+      exif_.get_field(tag.tag_, in.in_);
+  if (result.has_value()) {
+    return Field(std::move(result).value());
   }
   return std::nullopt;
 }
@@ -552,9 +553,10 @@ std::optional<Field> Exif::get_field(Tag tag, In in) const {
 uint32_t Exif::get_mnote_type() const { return exif_.get_mnote_type(); }
 
 std::optional<Field> Exif::get_mnote_field(uint32_t tag_num) const {
-  exif_bridge_rs::tiff::OptionField result = exif_.get_mnote_field(tag_num);
-  if (result.is_some()) {
-    return Field(std::move(result).unwrap());
+  std::optional<exif_bridge_rs::tiff::Field> result =
+      exif_.get_mnote_field(tag_num);
+  if (result.has_value()) {
+    return Field(std::move(result).value());
   }
   return std::nullopt;
 }
@@ -563,32 +565,35 @@ std::optional<Field> Exif::get_mnote_field(uint32_t tag_num) const {
 Reader::Reader() : reader_(exif_bridge_rs::reader::Reader::new_()) {}
 
 absl::StatusOr<Exif> Reader::read_raw(absl::Span<const uint8_t> data) {
-  exif_bridge_rs::reader::ResultExif result = reader_.read_raw(
-      exif_bridge_rs::types::VecU8::copy_from_raw(data.data(), data.size()));
-  if (result.is_ok()) {
-    return Exif(std::move(result).unwrap());
+  rs_std::Result<exif_bridge_rs::reader::Exif, exif_bridge_rs::error::Error>
+      result =
+          reader_.read_raw(exif_bridge_rs::types::VecU8::copy_from_slice(data));
+  if (result.has_value()) {
+    return Exif(std::move(result).value());
   }
-  return FromRustError(std::move(result).unwrap_err());
+  return FromRustError(std::move(result).err());
 }
 
 absl::StatusOr<Exif> Reader::read_from_container(
     absl::Span<const uint8_t> data) {
-  exif_bridge_rs::reader::ResultExif result = reader_.read_from_container(
-      exif_bridge_rs::types::VecU8::copy_from_raw(data.data(), data.size()));
-  if (result.is_ok()) {
-    return Exif(std::move(result).unwrap());
+  rs_std::Result<exif_bridge_rs::reader::Exif, exif_bridge_rs::error::Error>
+      result = reader_.read_from_container(
+          exif_bridge_rs::types::VecU8::copy_from_slice(data));
+  if (result.has_value()) {
+    return Exif(std::move(result).value());
   }
-  return FromRustError(std::move(result).unwrap_err());
+  return FromRustError(std::move(result).err());
 }
 
 absl::StatusOr<Exif> Reader::read_from_container(File& file) {
   ASSIGN_OR_RETURN(std::vector<uint8_t> data, ReadFileContents(file));
-  exif_bridge_rs::reader::ResultExif result = reader_.read_from_container(
-      exif_bridge_rs::types::VecU8::copy_from_raw(data.data(), data.size()));
-  if (result.is_ok()) {
-    return Exif(std::move(result).unwrap());
+  rs_std::Result<exif_bridge_rs::reader::Exif, exif_bridge_rs::error::Error>
+      result = reader_.read_from_container(
+          exif_bridge_rs::types::VecU8::copy_from_slice(data));
+  if (result.has_value()) {
+    return Exif(std::move(result).value());
   }
-  return FromRustError(std::move(result).unwrap_err());
+  return FromRustError(std::move(result).err());
 }
 
 // Writer
@@ -636,11 +641,12 @@ void Writer::set_jpeg(absl::Span<const uint8_t> jpeg, In ifd_num) {
 }
 
 absl::StatusOr<ExifBytes> Writer::write(bool little_endian) {
-  exif_bridge_rs::writer::ResultVecU8 result = writer_.write(little_endian);
-  if (!result.is_ok()) {
-    return FromRustError(std::move(result).unwrap_err());
+  rs_std::Result<exif_bridge_rs::types::VecU8, exif_bridge_rs::error::Error>
+      result = writer_.write(little_endian);
+  if (!result.has_value()) {
+    return FromRustError(std::move(result).err());
   }
-  return ExifBytes(std::move(result).unwrap());
+  return ExifBytes(std::move(result).value());
 }
 
 }  // namespace security::exif_bridge

@@ -1,5 +1,6 @@
-use crate::make_vec_type;
-use crate::reexport::{Display, ResultUIntValue, UIntValue};
+use crate::error::Error;
+use crate::make_vec_struct;
+use crate::reexport::{Display, UIntValue};
 use crate::types::{VecF32, VecF64, VecI16, VecI32, VecI8, VecU16, VecU32, VecU8, VecVecU8};
 use exif::{
     Rational as KamadakRational, SRational as KamadakSRational, Tag, Value as KamadakValue,
@@ -112,8 +113,8 @@ impl PartialEq for SRational {
     }
 }
 
-make_vec_type!(Rational);
-make_vec_type!(SRational);
+make_vec_struct!(Rational, VecRational);
+make_vec_struct!(SRational, VecSRational);
 
 impl From<VecRational> for Vec<KamadakRational> {
     fn from(v: VecRational) -> Self {
@@ -201,12 +202,10 @@ impl Value {
     /// The integer(s) can be obtained by `get(&self, index: usize)` method
     /// on `UIntValue`, which returns `Option<u32>`.
     /// `None` is returned if the index is out of bounds.
-    pub fn as_uint(&self) -> ResultUIntValue {
-        // Original function returns Result<&UIntValue> and Crubit does not support Resut return type.
-        // This wrapper allows us to return ResultUIntValue which is Crubit compatible.
+    pub fn as_uint(&self) -> Result<UIntValue, Error> {
         match UIntValue::ref_from(&self.0) {
-            Ok(value) => ResultUIntValue::from_ok(value.clone()),
-            Err(error) => ResultUIntValue::from(error),
+            Ok(value) => Ok(value.clone()),
+            Err(error) => Err(error),
         }
     }
 
