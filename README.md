@@ -9,7 +9,8 @@ C++ wrappers (using Crubit) for Rust libraries.
 | deflate      | [flate2](https://crates.io/crates/flate2)         | Compiles |
 | pixel_bridge | [image](https://crates.io/crates/image)           | Compiles |
 | saphyr       | [saphyr](https://crates.io/crates/saphyr)         | Compiles |
-| serde_json   | [serde_json](https://crates.io/crates/serde_json) | Compiles |
+| serde_json   | [serde_json](https://crates.io/crates/serde_json) | Compiles      |
+| kamadak-exif | [kamadak-exif](https://crates.io/crates/kamadak-exif) | Compiles      |
 | zip          | [zip](https://crates.io/crates/zip)               | Compiles |
 
 ## Contributing

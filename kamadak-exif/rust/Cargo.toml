@@ -1,0 +1,13 @@
+[package]
+name = "rust"
+version = "0.1.0"
+edition = "2024"
+license-file = "../../LICENSE"
+
+[lib]
+path = "lib.rs"
+doctest = false
+
+[dependencies]
+kamadak-exif = "0.6"
+crubit_annotate = "0.1.0"

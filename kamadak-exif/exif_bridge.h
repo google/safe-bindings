@@ -10,8 +10,7 @@
 #include <vector>
 
 #include "support/rs_std/slice_ref.h"
-#include "file/base/file.h"
-#include "rust/exif_bridge_rs.h"
+#include "crubit/rust.h"
 #include "absl/base/attributes.h"
 #include "absl/status/statusor.h"
 #include "absl/types/span.h"
@@ -22,23 +21,23 @@ namespace security::exif_bridge {
  * An enum that indicates how a tag number is interpreted.
  *
  * This alias is provided for user convenience and is guaranteed to always be
- * the same as exif_bridge_rs::Context.
+ * the same as rust::Context.
  */
-using Context = exif_bridge_rs::Context;
+using Context = rust::Context;
 /**
  * A signed rational number, which is a pair of 32-bit signed integers.
  *
  * This alias is provided for user convenience and is guaranteed to always be
- * the same as exif_bridge_rs::value::SRational.
+ * the same as rust::value::SRational.
  */
-using SRational = exif_bridge_rs::value::SRational;
+using SRational = rust::value::SRational;
 /**
  * An unsigned rational number, which is a pair of 32-bit unsigned integers.
  *
  * This alias is provided for user convenience and is guaranteed to always be
- * the same as exif_bridge_rs::value::Rational.
+ * the same as rust::value::Rational.
  */
-using Rational = exif_bridge_rs::value::Rational;
+using Rational = rust::value::Rational;
 
 class Tag;
 class Field;
@@ -129,7 +128,7 @@ class Value final {
    *
    * If you want to display with the unit, use `Field::display_value`.
    */
-  exif_bridge_rs::reexport::Display display_as(Tag tag) const;
+  rust::reexport::Display display_as(Tag tag) const;
 
   /**
    * Returns `UIntValue` if the value type is unsigned integer (BYTE,
@@ -139,7 +138,7 @@ class Value final {
    * on `UIntValue`, which returns `std::optional<uint32_t>`.
    * `std::nullopt` is returned if the index is out of bounds.
    */
-  absl::StatusOr<exif_bridge_rs::reexport::UIntValue> as_uint() const;
+  absl::StatusOr<rust::reexport::UIntValue> as_uint() const;
 
   /**
    * Returns the unsigned integer at the given position.
@@ -185,8 +184,8 @@ class Value final {
   friend class Tag;
   friend class Field;
 
-  explicit Value(exif_bridge_rs::value::Value value);
-  exif_bridge_rs::value::Value value_;
+  explicit Value(rust::value::Value value);
+  rust::value::Value value_;
 };
 
 /**
@@ -394,8 +393,8 @@ class Tag final {
   friend class Field;
   friend class Exif;
 
-  explicit Tag(exif_bridge_rs::tag::Tag tag);
-  exif_bridge_rs::tag::Tag tag_;
+  explicit Tag(rust::tag::Tag tag);
+  rust::tag::Tag tag_;
 };
 
 /**
@@ -428,12 +427,12 @@ class In final {
   friend class Exif;
   friend class Writer;
 
-  exif_bridge_rs::tiff::In in_;
-  constexpr explicit In(exif_bridge_rs::tiff::In in) : in_(in) {}
+  rust::tiff::In in_;
+  constexpr explicit In(rust::tiff::In in) : in_(in) {}
 };
 
-inline constexpr In In::kPrimary = In(exif_bridge_rs::tiff::In::PRIMARY);
-inline constexpr In In::kThumbnail = In(exif_bridge_rs::tiff::In::THUMBNAIL);
+inline constexpr In In::kPrimary = In(rust::tiff::In::PRIMARY);
+inline constexpr In In::kThumbnail = In(rust::tiff::In::THUMBNAIL);
 
 struct TiffExifData {
   std::vector<Field> fields;
@@ -479,11 +478,11 @@ class Field {
  private:
   friend class Exif;
   friend class Writer;
-  explicit Field(exif_bridge_rs::tiff::Field field);
+  explicit Field(rust::tiff::Field field);
   friend absl::StatusOr<TiffExifData> parse_exif(
       absl::Span<const uint8_t> data);
 
-  exif_bridge_rs::tiff::Field field_;
+  rust::tiff::Field field_;
   Tag tag_;
   In ifd_num_;
   Value value_;
@@ -541,8 +540,8 @@ class Exif final {
  private:
   friend class Reader;
 
-  explicit Exif(exif_bridge_rs::reader::Exif exif);
-  exif_bridge_rs::reader::Exif exif_;
+  explicit Exif(rust::reader::Exif exif);
+  rust::reader::Exif exif_;
   // Internal cached fields. When exif is created, this is populated from
   // exif_.fields(). Note that this only works because Exif fields is immutable
   // in this library.
@@ -581,21 +580,8 @@ class Reader final {
    */
   absl::StatusOr<Exif> read_from_container(absl::Span<const uint8_t> data);
 
-  /**
-   * Reads an image file and parses the Exif attributes in it.
-   * If an error occurred, an `absl::Status` is returned.
-   *
-   * Supported formats are:
-   * - TIFF and some RAW image formats based on it
-   * - JPEG
-   * - HEIF and coding-specific variations including HEIC and AVIF
-   * - PNG
-   * - WebP
-   */
-  absl::StatusOr<Exif> read_from_container(File& file);
-
  private:
-  exif_bridge_rs::reader::Reader reader_;
+  rust::reader::Reader reader_;
 };
 
 class Writer;
@@ -624,8 +610,8 @@ class ExifBytes final {
 
  private:
   friend class Writer;
-  explicit ExifBytes(exif_bridge_rs::types::VecU8 vec) : vec_(std::move(vec)) {}
-  exif_bridge_rs::types::VecU8 vec_;
+  explicit ExifBytes(rust::types::VecU8 vec) : vec_(std::move(vec)) {}
+  rust::types::VecU8 vec_;
 };
 
 /**
@@ -708,7 +694,7 @@ class Writer final {
 
   // writer_ must be declared last to ensure other members it might reference
   // are destroyed after it.
-  exif_bridge_rs::writer::Writer writer_;
+  rust::writer::Writer writer_;
 };
 
 }  // namespace security::exif_bridge

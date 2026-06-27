@@ -10,53 +10,37 @@
 #include <vector>
 
 #include "support/rs_std/slice_ref.h"
-#include "file/base/file.h"
-#include "file/base/helpers.h"
-#include "file/base/options.h"
-#include "rust/exif_bridge_rs.h"
+#include "crubit/rust.h"
 #include "crubit_helpers/string_conversions.h"
-#include "tech/file/proto/types.proto.h"
 #include "absl/algorithm/container.h"
 #include "absl/status/status.h"
+#include "absl/status/status_macros.h"
 #include "absl/status/statusor.h"
 #include "absl/types/span.h"
-#include "third_party/gloop/util/status/status_macros.h"
 
 namespace security::exif_bridge {
 namespace {
 
 using ::security::crubit_helpers::StringViewFromVecU8;
 
-absl::StatusOr<std::vector<uint8_t>> ReadFileContents(File& file) {
-  tech::file::StatProto stat;
-  RETURN_IF_ERROR(file.Stat(&stat, file::Defaults()));
-
-  const size_t length = stat.length();
-  std::vector<uint8_t> contents(length);
-  RETURN_IF_ERROR(file::ReadToBuffer(&file,
-                                     reinterpret_cast<char*>(contents.data()),
-                                     length, nullptr, file::Defaults()));
-  return contents;
-}
-
 // Mapping Rust error to C++ absl::Status.
-absl::Status FromRustError(exif_bridge_rs::error::Error error) {
+absl::Status FromRustError(rust::error::Error error) {
   switch (error.status()) {
-    case exif_bridge_rs::error::ErrorStatus::INVALID_FORMAT:
+    case rust::error::ErrorStatus::INVALID_FORMAT:
       return absl::InvalidArgumentError(StringViewFromVecU8(error.message()));
-    case exif_bridge_rs::error::ErrorStatus::IO:
+    case rust::error::ErrorStatus::IO:
       return absl::InternalError(StringViewFromVecU8(error.message()));
-    case exif_bridge_rs::error::ErrorStatus::NOT_FOUND:
+    case rust::error::ErrorStatus::NOT_FOUND:
       return absl::NotFoundError(StringViewFromVecU8(error.message()));
-    case exif_bridge_rs::error::ErrorStatus::BLANK_VALUE:
+    case rust::error::ErrorStatus::BLANK_VALUE:
       return absl::NotFoundError(StringViewFromVecU8(error.message()));
-    case exif_bridge_rs::error::ErrorStatus::TOO_BIG:
+    case rust::error::ErrorStatus::TOO_BIG:
       return absl::OutOfRangeError(StringViewFromVecU8(error.message()));
-    case exif_bridge_rs::error::ErrorStatus::NOT_SUPPORTED:
+    case rust::error::ErrorStatus::NOT_SUPPORTED:
       return absl::UnimplementedError(StringViewFromVecU8(error.message()));
-    case exif_bridge_rs::error::ErrorStatus::UNEXPECTED_VALUE:
+    case rust::error::ErrorStatus::UNEXPECTED_VALUE:
       return absl::InvalidArgumentError(StringViewFromVecU8(error.message()));
-    case exif_bridge_rs::error::ErrorStatus::PARTIAL_RESULT:
+    case rust::error::ErrorStatus::PARTIAL_RESULT:
       return absl::DataLossError(StringViewFromVecU8(error.message()));
     default:
       return absl::UnknownError(StringViewFromVecU8(error.message()));
@@ -65,92 +49,92 @@ absl::Status FromRustError(exif_bridge_rs::error::Error error) {
 }  // namespace
 
 // Value
-Value::Value(exif_bridge_rs::value::Value value) : value_(std::move(value)) {}
+Value::Value(rust::value::Value value) : value_(std::move(value)) {}
 
 bool Value::operator==(const Value& other) const {
   return value_.equals(other.value_);
 }
 
 Value Value::Byte(absl::Span<const uint8_t> value) {
-  return Value(exif_bridge_rs::value::Value::Byte(
-      exif_bridge_rs::types::VecU8::copy_from_slice(value)));
+  return Value(rust::value::Value::Byte(
+      rust::types::VecU8::copy_from_slice(value)));
 }
 
 Value Value::Ascii(absl::Span<const std::string> value) {
-  std::vector<exif_bridge_rs::types::VecU8> rust_vec;
+  std::vector<rust::types::VecU8> rust_vec;
   rust_vec.reserve(value.size());
   absl::c_transform(
       value, std::back_inserter(rust_vec), [](const std::string& s) {
-        return exif_bridge_rs::types::VecU8::copy_from_slice(
+        return rust::types::VecU8::copy_from_slice(
             absl::MakeConstSpan(reinterpret_cast<const uint8_t*>(s.data()),
                                 s.size()));
       });
-  return Value(exif_bridge_rs::value::Value::Ascii(
-      exif_bridge_rs::types::VecVecU8::copy_from_slice(rust_vec)));
+  return Value(rust::value::Value::Ascii(
+      rust::types::VecVecU8::copy_from_slice(rust_vec)));
 }
 
 Value Value::Short(absl::Span<const uint16_t> value) {
-  return Value(exif_bridge_rs::value::Value::Short(
-      exif_bridge_rs::types::VecU16::copy_from_slice(value)));
+  return Value(rust::value::Value::Short(
+      rust::types::VecU16::copy_from_slice(value)));
 }
 
 Value Value::Long(absl::Span<const uint32_t> value) {
-  return Value(exif_bridge_rs::value::Value::Long(
-      exif_bridge_rs::types::VecU32::copy_from_slice(value)));
+  return Value(rust::value::Value::Long(
+      rust::types::VecU32::copy_from_slice(value)));
 }
 
-Value Value::Rational(absl::Span<const exif_bridge_rs::value::Rational> value) {
-  return Value(exif_bridge_rs::value::Value::Rational(
-      exif_bridge_rs::value::VecRational::copy_from_slice(value)));
+Value Value::Rational(absl::Span<const rust::value::Rational> value) {
+  return Value(rust::value::Value::Rational(
+      rust::value::VecRational::copy_from_slice(value)));
 }
 
 Value Value::SByte(absl::Span<const int8_t> value) {
-  return Value(exif_bridge_rs::value::Value::SByte(
-      exif_bridge_rs::types::VecI8::copy_from_slice(value)));
+  return Value(rust::value::Value::SByte(
+      rust::types::VecI8::copy_from_slice(value)));
 }
 
 Value Value::Undefined(absl::Span<const uint8_t> value, uint32_t offset) {
-  return Value(exif_bridge_rs::value::Value::Undefined(
-      exif_bridge_rs::types::VecU8::copy_from_slice(value), offset));
+  return Value(rust::value::Value::Undefined(
+      rust::types::VecU8::copy_from_slice(value), offset));
 }
 
 Value Value::SShort(absl::Span<const int16_t> value) {
-  return Value(exif_bridge_rs::value::Value::SShort(
-      exif_bridge_rs::types::VecI16::copy_from_slice(value)));
+  return Value(rust::value::Value::SShort(
+      rust::types::VecI16::copy_from_slice(value)));
 }
 
 Value Value::SLong(absl::Span<const int32_t> value) {
-  return Value(exif_bridge_rs::value::Value::SLong(
-      exif_bridge_rs::types::VecI32::copy_from_slice(value)));
+  return Value(rust::value::Value::SLong(
+      rust::types::VecI32::copy_from_slice(value)));
 }
 
 Value Value::SRational(
-    absl::Span<const exif_bridge_rs::value::SRational> value) {
-  return Value(exif_bridge_rs::value::Value::SRational(
-      exif_bridge_rs::value::VecSRational::copy_from_slice(value)));
+    absl::Span<const rust::value::SRational> value) {
+  return Value(rust::value::Value::SRational(
+      rust::value::VecSRational::copy_from_slice(value)));
 }
 
 Value Value::Float(absl::Span<const float> value) {
-  return Value(exif_bridge_rs::value::Value::Float(
-      exif_bridge_rs::types::VecF32::copy_from_slice(value)));
+  return Value(rust::value::Value::Float(
+      rust::types::VecF32::copy_from_slice(value)));
 }
 
 Value Value::Double(absl::Span<const double> value) {
-  return Value(exif_bridge_rs::value::Value::Double(
-      exif_bridge_rs::types::VecF64::copy_from_slice(value)));
+  return Value(rust::value::Value::Double(
+      rust::types::VecF64::copy_from_slice(value)));
 }
 
 Value Value::Unknown(uint16_t type, uint32_t count, uint32_t offset) {
-  return Value(exif_bridge_rs::value::Value::Unknown(type, count, offset));
+  return Value(rust::value::Value::Unknown(type, count, offset));
 }
 
-exif_bridge_rs::reexport::Display Value::display_as(Tag tag) const {
+rust::reexport::Display Value::display_as(Tag tag) const {
   return value_.display_as(tag.tag_.into_inner());
 }
 
-absl::StatusOr<exif_bridge_rs::reexport::UIntValue> Value::as_uint() const {
-  rs_std::Result<exif_bridge_rs::reexport::UIntValue,
-                 exif_bridge_rs::error::Error>
+absl::StatusOr<rust::reexport::UIntValue> Value::as_uint() const {
+  rs_std::Result<rust::reexport::UIntValue,
+                 rust::error::Error>
       result = value_.as_uint();
   if (result.has_value()) {
     return std::move(result).value();
@@ -175,7 +159,7 @@ std::optional<double> Value::get_double(size_t index) const {
 }
 
 std::optional<std::vector<uint8_t>> Value::get_bytes() const {
-  std::optional<exif_bridge_rs::types::VecU8> result = value_.get_bytes();
+  std::optional<rust::types::VecU8> result = value_.get_bytes();
   if (result.has_value()) {
     const size_t len = result.value().len();
     std::vector<uint8_t> bytes;
@@ -188,7 +172,7 @@ std::optional<std::vector<uint8_t>> Value::get_bytes() const {
 }
 
 std::optional<std::vector<uint32_t>> Value::iter_uint() const {
-  std::optional<exif_bridge_rs::types::VecU32> result = value_.iter_uint();
+  std::optional<rust::types::VecU32> result = value_.iter_uint();
   if (result.has_value()) {
     const size_t len = result.value().len();
     std::vector<uint32_t> vec;
@@ -201,7 +185,7 @@ std::optional<std::vector<uint32_t>> Value::iter_uint() const {
 }
 
 // Tag
-Tag::Tag(exif_bridge_rs::tag::Tag tag) : tag_(std::move(tag)) {}
+Tag::Tag(rust::tag::Tag tag) : tag_(std::move(tag)) {}
 
 bool Tag::operator==(const Tag& other) const { return tag_.equals(other.tag_); }
 
@@ -209,245 +193,245 @@ bool Tag::operator<(const Tag& other) const {
   return tag_.less_than(other.tag_);
 }
 
-const Tag Tag::kAcceleration = Tag(exif_bridge_rs::tag::Tag::Acceleration());
-const Tag Tag::kApertureValue = Tag(exif_bridge_rs::tag::Tag::ApertureValue());
-const Tag Tag::kArtist = Tag(exif_bridge_rs::tag::Tag::Artist());
-const Tag Tag::kBitsPerSample = Tag(exif_bridge_rs::tag::Tag::BitsPerSample());
+const Tag Tag::kAcceleration = Tag(rust::tag::Tag::Acceleration());
+const Tag Tag::kApertureValue = Tag(rust::tag::Tag::ApertureValue());
+const Tag Tag::kArtist = Tag(rust::tag::Tag::Artist());
+const Tag Tag::kBitsPerSample = Tag(rust::tag::Tag::BitsPerSample());
 const Tag Tag::kBodySerialNumber =
-    Tag(exif_bridge_rs::tag::Tag::BodySerialNumber());
+    Tag(rust::tag::Tag::BodySerialNumber());
 const Tag Tag::kBrightnessValue =
-    Tag(exif_bridge_rs::tag::Tag::BrightnessValue());
-const Tag Tag::kCFAPattern = Tag(exif_bridge_rs::tag::Tag::CFAPattern());
+    Tag(rust::tag::Tag::BrightnessValue());
+const Tag Tag::kCFAPattern = Tag(rust::tag::Tag::CFAPattern());
 const Tag Tag::kCameraElevationAngle =
-    Tag(exif_bridge_rs::tag::Tag::CameraElevationAngle());
+    Tag(rust::tag::Tag::CameraElevationAngle());
 const Tag Tag::kCameraOwnerName =
-    Tag(exif_bridge_rs::tag::Tag::CameraOwnerName());
-const Tag Tag::kColorSpace = Tag(exif_bridge_rs::tag::Tag::ColorSpace());
+    Tag(rust::tag::Tag::CameraOwnerName());
+const Tag Tag::kColorSpace = Tag(rust::tag::Tag::ColorSpace());
 const Tag Tag::kComponentsConfiguration =
-    Tag(exif_bridge_rs::tag::Tag::ComponentsConfiguration());
+    Tag(rust::tag::Tag::ComponentsConfiguration());
 const Tag Tag::kCompositeImage =
-    Tag(exif_bridge_rs::tag::Tag::CompositeImage());
+    Tag(rust::tag::Tag::CompositeImage());
 const Tag Tag::kCompressedBitsPerPixel =
-    Tag(exif_bridge_rs::tag::Tag::CompressedBitsPerPixel());
-const Tag Tag::kCompression = Tag(exif_bridge_rs::tag::Tag::Compression());
-const Tag Tag::kContrast = Tag(exif_bridge_rs::tag::Tag::Contrast());
-const Tag Tag::kCopyright = Tag(exif_bridge_rs::tag::Tag::Copyright());
+    Tag(rust::tag::Tag::CompressedBitsPerPixel());
+const Tag Tag::kCompression = Tag(rust::tag::Tag::Compression());
+const Tag Tag::kContrast = Tag(rust::tag::Tag::Contrast());
+const Tag Tag::kCopyright = Tag(rust::tag::Tag::Copyright());
 const Tag Tag::kCustomRendered =
-    Tag(exif_bridge_rs::tag::Tag::CustomRendered());
-const Tag Tag::kDateTime = Tag(exif_bridge_rs::tag::Tag::DateTime());
+    Tag(rust::tag::Tag::CustomRendered());
+const Tag Tag::kDateTime = Tag(rust::tag::Tag::DateTime());
 const Tag Tag::kDateTimeDigitized =
-    Tag(exif_bridge_rs::tag::Tag::DateTimeDigitized());
+    Tag(rust::tag::Tag::DateTimeDigitized());
 const Tag Tag::kDateTimeOriginal =
-    Tag(exif_bridge_rs::tag::Tag::DateTimeOriginal());
+    Tag(rust::tag::Tag::DateTimeOriginal());
 const Tag Tag::kDeviceSettingDescription =
-    Tag(exif_bridge_rs::tag::Tag::DeviceSettingDescription());
+    Tag(rust::tag::Tag::DeviceSettingDescription());
 const Tag Tag::kDigitalZoomRatio =
-    Tag(exif_bridge_rs::tag::Tag::DigitalZoomRatio());
-const Tag Tag::kExifVersion = Tag(exif_bridge_rs::tag::Tag::ExifVersion());
+    Tag(rust::tag::Tag::DigitalZoomRatio());
+const Tag Tag::kExifVersion = Tag(rust::tag::Tag::ExifVersion());
 const Tag Tag::kExposureBiasValue =
-    Tag(exif_bridge_rs::tag::Tag::ExposureBiasValue());
-const Tag Tag::kExposureIndex = Tag(exif_bridge_rs::tag::Tag::ExposureIndex());
-const Tag Tag::kExposureMode = Tag(exif_bridge_rs::tag::Tag::ExposureMode());
+    Tag(rust::tag::Tag::ExposureBiasValue());
+const Tag Tag::kExposureIndex = Tag(rust::tag::Tag::ExposureIndex());
+const Tag Tag::kExposureMode = Tag(rust::tag::Tag::ExposureMode());
 const Tag Tag::kExposureProgram =
-    Tag(exif_bridge_rs::tag::Tag::ExposureProgram());
-const Tag Tag::kExposureTime = Tag(exif_bridge_rs::tag::Tag::ExposureTime());
-const Tag Tag::kFNumber = Tag(exif_bridge_rs::tag::Tag::FNumber());
-const Tag Tag::kFileSource = Tag(exif_bridge_rs::tag::Tag::FileSource());
-const Tag Tag::kFlash = Tag(exif_bridge_rs::tag::Tag::Flash());
-const Tag Tag::kFlashEnergy = Tag(exif_bridge_rs::tag::Tag::FlashEnergy());
+    Tag(rust::tag::Tag::ExposureProgram());
+const Tag Tag::kExposureTime = Tag(rust::tag::Tag::ExposureTime());
+const Tag Tag::kFNumber = Tag(rust::tag::Tag::FNumber());
+const Tag Tag::kFileSource = Tag(rust::tag::Tag::FileSource());
+const Tag Tag::kFlash = Tag(rust::tag::Tag::Flash());
+const Tag Tag::kFlashEnergy = Tag(rust::tag::Tag::FlashEnergy());
 const Tag Tag::kFlashpixVersion =
-    Tag(exif_bridge_rs::tag::Tag::FlashpixVersion());
-const Tag Tag::kFocalLength = Tag(exif_bridge_rs::tag::Tag::FocalLength());
+    Tag(rust::tag::Tag::FlashpixVersion());
+const Tag Tag::kFocalLength = Tag(rust::tag::Tag::FocalLength());
 const Tag Tag::kFocalLengthIn35mmFilm =
-    Tag(exif_bridge_rs::tag::Tag::FocalLengthIn35mmFilm());
+    Tag(rust::tag::Tag::FocalLengthIn35mmFilm());
 const Tag Tag::kFocalPlaneResolutionUnit =
-    Tag(exif_bridge_rs::tag::Tag::FocalPlaneResolutionUnit());
+    Tag(rust::tag::Tag::FocalPlaneResolutionUnit());
 const Tag Tag::kFocalPlaneXResolution =
-    Tag(exif_bridge_rs::tag::Tag::FocalPlaneXResolution());
+    Tag(rust::tag::Tag::FocalPlaneXResolution());
 const Tag Tag::kFocalPlaneYResolution =
-    Tag(exif_bridge_rs::tag::Tag::FocalPlaneYResolution());
-const Tag Tag::kGPSAltitude = Tag(exif_bridge_rs::tag::Tag::GPSAltitude());
+    Tag(rust::tag::Tag::FocalPlaneYResolution());
+const Tag Tag::kGPSAltitude = Tag(rust::tag::Tag::GPSAltitude());
 const Tag Tag::kGPSAltitudeRef =
-    Tag(exif_bridge_rs::tag::Tag::GPSAltitudeRef());
+    Tag(rust::tag::Tag::GPSAltitudeRef());
 const Tag Tag::kGPSAreaInformation =
-    Tag(exif_bridge_rs::tag::Tag::GPSAreaInformation());
-const Tag Tag::kGPSDOP = Tag(exif_bridge_rs::tag::Tag::GPSDOP());
-const Tag Tag::kGPSDateStamp = Tag(exif_bridge_rs::tag::Tag::GPSDateStamp());
+    Tag(rust::tag::Tag::GPSAreaInformation());
+const Tag Tag::kGPSDOP = Tag(rust::tag::Tag::GPSDOP());
+const Tag Tag::kGPSDateStamp = Tag(rust::tag::Tag::GPSDateStamp());
 const Tag Tag::kGPSDestBearing =
-    Tag(exif_bridge_rs::tag::Tag::GPSDestBearing());
+    Tag(rust::tag::Tag::GPSDestBearing());
 const Tag Tag::kGPSDestBearingRef =
-    Tag(exif_bridge_rs::tag::Tag::GPSDestBearingRef());
+    Tag(rust::tag::Tag::GPSDestBearingRef());
 const Tag Tag::kGPSDestDistance =
-    Tag(exif_bridge_rs::tag::Tag::GPSDestDistance());
+    Tag(rust::tag::Tag::GPSDestDistance());
 const Tag Tag::kGPSDestDistanceRef =
-    Tag(exif_bridge_rs::tag::Tag::GPSDestDistanceRef());
+    Tag(rust::tag::Tag::GPSDestDistanceRef());
 const Tag Tag::kGPSDestLatitude =
-    Tag(exif_bridge_rs::tag::Tag::GPSDestLatitude());
+    Tag(rust::tag::Tag::GPSDestLatitude());
 const Tag Tag::kGPSDestLatitudeRef =
-    Tag(exif_bridge_rs::tag::Tag::GPSDestLatitudeRef());
+    Tag(rust::tag::Tag::GPSDestLatitudeRef());
 const Tag Tag::kGPSDestLongitude =
-    Tag(exif_bridge_rs::tag::Tag::GPSDestLongitude());
+    Tag(rust::tag::Tag::GPSDestLongitude());
 const Tag Tag::kGPSDestLongitudeRef =
-    Tag(exif_bridge_rs::tag::Tag::GPSDestLongitudeRef());
+    Tag(rust::tag::Tag::GPSDestLongitudeRef());
 const Tag Tag::kGPSDifferential =
-    Tag(exif_bridge_rs::tag::Tag::GPSDifferential());
+    Tag(rust::tag::Tag::GPSDifferential());
 const Tag Tag::kGPSHPositioningError =
-    Tag(exif_bridge_rs::tag::Tag::GPSHPositioningError());
+    Tag(rust::tag::Tag::GPSHPositioningError());
 const Tag Tag::kGPSImgDirection =
-    Tag(exif_bridge_rs::tag::Tag::GPSImgDirection());
+    Tag(rust::tag::Tag::GPSImgDirection());
 const Tag Tag::kGPSImgDirectionRef =
-    Tag(exif_bridge_rs::tag::Tag::GPSImgDirectionRef());
-const Tag Tag::kGPSLatitude = Tag(exif_bridge_rs::tag::Tag::GPSLatitude());
+    Tag(rust::tag::Tag::GPSImgDirectionRef());
+const Tag Tag::kGPSLatitude = Tag(rust::tag::Tag::GPSLatitude());
 const Tag Tag::kGPSLatitudeRef =
-    Tag(exif_bridge_rs::tag::Tag::GPSLatitudeRef());
-const Tag Tag::kGPSLongitude = Tag(exif_bridge_rs::tag::Tag::GPSLongitude());
+    Tag(rust::tag::Tag::GPSLatitudeRef());
+const Tag Tag::kGPSLongitude = Tag(rust::tag::Tag::GPSLongitude());
 const Tag Tag::kGPSLongitudeRef =
-    Tag(exif_bridge_rs::tag::Tag::GPSLongitudeRef());
-const Tag Tag::kGPSMapDatum = Tag(exif_bridge_rs::tag::Tag::GPSMapDatum());
+    Tag(rust::tag::Tag::GPSLongitudeRef());
+const Tag Tag::kGPSMapDatum = Tag(rust::tag::Tag::GPSMapDatum());
 const Tag Tag::kGPSMeasureMode =
-    Tag(exif_bridge_rs::tag::Tag::GPSMeasureMode());
+    Tag(rust::tag::Tag::GPSMeasureMode());
 const Tag Tag::kGPSProcessingMethod =
-    Tag(exif_bridge_rs::tag::Tag::GPSProcessingMethod());
-const Tag Tag::kGPSSatellites = Tag(exif_bridge_rs::tag::Tag::GPSSatellites());
-const Tag Tag::kGPSSpeed = Tag(exif_bridge_rs::tag::Tag::GPSSpeed());
-const Tag Tag::kGPSSpeedRef = Tag(exif_bridge_rs::tag::Tag::GPSSpeedRef());
-const Tag Tag::kGPSStatus = Tag(exif_bridge_rs::tag::Tag::GPSStatus());
-const Tag Tag::kGPSTimeStamp = Tag(exif_bridge_rs::tag::Tag::GPSTimeStamp());
-const Tag Tag::kGPSTrack = Tag(exif_bridge_rs::tag::Tag::GPSTrack());
-const Tag Tag::kGPSTrackRef = Tag(exif_bridge_rs::tag::Tag::GPSTrackRef());
-const Tag Tag::kGPSVersionID = Tag(exif_bridge_rs::tag::Tag::GPSVersionID());
-const Tag Tag::kGainControl = Tag(exif_bridge_rs::tag::Tag::GainControl());
-const Tag Tag::kGamma = Tag(exif_bridge_rs::tag::Tag::Gamma());
-const Tag Tag::kHumidity = Tag(exif_bridge_rs::tag::Tag::Humidity());
-const Tag Tag::kISOSpeed = Tag(exif_bridge_rs::tag::Tag::ISOSpeed());
+    Tag(rust::tag::Tag::GPSProcessingMethod());
+const Tag Tag::kGPSSatellites = Tag(rust::tag::Tag::GPSSatellites());
+const Tag Tag::kGPSSpeed = Tag(rust::tag::Tag::GPSSpeed());
+const Tag Tag::kGPSSpeedRef = Tag(rust::tag::Tag::GPSSpeedRef());
+const Tag Tag::kGPSStatus = Tag(rust::tag::Tag::GPSStatus());
+const Tag Tag::kGPSTimeStamp = Tag(rust::tag::Tag::GPSTimeStamp());
+const Tag Tag::kGPSTrack = Tag(rust::tag::Tag::GPSTrack());
+const Tag Tag::kGPSTrackRef = Tag(rust::tag::Tag::GPSTrackRef());
+const Tag Tag::kGPSVersionID = Tag(rust::tag::Tag::GPSVersionID());
+const Tag Tag::kGainControl = Tag(rust::tag::Tag::GainControl());
+const Tag Tag::kGamma = Tag(rust::tag::Tag::Gamma());
+const Tag Tag::kHumidity = Tag(rust::tag::Tag::Humidity());
+const Tag Tag::kISOSpeed = Tag(rust::tag::Tag::ISOSpeed());
 const Tag Tag::kISOSpeedLatitudeyyy =
-    Tag(exif_bridge_rs::tag::Tag::ISOSpeedLatitudeyyy());
+    Tag(rust::tag::Tag::ISOSpeedLatitudeyyy());
 const Tag Tag::kISOSpeedLatitudezzz =
-    Tag(exif_bridge_rs::tag::Tag::ISOSpeedLatitudezzz());
+    Tag(rust::tag::Tag::ISOSpeedLatitudezzz());
 const Tag Tag::kImageDescription =
-    Tag(exif_bridge_rs::tag::Tag::ImageDescription());
-const Tag Tag::kImageLength = Tag(exif_bridge_rs::tag::Tag::ImageLength());
-const Tag Tag::kImageUniqueID = Tag(exif_bridge_rs::tag::Tag::ImageUniqueID());
-const Tag Tag::kImageWidth = Tag(exif_bridge_rs::tag::Tag::ImageWidth());
+    Tag(rust::tag::Tag::ImageDescription());
+const Tag Tag::kImageLength = Tag(rust::tag::Tag::ImageLength());
+const Tag Tag::kImageUniqueID = Tag(rust::tag::Tag::ImageUniqueID());
+const Tag Tag::kImageWidth = Tag(rust::tag::Tag::ImageWidth());
 const Tag Tag::kInteroperabilityIndex =
-    Tag(exif_bridge_rs::tag::Tag::InteroperabilityIndex());
+    Tag(rust::tag::Tag::InteroperabilityIndex());
 const Tag Tag::kInteroperabilityVersion =
-    Tag(exif_bridge_rs::tag::Tag::InteroperabilityVersion());
+    Tag(rust::tag::Tag::InteroperabilityVersion());
 const Tag Tag::kJPEGInterchangeFormat =
-    Tag(exif_bridge_rs::tag::Tag::JPEGInterchangeFormat());
+    Tag(rust::tag::Tag::JPEGInterchangeFormat());
 const Tag Tag::kJPEGInterchangeFormatLength =
-    Tag(exif_bridge_rs::tag::Tag::JPEGInterchangeFormatLength());
-const Tag Tag::kLensMake = Tag(exif_bridge_rs::tag::Tag::LensMake());
-const Tag Tag::kLensModel = Tag(exif_bridge_rs::tag::Tag::LensModel());
+    Tag(rust::tag::Tag::JPEGInterchangeFormatLength());
+const Tag Tag::kLensMake = Tag(rust::tag::Tag::LensMake());
+const Tag Tag::kLensModel = Tag(rust::tag::Tag::LensModel());
 const Tag Tag::kLensSerialNumber =
-    Tag(exif_bridge_rs::tag::Tag::LensSerialNumber());
+    Tag(rust::tag::Tag::LensSerialNumber());
 const Tag Tag::kLensSpecification =
-    Tag(exif_bridge_rs::tag::Tag::LensSpecification());
-const Tag Tag::kLightSource = Tag(exif_bridge_rs::tag::Tag::LightSource());
-const Tag Tag::kMake = Tag(exif_bridge_rs::tag::Tag::Make());
-const Tag Tag::kMakerNote = Tag(exif_bridge_rs::tag::Tag::MakerNote());
+    Tag(rust::tag::Tag::LensSpecification());
+const Tag Tag::kLightSource = Tag(rust::tag::Tag::LightSource());
+const Tag Tag::kMake = Tag(rust::tag::Tag::Make());
+const Tag Tag::kMakerNote = Tag(rust::tag::Tag::MakerNote());
 const Tag Tag::kMaxApertureValue =
-    Tag(exif_bridge_rs::tag::Tag::MaxApertureValue());
-const Tag Tag::kMeteringMode = Tag(exif_bridge_rs::tag::Tag::MeteringMode());
-const Tag Tag::kModel = Tag(exif_bridge_rs::tag::Tag::Model());
-const Tag Tag::kOECF = Tag(exif_bridge_rs::tag::Tag::OECF());
-const Tag Tag::kOffsetTime = Tag(exif_bridge_rs::tag::Tag::OffsetTime());
+    Tag(rust::tag::Tag::MaxApertureValue());
+const Tag Tag::kMeteringMode = Tag(rust::tag::Tag::MeteringMode());
+const Tag Tag::kModel = Tag(rust::tag::Tag::Model());
+const Tag Tag::kOECF = Tag(rust::tag::Tag::OECF());
+const Tag Tag::kOffsetTime = Tag(rust::tag::Tag::OffsetTime());
 const Tag Tag::kOffsetTimeDigitized =
-    Tag(exif_bridge_rs::tag::Tag::OffsetTimeDigitized());
+    Tag(rust::tag::Tag::OffsetTimeDigitized());
 const Tag Tag::kOffsetTimeOriginal =
-    Tag(exif_bridge_rs::tag::Tag::OffsetTimeOriginal());
-const Tag Tag::kOrientation = Tag(exif_bridge_rs::tag::Tag::Orientation());
+    Tag(rust::tag::Tag::OffsetTimeOriginal());
+const Tag Tag::kOrientation = Tag(rust::tag::Tag::Orientation());
 const Tag Tag::kPhotographicSensitivity =
-    Tag(exif_bridge_rs::tag::Tag::PhotographicSensitivity());
+    Tag(rust::tag::Tag::PhotographicSensitivity());
 const Tag Tag::kPhotometricInterpretation =
-    Tag(exif_bridge_rs::tag::Tag::PhotometricInterpretation());
+    Tag(rust::tag::Tag::PhotometricInterpretation());
 const Tag Tag::kPixelXDimension =
-    Tag(exif_bridge_rs::tag::Tag::PixelXDimension());
+    Tag(rust::tag::Tag::PixelXDimension());
 const Tag Tag::kPixelYDimension =
-    Tag(exif_bridge_rs::tag::Tag::PixelYDimension());
+    Tag(rust::tag::Tag::PixelYDimension());
 const Tag Tag::kPlanarConfiguration =
-    Tag(exif_bridge_rs::tag::Tag::PlanarConfiguration());
-const Tag Tag::kPressure = Tag(exif_bridge_rs::tag::Tag::Pressure());
+    Tag(rust::tag::Tag::PlanarConfiguration());
+const Tag Tag::kPressure = Tag(rust::tag::Tag::Pressure());
 const Tag Tag::kPrimaryChromaticities =
-    Tag(exif_bridge_rs::tag::Tag::PrimaryChromaticities());
+    Tag(rust::tag::Tag::PrimaryChromaticities());
 const Tag Tag::kRecommendedExposureIndex =
-    Tag(exif_bridge_rs::tag::Tag::RecommendedExposureIndex());
+    Tag(rust::tag::Tag::RecommendedExposureIndex());
 const Tag Tag::kReferenceBlackWhite =
-    Tag(exif_bridge_rs::tag::Tag::ReferenceBlackWhite());
+    Tag(rust::tag::Tag::ReferenceBlackWhite());
 const Tag Tag::kRelatedImageFileFormat =
-    Tag(exif_bridge_rs::tag::Tag::RelatedImageFileFormat());
+    Tag(rust::tag::Tag::RelatedImageFileFormat());
 const Tag Tag::kRelatedImageLength =
-    Tag(exif_bridge_rs::tag::Tag::RelatedImageLength());
+    Tag(rust::tag::Tag::RelatedImageLength());
 const Tag Tag::kRelatedImageWidth =
-    Tag(exif_bridge_rs::tag::Tag::RelatedImageWidth());
+    Tag(rust::tag::Tag::RelatedImageWidth());
 const Tag Tag::kRelatedSoundFile =
-    Tag(exif_bridge_rs::tag::Tag::RelatedSoundFile());
+    Tag(rust::tag::Tag::RelatedSoundFile());
 const Tag Tag::kResolutionUnit =
-    Tag(exif_bridge_rs::tag::Tag::ResolutionUnit());
-const Tag Tag::kRowsPerStrip = Tag(exif_bridge_rs::tag::Tag::RowsPerStrip());
+    Tag(rust::tag::Tag::ResolutionUnit());
+const Tag Tag::kRowsPerStrip = Tag(rust::tag::Tag::RowsPerStrip());
 const Tag Tag::kSamplesPerPixel =
-    Tag(exif_bridge_rs::tag::Tag::SamplesPerPixel());
-const Tag Tag::kSaturation = Tag(exif_bridge_rs::tag::Tag::Saturation());
+    Tag(rust::tag::Tag::SamplesPerPixel());
+const Tag Tag::kSaturation = Tag(rust::tag::Tag::Saturation());
 const Tag Tag::kSceneCaptureType =
-    Tag(exif_bridge_rs::tag::Tag::SceneCaptureType());
-const Tag Tag::kSceneType = Tag(exif_bridge_rs::tag::Tag::SceneType());
-const Tag Tag::kSensingMethod = Tag(exif_bridge_rs::tag::Tag::SensingMethod());
+    Tag(rust::tag::Tag::SceneCaptureType());
+const Tag Tag::kSceneType = Tag(rust::tag::Tag::SceneType());
+const Tag Tag::kSensingMethod = Tag(rust::tag::Tag::SensingMethod());
 const Tag Tag::kSensitivityType =
-    Tag(exif_bridge_rs::tag::Tag::SensitivityType());
-const Tag Tag::kSharpness = Tag(exif_bridge_rs::tag::Tag::Sharpness());
+    Tag(rust::tag::Tag::SensitivityType());
+const Tag Tag::kSharpness = Tag(rust::tag::Tag::Sharpness());
 const Tag Tag::kShutterSpeedValue =
-    Tag(exif_bridge_rs::tag::Tag::ShutterSpeedValue());
-const Tag Tag::kSoftware = Tag(exif_bridge_rs::tag::Tag::Software());
+    Tag(rust::tag::Tag::ShutterSpeedValue());
+const Tag Tag::kSoftware = Tag(rust::tag::Tag::Software());
 const Tag Tag::kSourceExposureTimesOfCompositeImage =
-    Tag(exif_bridge_rs::tag::Tag::SourceExposureTimesOfCompositeImage());
+    Tag(rust::tag::Tag::SourceExposureTimesOfCompositeImage());
 const Tag Tag::kSourceImageNumberOfCompositeImage =
-    Tag(exif_bridge_rs::tag::Tag::SourceImageNumberOfCompositeImage());
+    Tag(rust::tag::Tag::SourceImageNumberOfCompositeImage());
 const Tag Tag::kSpatialFrequencyResponse =
-    Tag(exif_bridge_rs::tag::Tag::SpatialFrequencyResponse());
+    Tag(rust::tag::Tag::SpatialFrequencyResponse());
 const Tag Tag::kSpectralSensitivity =
-    Tag(exif_bridge_rs::tag::Tag::SpectralSensitivity());
+    Tag(rust::tag::Tag::SpectralSensitivity());
 const Tag Tag::kStandardOutputSensitivity =
-    Tag(exif_bridge_rs::tag::Tag::StandardOutputSensitivity());
+    Tag(rust::tag::Tag::StandardOutputSensitivity());
 const Tag Tag::kStripByteCounts =
-    Tag(exif_bridge_rs::tag::Tag::StripByteCounts());
-const Tag Tag::kStripOffsets = Tag(exif_bridge_rs::tag::Tag::StripOffsets());
-const Tag Tag::kSubSecTime = Tag(exif_bridge_rs::tag::Tag::SubSecTime());
+    Tag(rust::tag::Tag::StripByteCounts());
+const Tag Tag::kStripOffsets = Tag(rust::tag::Tag::StripOffsets());
+const Tag Tag::kSubSecTime = Tag(rust::tag::Tag::SubSecTime());
 const Tag Tag::kSubSecTimeDigitized =
-    Tag(exif_bridge_rs::tag::Tag::SubSecTimeDigitized());
+    Tag(rust::tag::Tag::SubSecTimeDigitized());
 const Tag Tag::kSubSecTimeOriginal =
-    Tag(exif_bridge_rs::tag::Tag::SubSecTimeOriginal());
-const Tag Tag::kSubjectArea = Tag(exif_bridge_rs::tag::Tag::SubjectArea());
+    Tag(rust::tag::Tag::SubSecTimeOriginal());
+const Tag Tag::kSubjectArea = Tag(rust::tag::Tag::SubjectArea());
 const Tag Tag::kSubjectDistance =
-    Tag(exif_bridge_rs::tag::Tag::SubjectDistance());
+    Tag(rust::tag::Tag::SubjectDistance());
 const Tag Tag::kSubjectDistanceRange =
-    Tag(exif_bridge_rs::tag::Tag::SubjectDistanceRange());
+    Tag(rust::tag::Tag::SubjectDistanceRange());
 const Tag Tag::kSubjectLocation =
-    Tag(exif_bridge_rs::tag::Tag::SubjectLocation());
-const Tag Tag::kTemperature = Tag(exif_bridge_rs::tag::Tag::Temperature());
+    Tag(rust::tag::Tag::SubjectLocation());
+const Tag Tag::kTemperature = Tag(rust::tag::Tag::Temperature());
 const Tag Tag::kTileByteCounts =
-    Tag(exif_bridge_rs::tag::Tag::TileByteCounts());
-const Tag Tag::kTileOffsets = Tag(exif_bridge_rs::tag::Tag::TileOffsets());
+    Tag(rust::tag::Tag::TileByteCounts());
+const Tag Tag::kTileOffsets = Tag(rust::tag::Tag::TileOffsets());
 const Tag Tag::kTransferFunction =
-    Tag(exif_bridge_rs::tag::Tag::TransferFunction());
-const Tag Tag::kUserComment = Tag(exif_bridge_rs::tag::Tag::UserComment());
-const Tag Tag::kWaterDepth = Tag(exif_bridge_rs::tag::Tag::WaterDepth());
-const Tag Tag::kWhiteBalance = Tag(exif_bridge_rs::tag::Tag::WhiteBalance());
-const Tag Tag::kWhitePoint = Tag(exif_bridge_rs::tag::Tag::WhitePoint());
-const Tag Tag::kXResolution = Tag(exif_bridge_rs::tag::Tag::XResolution());
+    Tag(rust::tag::Tag::TransferFunction());
+const Tag Tag::kUserComment = Tag(rust::tag::Tag::UserComment());
+const Tag Tag::kWaterDepth = Tag(rust::tag::Tag::WaterDepth());
+const Tag Tag::kWhiteBalance = Tag(rust::tag::Tag::WhiteBalance());
+const Tag Tag::kWhitePoint = Tag(rust::tag::Tag::WhitePoint());
+const Tag Tag::kXResolution = Tag(rust::tag::Tag::XResolution());
 const Tag Tag::kYCbCrCoefficients =
-    Tag(exif_bridge_rs::tag::Tag::YCbCrCoefficients());
+    Tag(rust::tag::Tag::YCbCrCoefficients());
 const Tag Tag::kYCbCrPositioning =
-    Tag(exif_bridge_rs::tag::Tag::YCbCrPositioning());
+    Tag(rust::tag::Tag::YCbCrPositioning());
 const Tag Tag::kYCbCrSubSampling =
-    Tag(exif_bridge_rs::tag::Tag::YCbCrSubSampling());
-const Tag Tag::kYResolution = Tag(exif_bridge_rs::tag::Tag::YResolution());
+    Tag(rust::tag::Tag::YCbCrSubSampling());
+const Tag Tag::kYResolution = Tag(rust::tag::Tag::YResolution());
 
 Context Tag::context() const { return tag_.context(); }
 
 std::uint16_t Tag::number() const { return tag_.number(); }
 
 std::optional<std::string> Tag::description() const {
-  std::optional<exif_bridge_rs::types::VecU8> desc = tag_.description();
+  std::optional<rust::types::VecU8> desc = tag_.description();
   if (desc.has_value()) {
     return std::string(reinterpret_cast<const char*>(desc->as_ptr()),
                        desc->len());
@@ -456,7 +440,7 @@ std::optional<std::string> Tag::description() const {
 }
 
 std::optional<Value> Tag::default_value() const {
-  std::optional<exif_bridge_rs::value::Value> val = tag_.default_value();
+  std::optional<rust::value::Value> val = tag_.default_value();
   if (val.has_value()) {
     return Value(std::move(*val));
   }
@@ -464,31 +448,31 @@ std::optional<Value> Tag::default_value() const {
 }
 
 Tag Tag::from_u16(Context context, uint16_t number) {
-  return Tag(exif_bridge_rs::tag::Tag::from_u16(context, number));
+  return Tag(rust::tag::Tag::from_u16(context, number));
 }
 
 // Field
 Field::Field(Tag tag, In ifd_num, Value value)
-    : field_(exif_bridge_rs::tiff::Field::new_(tag.tag_, ifd_num.in_,
+    : field_(rust::tiff::Field::new_(tag.tag_, ifd_num.in_,
                                                value.value_)),
       tag_(field_.get_tag()),
       ifd_num_(field_.get_ifd()),
       value_(field_.get_value()) {}
 
-Field::Field(exif_bridge_rs::tiff::Field field)
+Field::Field(rust::tiff::Field field)
     : field_(std::move(field)),
       tag_(field_.get_tag()),
       ifd_num_(field_.get_ifd()),
       value_(field_.get_value()) {}
 
 absl::StatusOr<TiffExifData> parse_exif(absl::Span<const uint8_t> data) {
-  rs_std::Result<exif_bridge_rs::types::TiffExifDataRs,
-                 exif_bridge_rs::error::Error>
-      result = exif_bridge_rs::tiff::parse_exif(data);
+  rs_std::Result<rust::types::TiffExifDataRs,
+                 rust::error::Error>
+      result = rust::tiff::parse_exif(data);
   if (!result.has_value()) {
     return FromRustError(std::move(result).err());
   }
-  exif_bridge_rs::types::TiffExifDataRs val = std::move(result).value();
+  rust::types::TiffExifDataRs val = std::move(result).value();
   auto fields_vec = std::move(val.fields);
   bool is_little_endian = val.is_little_endian;
   std::vector<Field> fields;
@@ -496,34 +480,34 @@ absl::StatusOr<TiffExifData> parse_exif(absl::Span<const uint8_t> data) {
   std::transform(
       fields_vec.as_mut_ptr(), fields_vec.as_mut_ptr() + fields_vec.len(),
       std::back_inserter(fields),
-      [](exif_bridge_rs::tiff::Field& f) { return Field(std::move(f)); });
+      [](rust::tiff::Field& f) { return Field(std::move(f)); });
   return TiffExifData(std::move(fields), is_little_endian);
 }
 
 // Exif
-Exif::Exif(exif_bridge_rs::reader::Exif exif) : exif_(std::move(exif)) {
+Exif::Exif(rust::reader::Exif exif) : exif_(std::move(exif)) {
   // Initialize cached buffer.
-  exif_bridge_rs::types::VecU8 buf_view = exif_.buf();
+  rust::types::VecU8 buf_view = exif_.buf();
   buf_ = std::vector<uint8_t>(buf_view.as_mut_ptr(),
                               buf_view.as_mut_ptr() + buf_view.len());
   // Initialize cached fields.
-  exif_bridge_rs::types::VecField fields_vec = exif_.fields();
+  rust::types::VecField fields_vec = exif_.fields();
   std::vector<Field> fields;
   fields.reserve(fields_vec.len());
   std::transform(
       fields_vec.as_mut_ptr(), fields_vec.as_mut_ptr() + fields_vec.len(),
       std::back_inserter(fields),
-      [](exif_bridge_rs::tiff::Field& f) { return Field(std::move(f)); });
+      [](rust::tiff::Field& f) { return Field(std::move(f)); });
   fields_ = std::move(fields);
 
   // Initialize cached mnote fields.
-  exif_bridge_rs::types::VecField mnote_vec = exif_.mnote_fields();
+  rust::types::VecField mnote_vec = exif_.mnote_fields();
   std::vector<Field> mnote_fields;
   mnote_fields.reserve(mnote_vec.len());
   std::transform(
       mnote_vec.as_mut_ptr(), mnote_vec.as_mut_ptr() + mnote_vec.len(),
       std::back_inserter(mnote_fields),
-      [](exif_bridge_rs::tiff::Field& f) { return Field(std::move(f)); });
+      [](rust::tiff::Field& f) { return Field(std::move(f)); });
   mnote_fields_ = std::move(mnote_fields);
 }
 
@@ -542,7 +526,7 @@ absl::Span<const Field> Exif::mnote_fields() const {
 bool Exif::little_endian() const { return exif_.little_endian(); }
 
 std::optional<Field> Exif::get_field(Tag tag, In in) const {
-  std::optional<exif_bridge_rs::tiff::Field> result =
+  std::optional<rust::tiff::Field> result =
       exif_.get_field(tag.tag_, in.in_);
   if (result.has_value()) {
     return Field(std::move(result).value());
@@ -553,7 +537,7 @@ std::optional<Field> Exif::get_field(Tag tag, In in) const {
 uint32_t Exif::get_mnote_type() const { return exif_.get_mnote_type(); }
 
 std::optional<Field> Exif::get_mnote_field(uint32_t tag_num) const {
-  std::optional<exif_bridge_rs::tiff::Field> result =
+  std::optional<rust::tiff::Field> result =
       exif_.get_mnote_field(tag_num);
   if (result.has_value()) {
     return Field(std::move(result).value());
@@ -562,12 +546,12 @@ std::optional<Field> Exif::get_mnote_field(uint32_t tag_num) const {
 }
 
 // Reader
-Reader::Reader() : reader_(exif_bridge_rs::reader::Reader::new_()) {}
+Reader::Reader() : reader_(rust::reader::Reader::new_()) {}
 
 absl::StatusOr<Exif> Reader::read_raw(absl::Span<const uint8_t> data) {
-  rs_std::Result<exif_bridge_rs::reader::Exif, exif_bridge_rs::error::Error>
+  rs_std::Result<rust::reader::Exif, rust::error::Error>
       result =
-          reader_.read_raw(exif_bridge_rs::types::VecU8::copy_from_slice(data));
+          reader_.read_raw(rust::types::VecU8::copy_from_slice(data));
   if (result.has_value()) {
     return Exif(std::move(result).value());
   }
@@ -576,20 +560,9 @@ absl::StatusOr<Exif> Reader::read_raw(absl::Span<const uint8_t> data) {
 
 absl::StatusOr<Exif> Reader::read_from_container(
     absl::Span<const uint8_t> data) {
-  rs_std::Result<exif_bridge_rs::reader::Exif, exif_bridge_rs::error::Error>
+  rs_std::Result<rust::reader::Exif, rust::error::Error>
       result = reader_.read_from_container(
-          exif_bridge_rs::types::VecU8::copy_from_slice(data));
-  if (result.has_value()) {
-    return Exif(std::move(result).value());
-  }
-  return FromRustError(std::move(result).err());
-}
-
-absl::StatusOr<Exif> Reader::read_from_container(File& file) {
-  ASSIGN_OR_RETURN(std::vector<uint8_t> data, ReadFileContents(file));
-  rs_std::Result<exif_bridge_rs::reader::Exif, exif_bridge_rs::error::Error>
-      result = reader_.read_from_container(
-          exif_bridge_rs::types::VecU8::copy_from_slice(data));
+          rust::types::VecU8::copy_from_slice(data));
   if (result.has_value()) {
     return Exif(std::move(result).value());
   }
@@ -597,7 +570,7 @@ absl::StatusOr<Exif> Reader::read_from_container(File& file) {
 }
 
 // Writer
-Writer::Writer() : writer_(exif_bridge_rs::writer::Writer::new_()) {}
+Writer::Writer() : writer_(rust::writer::Writer::new_()) {}
 
 void Writer::push_field(Field field) {
   // We can further optimize this, since upstream's push_field ignores
@@ -641,7 +614,7 @@ void Writer::set_jpeg(absl::Span<const uint8_t> jpeg, In ifd_num) {
 }
 
 absl::StatusOr<ExifBytes> Writer::write(bool little_endian) {
-  rs_std::Result<exif_bridge_rs::types::VecU8, exif_bridge_rs::error::Error>
+  rs_std::Result<rust::types::VecU8, rust::error::Error>
       result = writer_.write(little_endian);
   if (!result.has_value()) {
     return FromRustError(std::move(result).err());
