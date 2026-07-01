@@ -25,8 +25,8 @@ jobs:
       - name: Set up Rust
         uses: actions-rust-lang/setup-rust-toolchain@46268bd060767258de96ed93c1251119784f2ab6 # v1
         with:
-          # NOTE: b/514328084 - Crubit generates some code that causes unused-imports warnings. By
-          # default rustflags is "-D warnings" causing the build to fail.
+          # NOTE: b/530101873 - Crubit has some compiler warnings. By default rustflags is
+          # "-D warnings" causing the build to fail.
           rustflags: ""
 
       - name: Install Protobuf
