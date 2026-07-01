@@ -5,16 +5,7 @@
 #include <utility>
 
 #include "crubit_helpers/string_conversions.h"
-#include <chrono>
-#include <ctime>
-#include "absl/time/time.h"
-
-// Workaround for Crubit generating `namespace time` (from the Rust `time` crate)
-// which collides with the C standard library `time()` function in the global namespace.
-// The macro renames Crubit's namespace to `crubit_time_namespace` during header parsing.
-#define time crubit_time_namespace
 #include "crubit/rust.h"
-#undef time
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
 #include "absl/strings/string_view.h"
