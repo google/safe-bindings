@@ -19,6 +19,22 @@ fn invalid_argument_error(message: impl Into<String>) -> Status {
     Err(message.into().into())
 }
 
+#[derive(Default, PartialEq, Clone, Debug)]
+pub struct GetArrayElementError {
+    pub msg: RawString,
+    pub is_out_of_bounds: bool,
+}
+
+impl GetArrayElementError {
+    pub fn new_out_of_bounds(msg: impl Into<String>) -> Self {
+        Self { msg: msg.into().into(), is_out_of_bounds: true }
+    }
+
+    pub fn new_failed_precondition(msg: impl Into<String>) -> Self {
+        Self { msg: msg.into().into(), is_out_of_bounds: false }
+    }
+}
+
 #[derive(Default, PartialEq, Clone)]
 pub struct SerdeJson {
     pub(crate) value: serde_json::Value,
@@ -176,6 +192,33 @@ impl SerdeJson {
         }
     }
 
+    /// Returns an element of an array for a given field name in the JSON.
+    pub fn get_field_array_element(
+        &self,
+        raw_field_name: &[u8],
+        index: usize,
+    ) -> Result<SerdeJson, GetArrayElementError> {
+        let field_name = match std::str::from_utf8(raw_field_name) {
+            Ok(field_name) => field_name,
+            Err(err) => return Err(GetArrayElementError::new_failed_precondition(err.to_string())),
+        };
+        match self.value[field_name].as_array() {
+            Some(a) => match a.get(index) {
+                Some(v) => Ok(Self { value: v.clone() }),
+                None => Err(GetArrayElementError::new_out_of_bounds(format!(
+                    "Index {} out of bounds for array field '{}' of length {}",
+                    index,
+                    field_name,
+                    a.len()
+                ))),
+            },
+            None => Err(GetArrayElementError::new_failed_precondition(format!(
+                "Field '{}' is not array",
+                field_name
+            ))),
+        }
+    }
+
     /// Returns the boolean value of this [SerdeJson] if it is a boolean.
     pub fn get_bool(&self) -> Result<bool, RawString> {
         match self.value.as_bool() {
@@ -213,6 +256,21 @@ impl SerdeJson {
         match self.value.as_array() {
             Some(a) => Ok(std::convert::Into::<VecSerdeJson>::into(a)),
             None => Err("This object is not array".into()),
+        }
+    }
+
+    /// Returns the element of an array at index `index` if the object is an array.
+    pub fn get_array_element(&self, index: usize) -> Result<SerdeJson, GetArrayElementError> {
+        match self.value.as_array() {
+            Some(a) => match a.get(index) {
+                Some(v) => Ok(Self { value: v.clone() }),
+                None => Err(GetArrayElementError::new_out_of_bounds(format!(
+                    "Index {} out of bounds for array of length {}",
+                    index,
+                    a.len()
+                ))),
+            },
+            None => Err(GetArrayElementError::new_failed_precondition("This object is not array")),
         }
     }
 

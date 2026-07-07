@@ -194,6 +194,24 @@ absl::StatusOr<std::vector<SerdeJson>> SerdeJson::GetArray() const {
   return ConvertVecSerdeJsonToVector(std::move(rs_result).value());
 }
 
+absl::StatusOr<SerdeJson> SerdeJson::GetArrayElement(size_t index) const {
+  rs_std::Result<rust::json::SerdeJson,
+                 rust::json::GetArrayElementError>
+      rs_result = json_obj_.get_array_element(index);
+
+  if (!rs_result.has_value()) {
+    rust::json::GetArrayElementError err =
+        std::move(rs_result).err();
+    std::string err_msg = FromRustRawString(err.msg);
+    if (err.is_out_of_bounds) {
+      return absl::OutOfRangeError(std::move(err_msg));
+    }
+    return absl::FailedPreconditionError(std::move(err_msg));
+  }
+
+  return SerdeJson(std::move(rs_result).value());
+}
+
 absl::StatusOr<std::string> SerdeJson::GetFieldString(
     absl::string_view key) const {
   rs_std::Result<rust::raw_string::RawString,
@@ -261,6 +279,28 @@ absl::StatusOr<std::vector<SerdeJson>> SerdeJson::GetFieldArray(
   }
 
   return ConvertVecSerdeJsonToVector(std::move(rs_result).value());
+}
+
+absl::StatusOr<SerdeJson> SerdeJson::GetFieldArrayElement(absl::string_view key,
+                                                          size_t index) const {
+  rs_std::Result<rust::json::SerdeJson,
+                 rust::json::GetArrayElementError>
+      rs_result = json_obj_.get_field_array_element(
+          absl::Span<const uint8_t>(
+              reinterpret_cast<const uint8_t*>(key.data()), key.size()),
+          index);
+
+  if (!rs_result.has_value()) {
+    rust::json::GetArrayElementError err =
+        std::move(rs_result).err();
+    std::string err_msg = FromRustRawString(err.msg);
+    if (err.is_out_of_bounds) {
+      return absl::OutOfRangeError(std::move(err_msg));
+    }
+    return absl::FailedPreconditionError(std::move(err_msg));
+  }
+
+  return SerdeJson(std::move(rs_result).value());
 }
 
 bool SerdeJson::IsNull() const { return json_obj_.is_null(); }

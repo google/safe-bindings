@@ -38,6 +38,7 @@ class SerdeJson final {
   absl::StatusOr<std::string> GetString() const;
   absl::StatusOr<double> GetDouble() const;
   absl::StatusOr<std::vector<SerdeJson>> GetArray() const;
+  absl::StatusOr<SerdeJson> GetArrayElement(size_t index) const;
 
   // Returns a node of the corresponding `key` field of this json object.
   // Used when we don't know the type or for objects.
@@ -51,6 +52,8 @@ class SerdeJson final {
   absl::StatusOr<SerdeJson> GetFieldObject(absl::string_view key) const;
   absl::StatusOr<std::vector<SerdeJson>> GetFieldArray(
       absl::string_view key) const;
+  absl::StatusOr<SerdeJson> GetFieldArrayElement(absl::string_view key,
+                                                 size_t index) const;
 
   // Methods for checking the type of this json node.
   bool IsNull() const;
