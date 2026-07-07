@@ -9,6 +9,7 @@
 
 #include "support/rs_std/str_ref.h"
 #include "crubit/rust.h"
+#include "absl/base/attributes.h"
 #include "absl/status/statusor.h"
 #include "absl/strings/string_view.h"
 
@@ -42,6 +43,11 @@ class NodeView {
   // Returns a `NodeView` at `index`
   // Use `IsDefined()` to check if the returned node is defined to avoid
   // invalid pointer access.
+  // Note: NodeView methods deliberately omit ABSL_ATTRIBUTE_LIFETIME_BOUND.
+  // NodeView is a trivially-copyable pointer into the root Node's data, so
+  // chaining (e.g., view["a"]["b"]) is safe -- all returned NodeViews borrow
+  // from the same root Node, not from intermediate temporaries. The lifetime
+  // annotation is on Node's methods instead.
   NodeView operator[](size_t index) const;
   // Required to resolve overload ambiguity between size_t and const char*
   // for numeric literals like 0. It also checks for negative indices.
@@ -205,25 +211,27 @@ class Node {
   // Accesses an element in a map by key.
   // Returns a `NodeView` for which `IsDefined()` is false if the node is not a
   // map or the key is not found.
-  NodeView operator[](rs_std::StrRef key) const;
-  NodeView operator[](const char* key) const {
+  NodeView operator[](rs_std::StrRef key) const ABSL_ATTRIBUTE_LIFETIME_BOUND;
+  NodeView operator[](const char* key) const ABSL_ATTRIBUTE_LIFETIME_BOUND {
     return operator[](rs_std::StrRef::FromUtf8Unchecked(key));
   }
-  NodeView operator[](absl::string_view key) const {
+  NodeView operator[](absl::string_view key) const
+      ABSL_ATTRIBUTE_LIFETIME_BOUND {
     return operator[](rs_std::StrRef::FromUtf8Unchecked(key));
   }
   // Accesses an element in a sequence by index.
   // Returns a `NodeView` for which `IsDefined()` is false if the node is not a
   // sequence or the index is out of bounds.
-  NodeView operator[](size_t index) const;
-  NodeView operator[](int index) const {
+  NodeView operator[](size_t index) const ABSL_ATTRIBUTE_LIFETIME_BOUND;
+  NodeView operator[](int index) const ABSL_ATTRIBUTE_LIFETIME_BOUND {
     return index < 0 ? NodeView() : operator[](static_cast<size_t>(index));
   }
 
   // A safer version of `operator[]` for sequence.
-  std::optional<NodeView> Get(size_t index) const;
+  std::optional<NodeView> Get(size_t index) const ABSL_ATTRIBUTE_LIFETIME_BOUND;
   // A safer version of `operator[]` for map.
-  std::optional<NodeView> Get(rs_std::StrRef key) const;
+  std::optional<NodeView> Get(rs_std::StrRef key) const
+      ABSL_ATTRIBUTE_LIFETIME_BOUND;
 
   // Sets the value at a given index in a sequence.
   // If `index` is within bounds, the existing value is replaced.
@@ -237,7 +245,7 @@ class Node {
   std::optional<T> as_optional() const;
 
   // Returns a view into the node.
-  NodeView as_view() const;
+  NodeView as_view() const ABSL_ATTRIBUTE_LIFETIME_BOUND;
 
  private:
   rust::NodeOwned node_;

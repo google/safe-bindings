@@ -473,7 +473,7 @@ class Field {
   /**
    * The value of this field.
    */
-  const Value& value() const { return value_; };
+  const Value& value() const ABSL_ATTRIBUTE_LIFETIME_BOUND { return value_; };
 
  private:
   friend class Exif;
@@ -604,7 +604,7 @@ class ExifBytes final {
   /**
    * Returns a view to the Exif data.
    */
-  absl::Span<const uint8_t> view() const {
+  absl::Span<const uint8_t> view() const ABSL_ATTRIBUTE_LIFETIME_BOUND {
     return absl::Span<const uint8_t>(vec_.as_ptr(), vec_.len());
   }
 

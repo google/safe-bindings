@@ -6,6 +6,7 @@
 
 #include "crubit_helpers/string_conversions.h"
 #include "crubit/rust.h"
+#include "absl/base/attributes.h"
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
 #include "absl/strings/string_view.h"
@@ -20,7 +21,7 @@ class RustVecU8Wrapper {
   explicit RustVecU8Wrapper(rust::VecU8 vec_u8)
       : vec_u8_(std::move(vec_u8)) {}
 
-  absl::string_view AsStringView() const {
+  absl::string_view AsStringView() const ABSL_ATTRIBUTE_LIFETIME_BOUND {
     return security::crubit_helpers::StringViewFromVecU8(vec_u8_);
   }
 
