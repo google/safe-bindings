@@ -120,10 +120,37 @@ void BM_SerdeJson_AccessPath(benchmark::State& state,
   std::string json_document = LoadJson(json_file);
   SerdeJson parsed = gtl::ValueOrDie(SerdeJson::Parse(json_document));
   for (auto s : state) {
-    std::vector<SerdeJson> elements =
-        gtl::ValueOrDie(parsed.GetFieldArray("dataFeedElement"));
-    std::string name = gtl::ValueOrDie(elements[0].GetFieldString("name"));
+    SerdeJson data_feed_element =
+        gtl::ValueOrDie(parsed.GetFieldArrayElement("dataFeedElement", 0));
+    std::string name =
+        gtl::ValueOrDie(data_feed_element.GetFieldString("name"));
     benchmark::DoNotOptimize(name);
+  }
+}
+
+void BM_Nlohmann_SetValueNested(benchmark::State& state,
+                                absl::string_view json_file) {
+  std::string json_document = LoadJson(json_file);
+  nlohmann::json parsed = nlohmann::json::parse(json_document);
+  for (auto s : state) {
+    parsed["dataFeedElement"].push_back("name");
+    benchmark::DoNotOptimize(parsed);
+    parsed["dataFeedElement"].erase(parsed["dataFeedElement"].size() - 1);
+  }
+}
+
+void BM_SerdeJson_SetValueNested(benchmark::State& state,
+                                 absl::string_view json_file) {
+  std::string json_document = LoadJson(json_file);
+  SerdeJson parsed = gtl::ValueOrDie(SerdeJson::Parse(json_document));
+  SerdeJson name_val = gtl::ValueOrDie(SerdeJson::CreateString("name"));
+  for (auto s : state) {
+    std::vector<SerdeJson> array =
+        gtl::ValueOrDie(parsed.GetFieldArray("dataFeedElement"));
+    array.push_back(name_val);
+    benchmark::DoNotOptimize(parsed.AddFieldArray("dataFeedElement", array));
+    array.pop_back();
+    benchmark::DoNotOptimize(parsed.AddFieldArray("dataFeedElement", array));
   }
 }
 
@@ -153,6 +180,10 @@ void BM_SerdeJson_AccessPath(benchmark::State& state,
                                BM_Nlohmann_AccessPath, "large.json");
   benchmark::RegisterBenchmark("BM_SerdeJson_AccessPath_LargeDoc",
                                BM_SerdeJson_AccessPath, "large.json");
+  benchmark::RegisterBenchmark("BM_Nlohmann_SetValueNested_LargeDoc",
+                               BM_Nlohmann_SetValueNested, "large.json");
+  benchmark::RegisterBenchmark("BM_SerdeJson_SetValueNested_LargeDoc",
+                               BM_SerdeJson_SetValueNested, "large.json");
   return false;
 }();
 
