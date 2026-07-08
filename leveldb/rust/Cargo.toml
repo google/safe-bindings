@@ -1,0 +1,15 @@
+[package]
+name = "rust"
+version = "0.1.0"
+edition = "2024"
+license-file = "../../LICENSE"
+
+[lib]
+path = "lib.rs"
+doctest = false
+
+[dependencies]
+rusty-leveldb = "4.0"
+bytes = "1.5"
+paste = "1.0"
+crubit_annotate = "0.1.0"
