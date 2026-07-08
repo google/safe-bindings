@@ -286,7 +286,6 @@ impl Frames {
 }
 
 fn format_panic(err: Box<dyn std::any::Any + Send>) -> String {
-    let backtrace = std::backtrace::Backtrace::capture();
     let msg = if let Some(msg) = err.downcast_ref::<&str>() {
         *msg
     } else if let Some(msg) = err.downcast_ref::<String>() {
@@ -294,9 +293,17 @@ fn format_panic(err: Box<dyn std::any::Any + Send>) -> String {
     } else {
         "Unknown panic payload"
     };
+
+    // Capturing backtraces under TSAN can cause deadlocks.
+    let backtrace = if std::env::var("RUST_BACKTRACE").is_ok() {
+        format!("\nBacktrace:\n{}", std::backtrace::Backtrace::capture())
+    } else {
+        String::new()
+    };
+
     // This error message needs to start with "Rust panic caught", as
     // that is how we identify it on the C++ side.
-    format!("Rust panic caught: {}\nBacktrace:\n{}", msg, backtrace)
+    format!("Rust panic caught: {}{}", msg, backtrace)
 }
 
 fn run_catching_panics<F, T>(f: F) -> Result<T, String>
