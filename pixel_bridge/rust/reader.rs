@@ -2,12 +2,14 @@ use crate::{
     image::{GenericImageDecoder, ImageDecoder},
     vec_u8::VecU8,
 };
-use image::{
-    codecs::bmp::BmpDecoder as RustBmpDecoder, codecs::gif::GifDecoder as RustGifDecoder,
-    codecs::ico::IcoDecoder as RustIcoDecoder, codecs::jpeg::JpegDecoder as RustJpegDecoder,
-    codecs::png::PngDecoder as RustPngDecoder, codecs::tiff::TiffDecoder as RustTiffDecoder,
-    codecs::webp::WebPDecoder as RustWebPDecoder, ImageFormat, ImageReader as RustImageReader,
-};
+use image::codecs::bmp::BmpDecoder as RustBmpDecoder;
+use image::codecs::gif::GifDecoder as RustGifDecoder;
+use image::codecs::ico::IcoDecoder as RustIcoDecoder;
+use image::codecs::jpeg::JpegDecoder as RustJpegDecoder;
+use image::codecs::png::PngDecoder as RustPngDecoder;
+use image::codecs::tiff::TiffDecoder as RustTiffDecoder;
+use image::codecs::webp::WebPDecoder as RustWebPDecoder;
+use image::{ImageFormat, ImageReader as RustImageReader};
 use std::fs::File;
 use std::io::{BufRead, BufReader, Cursor, Read, Seek};
 
@@ -46,6 +48,7 @@ pub enum Format {
     Ico,
 }
 
+#[doc(hidden)]
 impl From<Format> for ImageFormat {
     fn from(value: Format) -> ImageFormat {
         match value {
@@ -117,7 +120,7 @@ impl ImageReader {
         // Delegate to non-inlined helper functions to reduce the stack frame size by 4k.
         match inner.format() {
             Some(ImageFormat::Png) => png(inner),
-            Some(ImageFormat::Jpeg) => jpeg(inner),
+            Some(ImageFormat::Jpeg) => jpeg(inner, self.jpeg_strict_mode),
             Some(ImageFormat::WebP) => webp(inner),
             Some(ImageFormat::Gif) => gif(inner),
             Some(ImageFormat::Tiff) => tiff(inner),
@@ -138,10 +141,9 @@ fn png(
 }
 
 #[inline(never)]
-fn jpeg(
-    d: RustImageReader<Box<dyn ReadSeek>>,
-) -> Result<ImageDecoder, String> {
-    let decoder = RustJpegDecoder::new(d.into_inner()).map_err(|e| e.to_string())?;
+fn jpeg(d: RustImageReader<Box<dyn ReadSeek>>, strict_mode: bool) -> Result<ImageDecoder, String> {
+    let mut decoder = RustJpegDecoder::new(d.into_inner()).map_err(|e| e.to_string())?;
+    decoder.set_strict_mode(strict_mode);
     Ok(ImageDecoder::new(GenericImageDecoder::Jpeg(Box::new(decoder))))
 }
 
@@ -163,8 +165,6 @@ fn gif(d: RustImageReader<Box<dyn ReadSeek>>) -> Result<ImageDecoder, String> {
 fn tiff(d: RustImageReader<Box<dyn ReadSeek>>) -> Result<ImageDecoder, String> {
     let mut reader = d.into_inner();
     let mut should_premultiply = false;
-
-    // Check if we should premultiply based on ExtraSamples tag
     {
         let tiff_decoder_result = tiff::decoder::Decoder::new(&mut *reader);
         if let Ok(mut decoder) = tiff_decoder_result
@@ -176,10 +176,7 @@ fn tiff(d: RustImageReader<Box<dyn ReadSeek>>) -> Result<ImageDecoder, String> {
             should_premultiply = true;
         }
     }
-
-    // Seek back to start before passing to image crate decoder
     reader.seek(std::io::SeekFrom::Start(0)).map_err(|e| e.to_string())?;
-
     let mut image_decoder = ImageDecoder::new(GenericImageDecoder::Tiff(Box::new(
         RustTiffDecoder::new(reader).map_err(|e| e.to_string())?,
     )));
