@@ -303,7 +303,7 @@ fn run_catching_panics<F, T>(f: F) -> Result<T, String>
 where
     F: FnOnce() -> T,
 {
-    // b/372147306 - The image crate can panic on malformed input.
+    // b/491846166 - The image crate can panic on malformed input.
     match std::panic::catch_unwind(std::panic::AssertUnwindSafe(f)) {
         Ok(res) => Ok(res),
         Err(err) => {
