@@ -121,7 +121,7 @@ std::string FormatToString(Format format) {
 }
 
 inline absl::Status ToStatus(rust::image::Status status) {
-  if (!status.has_value()) {
+  if (status.has_value()) {
     return absl::OkStatus();
   }
   return absl::InternalError(StringViewFromVecU8(std::move(status).err()));
