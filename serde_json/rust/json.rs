@@ -1,6 +1,7 @@
 use crate::make_vec_type;
 use crate::raw_string::RawString;
 use serde::Serialize;
+use std::sync::Arc;
 // NOTE: b/517030085 - Crubit doesn't seem to support () here, so using a u8 for now.
 pub type Status = Result<u8, RawString>;
 
@@ -35,24 +36,78 @@ impl GetArrayElementError {
     }
 }
 
-#[derive(Default, PartialEq, Clone)]
+#[derive(Clone)]
 pub struct SerdeJson {
-    pub(crate) value: serde_json::Value,
+    pub(crate) root: Arc<serde_json::Value>,
+    pub(crate) node: *const serde_json::Value,
+}
+
+// SAFETY: `SerdeJson` contains a raw pointer (`node`) which makes it `!Send` and `!Sync` by
+// default. However, `node` always points into `root` (`Arc<serde_json::Value>`), which keeps the
+// target memory valid and immutable for the lifetime of this struct. Since `serde_json::Value` and
+// `Arc<T>` are both `Send` and `Sync`, and mutation is strictly guarded by `Arc::make_mut` on the
+// root node, sending or sharing `SerdeJson` across threads cannot cause data races or memory
+// corruption.
+unsafe impl Send for SerdeJson {}
+// SAFETY: See `Send` safety justification above; immutable concurrent access to `node` guarded by
+// `Arc` is thread-safe.
+unsafe impl Sync for SerdeJson {}
+
+impl Default for SerdeJson {
+    fn default() -> Self {
+        Self::create_null()
+    }
+}
+
+impl PartialEq for SerdeJson {
+    fn eq(&self, other: &Self) -> bool {
+        self.as_value() == other.as_value()
+    }
 }
 
 impl std::fmt::Debug for SerdeJson {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
-        write!(f, "SerdeJson")
+        write!(f, "SerdeJson({:?})", self.as_value())
     }
 }
 
 impl From<&Vec<serde_json::Value>> for VecSerdeJson {
     fn from(value: &Vec<serde_json::Value>) -> Self {
-        value.iter().map(|v| SerdeJson { value: v.clone() }).collect::<Vec<SerdeJson>>().into()
+        value.iter().map(|v| SerdeJson::from_value(v.clone())).collect::<Vec<SerdeJson>>().into()
     }
 }
 
 impl SerdeJson {
+    fn from_value(value: serde_json::Value) -> Self {
+        let root = Arc::new(value);
+        let node = Arc::as_ptr(&root);
+        Self { root, node }
+    }
+
+    fn as_sub_node(&self, sub_node: &serde_json::Value) -> Self {
+        Self { root: self.root.clone(), node: sub_node as *const serde_json::Value }
+    }
+
+    fn as_value(&self) -> &serde_json::Value {
+        // SAFETY: `self.node` is guaranteed to be non-null, properly aligned, and pointing to a
+        // valid `serde_json::Value` owned by `self.root`. The memory is kept alive by `self.root`'s
+        // `Arc` reference count for at least the lifetime of `&self`. Furthermore, no mutable
+        // aliasing can occur because mutating methods require `&mut self` and use `Arc::make_mut`
+        // which clones on shared ownership), preserving immutability for existing views.
+        unsafe { &*self.node }
+    }
+
+    fn as_mut_value(&mut self) -> Result<&mut serde_json::Value, Status> {
+        if std::ptr::eq(self.node, Arc::as_ptr(&self.root)) {
+            let root_mut = Arc::make_mut(&mut self.root);
+            let ptr = root_mut as *mut serde_json::Value;
+            self.node = ptr;
+            Ok(root_mut)
+        } else {
+            Err(internal_error("Cannot mutate a sub-node view of a shared SerdeJson object"))
+        }
+    }
+
     /// Creates a new [SerdeJson] from provided string buffer `raw_data`.
     pub fn parse_string(raw_data: &[u8]) -> Result<SerdeJson, RawString> {
         let data = match std::str::from_utf8(raw_data) {
@@ -61,38 +116,38 @@ impl SerdeJson {
         };
 
         match serde_json::from_str(data) {
-            Ok(value) => Ok(Self { value }),
+            Ok(value) => Ok(Self::from_value(value)),
             Err(err) => Err(err.to_string().into()),
         }
     }
 
     /// Creates a new [SerdeJson] of type object
     pub fn create_object() -> Self {
-        SerdeJson { value: serde_json::json!({}) }
+        Self::from_value(serde_json::json!({}))
     }
 
     /// Creates a new [SerdeJson] of type i64
     pub fn create_int(v: i64) -> Self {
-        SerdeJson { value: serde_json::json!(v) }
+        Self::from_value(serde_json::json!(v))
     }
 
     /// Creates a new [SerdeJson] of type double
     /// Returns error if value is NaN or infinity.
     pub fn create_double(v: f64) -> Result<SerdeJson, RawString> {
         match serde_json::Number::from_f64(v) {
-            Some(n) => Ok(SerdeJson { value: serde_json::Value::Number(n) }),
+            Some(n) => Ok(Self::from_value(serde_json::Value::Number(n))),
             None => Err(format!("Invalid JSON number: {}", v).into()),
         }
     }
 
     /// Creates a new [SerdeJson] of type bool
     pub fn create_bool(v: bool) -> Self {
-        SerdeJson { value: serde_json::json!(v) }
+        Self::from_value(serde_json::json!(v))
     }
 
     /// Creates a new [SerdeJson] of type null
     pub fn create_null() -> Self {
-        SerdeJson { value: serde_json::Value::Null }
+        Self::from_value(serde_json::Value::Null)
     }
 
     /// Creates a new [SerdeJson] of type string
@@ -101,7 +156,7 @@ impl SerdeJson {
             Ok(data) => data,
             Err(err) => return Err(err.to_string().into()),
         };
-        Ok(SerdeJson { value: serde_json::json!(value) })
+        Ok(Self::from_value(serde_json::json!(value)))
     }
 
     /// Returns a new [SerdeJson] for a given field name in the JSON.
@@ -113,8 +168,8 @@ impl SerdeJson {
             Ok(field_name) => field_name,
             Err(err) => return Err(err.to_string().into()),
         };
-        match self.value.get(field_name) {
-            Some(value) => Ok(Self { value: value.clone() }),
+        match self.as_value().get(field_name) {
+            Some(value) => Ok(self.as_sub_node(value)),
             None => Err(format!("Field '{}' not found in JSON object", field_name).into()),
         }
     }
@@ -125,7 +180,7 @@ impl SerdeJson {
             Ok(field_name) => field_name,
             Err(err) => return Err(err.to_string().into()),
         };
-        match self.value[field_name].as_str() {
+        match self.as_value()[field_name].as_str() {
             Some(s) => Ok(s.into()),
             None => Err(format!("Field '{}' is not string", field_name).into()),
         }
@@ -137,7 +192,7 @@ impl SerdeJson {
             Ok(field_name) => field_name,
             Err(err) => return Err(err.to_string().into()),
         };
-        match self.value[field_name].as_bool() {
+        match self.as_value()[field_name].as_bool() {
             Some(b) => Ok(b),
             None => Err(format!("Field '{}' is not boolean", field_name).into()),
         }
@@ -149,7 +204,7 @@ impl SerdeJson {
             Ok(field_name) => field_name,
             Err(err) => return Err(err.to_string().into()),
         };
-        match self.value[field_name].as_i64() {
+        match self.as_value()[field_name].as_i64() {
             Some(i) => Ok(i),
             None => Err(format!("Field '{}' is not integer", field_name).into()),
         }
@@ -162,8 +217,8 @@ impl SerdeJson {
             Ok(field_name) => field_name,
             Err(err) => return Err(err.to_string().into()),
         };
-        match &self.value[field_name] {
-            o @ serde_json::Value::Object(_) => Ok(Self { value: o.clone() }),
+        match &self.as_value()[field_name] {
+            o @ serde_json::Value::Object(_) => Ok(self.as_sub_node(o)),
             _ => Err(format!("Field '{}' is not object", field_name).into()),
         }
     }
@@ -174,7 +229,7 @@ impl SerdeJson {
             Ok(field_name) => field_name,
             Err(err) => return Err(err.to_string().into()),
         };
-        match self.value[field_name].as_f64() {
+        match self.as_value()[field_name].as_f64() {
             Some(f) => Ok(f),
             None => Err(format!("Field '{}' is not double", field_name).into()),
         }
@@ -186,8 +241,8 @@ impl SerdeJson {
             Ok(field_name) => field_name,
             Err(err) => return Err(err.to_string().into()),
         };
-        match self.value[field_name].as_array() {
-            Some(a) => Ok(std::convert::Into::<VecSerdeJson>::into(a)),
+        match self.as_value()[field_name].as_array() {
+            Some(a) => Ok(a.iter().map(|v| self.as_sub_node(v)).collect::<Vec<SerdeJson>>().into()),
             None => Err(format!("Field '{}' is not array", field_name).into()),
         }
     }
@@ -202,9 +257,9 @@ impl SerdeJson {
             Ok(field_name) => field_name,
             Err(err) => return Err(GetArrayElementError::new_failed_precondition(err.to_string())),
         };
-        match self.value[field_name].as_array() {
+        match self.as_value()[field_name].as_array() {
             Some(a) => match a.get(index) {
-                Some(v) => Ok(Self { value: v.clone() }),
+                Some(v) => Ok(self.as_sub_node(v)),
                 None => Err(GetArrayElementError::new_out_of_bounds(format!(
                     "Index {} out of bounds for array field '{}' of length {}",
                     index,
@@ -221,7 +276,7 @@ impl SerdeJson {
 
     /// Returns the boolean value of this [SerdeJson] if it is a boolean.
     pub fn get_bool(&self) -> Result<bool, RawString> {
-        match self.value.as_bool() {
+        match self.as_value().as_bool() {
             Some(b) => Ok(b),
             None => Err("This object is not boolean".into()),
         }
@@ -229,7 +284,7 @@ impl SerdeJson {
 
     /// Returns the int value of this [SerdeJson] if it is a int.
     pub fn get_int(&self) -> Result<i64, RawString> {
-        match self.value.as_i64() {
+        match self.as_value().as_i64() {
             Some(i) => Ok(i),
             None => Err("This object is not integer".into()),
         }
@@ -237,7 +292,7 @@ impl SerdeJson {
 
     /// Returns the double value of this [SerdeJson] if it is a double.
     pub fn get_double(&self) -> Result<f64, RawString> {
-        match self.value.as_f64() {
+        match self.as_value().as_f64() {
             Some(f) => Ok(f),
             None => Err("This object is not double".into()),
         }
@@ -245,7 +300,7 @@ impl SerdeJson {
 
     /// Returns the string value of this [SerdeJson] if it is a string.
     pub fn get_string(&self) -> Result<RawString, RawString> {
-        match self.value.as_str() {
+        match self.as_value().as_str() {
             Some(s) => Ok(s.into()),
             None => Err("This object is not string".into()),
         }
@@ -253,17 +308,17 @@ impl SerdeJson {
 
     /// Returns the array of [SerdeJson] if the object is an array.
     pub fn get_array(&self) -> Result<VecSerdeJson, RawString> {
-        match self.value.as_array() {
-            Some(a) => Ok(std::convert::Into::<VecSerdeJson>::into(a)),
+        match self.as_value().as_array() {
+            Some(a) => Ok(a.iter().map(|v| self.as_sub_node(v)).collect::<Vec<SerdeJson>>().into()),
             None => Err("This object is not array".into()),
         }
     }
 
     /// Returns the element of an array at index `index` if the object is an array.
     pub fn get_array_element(&self, index: usize) -> Result<SerdeJson, GetArrayElementError> {
-        match self.value.as_array() {
+        match self.as_value().as_array() {
             Some(a) => match a.get(index) {
-                Some(v) => Ok(Self { value: v.clone() }),
+                Some(v) => Ok(self.as_sub_node(v)),
                 None => Err(GetArrayElementError::new_out_of_bounds(format!(
                     "Index {} out of bounds for array of length {}",
                     index,
@@ -276,56 +331,56 @@ impl SerdeJson {
 
     /// Returns true if this [SerdeJson] is null.
     pub fn is_null(&self) -> bool {
-        self.value.is_null()
+        self.as_value().is_null()
     }
 
     /// Returns true if this [SerdeJson] is boolean.
     pub fn is_boolean(&self) -> bool {
-        self.value.is_boolean()
+        self.as_value().is_boolean()
     }
 
     /// Returns true if this [SerdeJson] is number.
     pub fn is_number(&self) -> bool {
-        self.value.is_number()
+        self.as_value().is_number()
     }
 
     /// Returns true if this [SerdeJson] is i64.
     pub fn is_i64(&self) -> bool {
-        self.value.is_i64()
+        self.as_value().is_i64()
     }
 
     /// Returns true if this [SerdeJson] is f64.
     pub fn is_f64(&self) -> bool {
-        self.value.is_f64()
+        self.as_value().is_f64()
     }
 
     /// Returns true if this [SerdeJson] is string.
     pub fn is_string(&self) -> bool {
-        self.value.is_string()
+        self.as_value().is_string()
     }
 
     /// Returns true if this [SerdeJson] is array.
     pub fn is_array(&self) -> bool {
-        self.value.is_array()
+        self.as_value().is_array()
     }
 
     /// Returns true if this [SerdeJson] is object.
     pub fn is_object(&self) -> bool {
-        self.value.is_object()
+        self.as_value().is_object()
     }
 
     /// Converts a [SerdeJson] to a string.
     pub fn to_string(&self, sort_keys: bool) -> RawString {
         if sort_keys {
-            let mut value = self.value.clone();
+            let mut value = self.as_value().clone();
             value.sort_all_objects();
             return value.to_string().into();
         }
-        self.value.to_string().into()
+        self.as_value().to_string().into()
     }
 
     pub fn get_keys(&self) -> Result<VecRawString, RawString> {
-        let object = match self.value.as_object() {
+        let object = match self.as_value().as_object() {
             Some(o) => o,
             None => return Err("This isn't a object".into()),
         };
@@ -336,7 +391,7 @@ impl SerdeJson {
     /// Returns true if the JSON object contains the given field.
     pub fn has_field(&self, raw_field_name: &[u8]) -> Result<bool, RawString> {
         match std::str::from_utf8(raw_field_name) {
-            Ok(field_name) => Ok(self.value.get(field_name).is_some()),
+            Ok(field_name) => Ok(self.as_value().get(field_name).is_some()),
             Err(err) => Err(err.to_string().into()),
         }
     }
@@ -348,16 +403,16 @@ impl SerdeJson {
             Err(err) => return invalid_argument_error(err.to_string()),
         };
 
-        if let serde_json::Value::Object(map) = &mut self.value {
-            match serde_json::to_value(value) {
+        match self.as_mut_value() {
+            Ok(serde_json::Value::Object(map)) => match serde_json::to_value(value) {
                 Ok(json_value) => {
                     map.insert(field_name.to_string(), json_value);
                     ok()
                 }
                 Err(err) => invalid_argument_error(format!("Failed to serialize value: {}", err)),
-            }
-        } else {
-            internal_error("JSON value is not an object")
+            },
+            Ok(_) => internal_error("JSON value is not an object"),
+            Err(status) => status,
         }
     }
 
@@ -392,20 +447,20 @@ impl SerdeJson {
 
     /// Adds an object field to the JSON object.
     pub fn add_field_object(&mut self, raw_field_name: &[u8], obj: SerdeJson) -> Status {
-        self.add_field(raw_field_name, obj.value)
+        self.add_field(raw_field_name, obj.as_value().clone())
     }
 
     /// Adds an array field to the JSON object.
     pub fn add_field_array(&mut self, raw_field_name: &[u8], items: &[SerdeJson]) -> Status {
         self.add_field(
             raw_field_name,
-            items.iter().map(|v| v.value.clone()).collect::<Vec<serde_json::Value>>(),
+            items.iter().map(|v| v.as_value().clone()).collect::<Vec<serde_json::Value>>(),
         )
     }
 
     /// Compares two SerdeJson objects.
     pub fn is_json_equal(&self, other: &Self) -> bool {
-        self.value == other.value
+        self.as_value() == other.as_value()
     }
 }
 
