@@ -57,6 +57,7 @@ class SerdeJson final {
 
   // Methods for checking the type of this json node.
   bool IsNull() const;
+  bool IsEmpty() const;
   bool IsObject() const;
   bool IsArray() const;
   bool IsString() const;

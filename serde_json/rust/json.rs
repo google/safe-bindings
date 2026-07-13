@@ -274,6 +274,16 @@ impl SerdeJson {
         }
     }
 
+    /// Returns true if this [SerdeJson] is empty.
+    pub fn is_empty(&self) -> bool {
+        match &self.value {
+            serde_json::Value::Null => true,
+            serde_json::Value::Array(arr) => arr.is_empty(),
+            serde_json::Value::Object(obj) => obj.is_empty(),
+            _ => false,
+        }
+    }
+
     /// Returns true if this [SerdeJson] is null.
     pub fn is_null(&self) -> bool {
         self.value.is_null()

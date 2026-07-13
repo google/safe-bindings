@@ -305,6 +305,8 @@ absl::StatusOr<SerdeJson> SerdeJson::GetFieldArrayElement(absl::string_view key,
 
 bool SerdeJson::IsNull() const { return json_obj_.is_null(); }
 
+bool SerdeJson::IsEmpty() const { return json_obj_.is_empty(); }
+
 bool SerdeJson::IsObject() const { return json_obj_.is_object(); }
 
 bool SerdeJson::IsArray() const { return json_obj_.is_array(); }
