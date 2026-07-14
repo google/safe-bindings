@@ -2,11 +2,14 @@ use crate::{
     reader::{Format, ReadSeek},
     vec_u8::VecU8,
 };
+use image::codecs::bmp::BmpDecoder as RustBmpDecoder;
+use image::codecs::gif::GifDecoder as RustGifDecoder;
+use image::codecs::ico::IcoDecoder as RustIcoDecoder;
+use image::codecs::jpeg::JpegDecoder as RustJpegDecoder;
+use image::codecs::tiff::TiffDecoder as RustTiffDecoder;
+use image::codecs::webp::WebPDecoder as RustWebPDecoder;
 use image::{
-    codecs::bmp::BmpDecoder as RustBmpDecoder, codecs::gif::GifDecoder as RustGifDecoder,
-    codecs::ico::IcoDecoder as RustIcoDecoder, codecs::jpeg::JpegDecoder as RustJpegDecoder,
-    codecs::png::PngDecoder as RustPngDecoder, codecs::tiff::TiffDecoder as RustTiffDecoder,
-    codecs::webp::WebPDecoder as RustWebPDecoder, flat::SampleLayout as RustSampleLayout,
+    codecs::png::PngDecoder as RustPngDecoder, flat::SampleLayout as RustSampleLayout,
     AnimationDecoder, ColorType as RustColorType, ExtendedColorType as RustExtendedColorType,
     Frame as RustFrame, ImageBuffer as RustImageBuffer, ImageDecoder as RustImageDecoder,
     Rgba as RustRgba,
@@ -162,6 +165,7 @@ pub enum PixelType {
     F32,
 }
 
+#[doc(hidden)]
 impl From<RustColorType> for PixelType {
     fn from(value: RustColorType) -> Self {
         match value {
@@ -202,6 +206,7 @@ pub struct Strides {
     pub channels: usize,
 }
 
+#[doc(hidden)]
 impl From<RustColorType> for ColorType {
     fn from(value: RustColorType) -> Self {
         match value {
