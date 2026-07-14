@@ -1,0 +1,28 @@
+syntax = "proto3";
+
+package security.json.serde_json_bridge.contrib;
+
+enum SimpleEnum {
+  SIMPLE_ENUM_UNSPECIFIED = 0;
+  SIMPLE_ENUM_A = 1;
+  SIMPLE_ENUM_B = 2;
+  SIMPLE_ENUM_C = 3;
+}
+
+message SimpleMessage {
+  string string_field = 1;
+  int32 int32_field = 2;
+  bool bool_field = 3;
+  SimpleEnum enum_field = 4;
+}
+
+message NestedMessage {
+  string value = 1;
+}
+
+message ComplexMessage {
+  SimpleMessage simple = 1;
+  repeated string repeated_string = 2;
+  NestedMessage nested = 3;
+  repeated NestedMessage repeated_nested = 4;
+}
