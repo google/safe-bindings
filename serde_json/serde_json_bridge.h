@@ -26,6 +26,7 @@ class SerdeJson final {
 
   // Creates a new SerdeJson of a given type.
   static absl::StatusOr<SerdeJson> CreateObject();
+  static absl::StatusOr<SerdeJson> CreateArray();
   static absl::StatusOr<SerdeJson> CreateInt(int64_t value);
   static absl::StatusOr<SerdeJson> CreateBool(bool value);
   static absl::StatusOr<SerdeJson> CreateDouble(double value);

@@ -51,6 +51,10 @@ absl::StatusOr<SerdeJson> SerdeJson::CreateObject() {
   return SerdeJson(rust::json::SerdeJson::create_object());
 }
 
+absl::StatusOr<SerdeJson> SerdeJson::CreateArray() {
+  return SerdeJson(rust::json::SerdeJson::create_array());
+}
+
 absl::StatusOr<SerdeJson> SerdeJson::CreateInt(int64_t value) {
   return SerdeJson(rust::json::SerdeJson::create_int(value));
 }

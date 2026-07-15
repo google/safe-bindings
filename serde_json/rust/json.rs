@@ -71,6 +71,11 @@ impl SerdeJson {
         SerdeJson { value: serde_json::json!({}) }
     }
 
+    /// Creates a new [SerdeJson] of type array
+    pub fn create_array() -> Self {
+        SerdeJson { value: serde_json::json!([]) }
+    }
+
     /// Creates a new [SerdeJson] of type i64
     pub fn create_int(v: i64) -> Self {
         SerdeJson { value: serde_json::json!(v) }
