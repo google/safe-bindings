@@ -194,9 +194,30 @@ fn bmp(d: RustImageReader<Box<dyn ReadSeek>>) -> Result<ImageDecoder, String> {
     ))))
 }
 
+/// Maximum number of directory entries we accept in an ICO file.
+///
+/// The ICO format allows up to `u16::MAX` (65535) entries. We enforce a much smaller cap here to bound the
+/// work the decoder performs on untrusted input.
+const MAX_ICO_ENTRIES: u16 = 16;
+
 #[inline(never)]
 fn ico(d: RustImageReader<Box<dyn ReadSeek>>) -> Result<ImageDecoder, String> {
+    let mut reader = d.into_inner();
+    let start = reader.stream_position().map_err(|e| e.to_string())?;
+
+    // ICONDIR header layout: bytes [0..2] = reserved, [2..4] = type,
+    // [4..6] = number of directory entries (little-endian u16).
+    let mut header = [0u8; 6];
+    reader.read_exact(&mut header).map_err(|e| e.to_string())?;
+    let count = u16::from_le_bytes([header[4], header[5]]);
+
+    reader.seek(std::io::SeekFrom::Start(start)).map_err(|e| e.to_string())?;
+
+    if count > MAX_ICO_ENTRIES {
+        return Err(format!("ICO file has too many entries: {count} (max {MAX_ICO_ENTRIES})"));
+    }
+
     Ok(ImageDecoder::new(GenericImageDecoder::Ico(Box::new(
-        RustIcoDecoder::new(d.into_inner()).map_err(|e| e.to_string())?,
+        RustIcoDecoder::new(reader).map_err(|e| e.to_string())?,
     ))))
 }
