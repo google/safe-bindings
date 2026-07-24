@@ -14,6 +14,70 @@
 
 namespace security::json::serde_json_bridge {
 
+class SerdeJson;
+
+// Borrowed zero-copy read-only view of a SerdeJson node.
+class SerdeJsonRef final {
+ public:
+  SerdeJsonRef() = default;
+
+  // Converts this borrowed view into an owned SerdeJson by deep cloning.
+  SerdeJson ToOwned() const;
+
+  // Returns the value of the current json node.
+  absl::StatusOr<int64_t> GetInt() const;
+  absl::StatusOr<bool> GetBool() const;
+  absl::StatusOr<std::string> GetString() const;
+  absl::StatusOr<double> GetDouble() const;
+  absl::StatusOr<std::vector<SerdeJsonRef>> GetArray() const;
+  absl::StatusOr<SerdeJsonRef> GetArrayElement(size_t index) const;
+
+  // Returns a node of the corresponding `key` field of this json object.
+  absl::StatusOr<SerdeJsonRef> GetField(absl::string_view key) const;
+
+  // Returns the value of the corresponding field of this json object.
+  absl::StatusOr<std::string> GetFieldString(absl::string_view key) const;
+  absl::StatusOr<bool> GetFieldBool(absl::string_view key) const;
+  absl::StatusOr<int64_t> GetFieldInt(absl::string_view key) const;
+  absl::StatusOr<double> GetFieldDouble(absl::string_view key) const;
+  absl::StatusOr<SerdeJsonRef> GetFieldObject(absl::string_view key) const;
+  absl::StatusOr<std::vector<SerdeJsonRef>> GetFieldArray(
+      absl::string_view key) const;
+  absl::StatusOr<SerdeJsonRef> GetFieldArrayElement(absl::string_view key,
+                                                    size_t index) const;
+
+  // Methods for checking the type of this json node.
+  bool IsNull() const;
+  bool IsEmpty() const;
+  bool IsObject() const;
+  bool IsArray() const;
+  bool IsString() const;
+  bool IsNumber() const;
+  bool IsDouble() const;
+  bool IsBool() const;
+  bool IsInt() const;
+
+  // If the current node is an object, returns whether the field exists.
+  absl::StatusOr<bool> HasField(absl::string_view key) const;
+
+  // Returns the keys of a json object.
+  absl::StatusOr<std::vector<std::string>> GetKeys() const;
+
+  // Size of array, object, or string.
+  absl::StatusOr<size_t> Size() const;
+
+  // Convert this object to string.
+  std::string ToString(bool sort_keys = true) const;
+  absl::StatusOr<::google::protobuf::Struct> ToProtoStruct() const;
+  absl::StatusOr<::google::protobuf::Value> ToProtoValue() const;
+
+ private:
+  friend class SerdeJson;
+  explicit SerdeJsonRef(rust::json::SerdeJsonRef rs_ref);
+
+  rust::json::SerdeJsonRef rs_ref_;
+};
+
 class SerdeJson final {
  public:
   // Compare two SerdeJson objects.
@@ -32,6 +96,9 @@ class SerdeJson final {
   static absl::StatusOr<SerdeJson> CreateDouble(double value);
   static absl::StatusOr<SerdeJson> CreateNull();
   static absl::StatusOr<SerdeJson> CreateString(absl::string_view value);
+
+  // Returns a borrowed zero-copy view of this SerdeJson.
+  SerdeJsonRef AsRef() const;
 
   // Returns the value of the current json node.
   absl::StatusOr<int64_t> GetInt() const;
@@ -74,6 +141,9 @@ class SerdeJson final {
   // is not an object.
   absl::StatusOr<std::vector<std::string>> GetKeys() const;
 
+  // Size of array, object, or string.
+  absl::StatusOr<size_t> Size() const;
+
   // Convert this object to string.
   std::string ToString(bool sort_keys = true) const;
   absl::StatusOr<::google::protobuf::Struct> ToProtoStruct() const;
@@ -91,7 +161,13 @@ class SerdeJson final {
   absl::Status AddFieldArray(absl::string_view key,
                              std::vector<SerdeJson> value);
 
+  // Array mutation methods (in-place / move semantics).
+  absl::Status Append(const SerdeJson& value);
+  absl::Status Append(SerdeJson&& value);
+  absl::Status Remove(size_t index);
+
  private:
+  friend class SerdeJsonRef;
   explicit SerdeJson(rust::json::SerdeJson);
 
   static std::vector<SerdeJson> ConvertVecSerdeJsonToVector(
