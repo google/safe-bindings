@@ -567,7 +567,7 @@ impl From<&[u8]> for Value {
 // Using `Value("foo")` otherwise fails from C++ because "foo" is a `const char[4]`, which decays to
 // a `const char*` and C++ has a standard conversion from pointer to boolean and standard
 // conversions take precedence over user-defined conversions like the one from `const char*` to
-// `rs_std::StrRef` that we'd like to use here. The fix is to provide an exactly matching
+// `rs::StrRef` that we'd like to use here. The fix is to provide an exactly matching
 // constructor for `const char*`.
 //
 // NOTE(b/562037348): This is unsound. Remove as soon as Crubit offers something better.
