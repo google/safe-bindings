@@ -29,9 +29,8 @@ namespace {
 
 using ::security::crubit_helpers::StringViewFromVecU8;
 
-rs_std::Vec<uint8_t>& ReturnCached(
-    std::optional<rs_std::Vec<uint8_t>>& cache,
-    absl::FunctionRef<rs_std::Vec<uint8_t>()> get) {
+rs::Vec<uint8_t>& ReturnCached(std::optional<rs::Vec<uint8_t>>& cache,
+                               absl::FunctionRef<rs::Vec<uint8_t>()> get) {
   if (!cache.has_value()) {
     cache = get();
   }
@@ -41,8 +40,8 @@ rs_std::Vec<uint8_t>& ReturnCached(
 // The outer optional is the cache, the inner optional is the semantic of the
 // value.
 std::optional<absl::string_view> ReturnCachedOptional(
-    std::optional<std::optional<rs_std::Vec<uint8_t>>>& cache,
-    absl::FunctionRef<std::optional<rs_std::Vec<uint8_t>>()> get) {
+    std::optional<std::optional<rs::Vec<uint8_t>>>& cache,
+    absl::FunctionRef<std::optional<rs::Vec<uint8_t>>()> get) {
   if (!cache.has_value()) {
     cache = get();
   }
@@ -66,14 +65,14 @@ absl::Status XmlErrorToStatus(rust::XmlError err) {
 }
 
 absl::StatusOr<absl::string_view> ResolveNamespace(
-    const rs_std::Vec<uint8_t>& qualified_name,
-    std::optional<rs_std::Vec<uint8_t>>& cache,
+    const rs::Vec<uint8_t>& qualified_name,
+    std::optional<rs::Vec<uint8_t>>& cache,
     absl::FunctionRef<
-        rs_std::Result<rust::ResolvedName, rust::XmlError>(
-            const rs_std::Vec<uint8_t>&)>
+        rs::Result<rust::ResolvedName, rust::XmlError>(
+            const rs::Vec<uint8_t>&)>
         resolver) {
   if (!cache.has_value()) {
-    rs_std::Result<rust::ResolvedName, rust::XmlError>
+    rs::Result<rust::ResolvedName, rust::XmlError>
         resolved_result = resolver(qualified_name);
     if (!resolved_result.has_value()) {
       return XmlErrorToStatus(std::move(resolved_result).err());
@@ -111,8 +110,8 @@ absl::StatusOr<Substrings> RangeToString(rust::Range range,
                                          range.outer_end - range.outer_begin)};
 }
 
-absl::StatusOr<rs_std::StrRef> ToStrRef(absl::string_view xml) {
-  std::optional<rs_std::StrRef> str_ref = rs_std::StrRef::FromUtf8(xml);
+absl::StatusOr<rs::StrRef> ToStrRef(absl::string_view xml) {
+  std::optional<rs::StrRef> str_ref = rs::StrRef::FromUtf8(xml);
   if (!str_ref.has_value()) {
     return absl::InvalidArgumentError("Input string is not UTF-8");
   }
@@ -162,7 +161,7 @@ absl::StatusOr<absl::string_view> QuickReader::Name::ResolvedNamespace() &
     ABSL_ATTRIBUTE_LIFETIME_BOUND {
   return ResolveNamespace(
       ReturnCached(qualified_name_, [this]() { return event_.qname(); }),
-      resolved_namespace_, [this](const rs_std::Vec<uint8_t>& qualified_name) {
+      resolved_namespace_, [this](const rs::Vec<uint8_t>& qualified_name) {
         return reader_->resolve_tag(qualified_name);
       });
 }
@@ -175,8 +174,8 @@ bool QuickReader::Name::PrefixValid() const { return event_.prefix_valid; }
 
 absl::StatusOr<QuickReader> QuickReader::Create(
     absl::string_view xml ABSL_ATTRIBUTE_LIFETIME_BOUND) {
-  ASSIGN_OR_RETURN(rs_std::StrRef str_ref, ToStrRef(xml));
-  rs_std::Result<rust::QuickReader, rust::XmlError> reader =
+  ASSIGN_OR_RETURN(rs::StrRef str_ref, ToStrRef(xml));
+  rs::Result<rust::QuickReader, rust::XmlError> reader =
       rust::QuickReader::create(std::move(str_ref));
   if (!reader.has_value()) {
     return XmlErrorToStatus(std::move(reader).err());
@@ -187,8 +186,8 @@ absl::StatusOr<QuickReader> QuickReader::Create(
 
 absl::StatusOr<QuickReader> QuickReader::CreateWithConfig(
     absl::string_view xml ABSL_ATTRIBUTE_LIFETIME_BOUND, Config config) {
-  ASSIGN_OR_RETURN(rs_std::StrRef str_ref, ToStrRef(xml));
-  rs_std::Result<rust::QuickReader, rust::XmlError> reader =
+  ASSIGN_OR_RETURN(rs::StrRef str_ref, ToStrRef(xml));
+  rs::Result<rust::QuickReader, rust::XmlError> reader =
       rust::QuickReader::create_with_config(std::move(str_ref),
                                                     ToRustConfig(config));
   if (!reader.has_value()) {
@@ -200,7 +199,7 @@ absl::StatusOr<QuickReader> QuickReader::CreateWithConfig(
 
 absl::StatusOr<QuickReader::Event> QuickReader::NextEvent()
     ABSL_ATTRIBUTE_LIFETIME_BOUND {
-  rs_std::Result<rust::XmlEvent, rust::XmlError> result =
+  rs::Result<rust::XmlEvent, rust::XmlError> result =
       reader_->next_event();
   if (!result.has_value()) {
     return XmlErrorToStatus(std::move(result).err());
@@ -209,8 +208,7 @@ absl::StatusOr<QuickReader::Event> QuickReader::NextEvent()
   switch (event.event_type().tag) {
     case rust::EventType::Tag::Empty:
     case rust::EventType::Tag::Start: {
-      rs_std::Result<rs_std::Option<rust::Range>,
-                     rust::XmlError>
+      rs::Result<rs::Option<rust::Range>, rust::XmlError>
           range_result = reader_->subtree_range();
       if (!range_result.has_value()) {
         absl::Status status = XmlErrorToStatus(std::move(range_result).err());
@@ -298,7 +296,7 @@ std::optional<absl::string_view> QuickReader::Attribute::NamespacePrefix() &
 absl::StatusOr<absl::string_view> QuickReader::Attribute::ResolvedNamespace() &
     ABSL_ATTRIBUTE_LIFETIME_BOUND {
   return ResolveNamespace(attribute_.key, resolved_namespace_,
-                          [this](const rs_std::Vec<uint8_t>& qualified_key) {
+                          [this](const rs::Vec<uint8_t>& qualified_key) {
                             return reader_->resolve_attribute(qualified_key);
                           });
 }
@@ -318,7 +316,7 @@ bool QuickReader::Attribute::PrefixValid() const {
 
 absl::StatusOr<std::optional<QuickReader::Attribute>>
 QuickReader::Attributes::NextAttribute() ABSL_ATTRIBUTE_LIFETIME_BOUND {
-  rs_std::Result<rs_std::Option<rust::Attribute>, rs_std::Vec<uint8_t>>
+  rs::Result<rs::Option<rust::Attribute>, rs::Vec<uint8_t>>
       attr_result = attributes_.next_attribute();
   if (!attr_result.has_value()) {
     return absl::InternalError(
@@ -334,7 +332,7 @@ QuickReader::Attributes::NextAttribute() ABSL_ATTRIBUTE_LIFETIME_BOUND {
 }
 
 std::optional<std::string> GetXmlEncoding(absl::string_view xml) {
-  std::optional<rs_std::Vec<uint8_t>> encoding =
+  std::optional<rs::Vec<uint8_t>> encoding =
       rust::get_xml_encoding(xml);
   if (!encoding.has_value()) {
     return std::nullopt;
