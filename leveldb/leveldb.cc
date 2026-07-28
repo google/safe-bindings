@@ -25,8 +25,8 @@ namespace {
 
 using ::security::crubit_helpers::StringViewFromVecU8;
 
-rs_std::SliceRef<const uint8_t> StringViewToSliceRef(absl::string_view sv) {
-  return rs_std::SliceRef<const uint8_t>(absl::Span<const uint8_t>(
+rs::SliceRef<const uint8_t> StringViewToSliceRef(absl::string_view sv) {
+  return rs::SliceRef<const uint8_t>(absl::Span<const uint8_t>(
       reinterpret_cast<const uint8_t*>(sv.data()), sv.size()));
 }
 
@@ -64,8 +64,7 @@ absl::Status LevelDBErrorToStatus(const rust::LevelDBError& err) {
 }
 
 template <typename T>
-absl::Status ResultToStatus(
-    rs_std::Result<T, rust::LevelDBError>&& result) {
+absl::Status ResultToStatus(rs::Result<T, rust::LevelDBError>&& result) {
   if (result.has_value()) {
     return absl::OkStatus();
   }
@@ -134,7 +133,7 @@ void WriteBatch::Clear() { rs_batch_.clear(); }
 
 absl::StatusOr<std::unique_ptr<DB>> DB::Open(absl::string_view name,
                                              Options options) {
-  auto name_ref = rs_std::StrRef::FromUtf8(name);
+  auto name_ref = rs::StrRef::FromUtf8(name);
   if (!name_ref.has_value()) {
     return absl::InvalidArgumentError("Invalid UTF-8 in database name");
   }
