@@ -12,7 +12,6 @@ use image::{
     Rgba as RustRgba,
 };
 use std::collections::VecDeque;
-use std::fmt;
 
 pub(crate) enum GenericImageDecoder {
     Png(Box<RustPngDecoder<Box<dyn ReadSeek>>>),
@@ -127,6 +126,7 @@ pub struct ImageDecoder {
     pub(crate) should_premultiply: bool,
 }
 
+#[cfg(debug_assertions)]
 impl std::fmt::Debug for ImageDecoder {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "ImageDecoder")
@@ -153,7 +153,8 @@ fn invalid_argument_error(message: impl Into<String>) -> Status {
 
 /// Which Rust integer type backs the value of a pixel.
 #[repr(C)]
-#[derive(Default, Copy, Clone, Debug)]
+#[derive(Default, Copy, Clone)]
+#[cfg_attr(debug_assertions, derive(Debug))]
 pub enum PixelType {
     // We need a default since this type is otherwise not bridged by Crubit.
     #[default]
@@ -182,7 +183,8 @@ impl From<RustColorType> for PixelType {
 
 /// An enumeration over supported color types.
 #[repr(C)]
-#[derive(Default, Copy, Clone, Debug)]
+#[derive(Default, Copy, Clone)]
+#[cfg_attr(debug_assertions, derive(Debug))]
 pub enum ColorType {
     // We need a default since this type is otherwise not bridged by Crubit.
     #[default]
@@ -224,8 +226,9 @@ pub struct Frame {
     inner: Option<RustFrame>,
 }
 
-impl fmt::Debug for Frame {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+#[cfg(debug_assertions)]
+impl std::fmt::Debug for Frame {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Frame").finish()
     }
 }
@@ -236,8 +239,9 @@ pub struct Frames {
     inner: VecDeque<RustFrame>,
 }
 
-impl fmt::Debug for Frames {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+#[cfg(debug_assertions)]
+impl std::fmt::Debug for Frames {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Frames").finish()
     }
 }

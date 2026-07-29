@@ -1,6 +1,7 @@
 /// Minimal wrapper around `Vec<u8>` to allow passing a `Vec<u8>` from Rust to C++.
 #[repr(C)]
-#[derive(Default, Debug, Clone, PartialEq, PartialOrd)]
+#[derive(Default)]
+#[cfg_attr(debug_assertions, derive(Debug))]
 pub struct VecU8(Vec<u8>);
 
 impl VecU8 {
@@ -12,8 +13,8 @@ impl VecU8 {
         self.0.len()
     }
 
-    pub fn is_empty(&self) -> bool {
-        self.0.is_empty()
+    pub fn as_slice(&self) -> &[u8] {
+        &self.0
     }
 }
 

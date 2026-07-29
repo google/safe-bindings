@@ -26,6 +26,7 @@ pub struct ImageReader {
     inner: Option<Box<RustImageReader<Box<dyn ReadSeek>>>>,
 }
 
+#[cfg(debug_assertions)]
 impl std::fmt::Debug for ImageReader {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "ImageReader")
@@ -33,7 +34,8 @@ impl std::fmt::Debug for ImageReader {
 }
 
 #[repr(C)]
-#[derive(Default, Copy, Clone, Debug)]
+#[derive(Default, Copy, Clone)]
+#[cfg_attr(debug_assertions, derive(Debug))]
 pub enum Format {
     // We need a default since this type is otherwise not bridged by Crubit.
     #[default]
