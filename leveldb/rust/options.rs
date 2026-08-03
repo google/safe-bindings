@@ -64,61 +64,29 @@ impl Options {
 
     /// Sets the comparator for the database.
     ///
-    /// # Safety
-    ///
-    /// * `cmp` must be a valid, heap-allocated C++ `Comparator`. This function
-    ///   takes ownership and will delete the object when dropped.
-    /// * The implementation of `cmp` **must be thread-safe** (safe to call `Compare`
-    ///   simultaneously from multiple threads), as LevelDB will use it
-    ///   from background compaction threads.
-    // NOTE: b/505082018 - Change the parameter type to cc_std::std::virtual_unique_ptr once mapping from virtual_unique_ptr to cc_std::unique_ptr is implemented.
-    pub unsafe fn set_cmp(&mut self, cmp: *mut Comparator) {
-        assert!(!cmp.is_null(), "Comparator pointer must not be null");
-        let wrapped_cmp = unsafe { virtual_unique_ptr::new(cmp) };
+    /// The implementation of `cmp` **must be thread-safe** (safe to call `Compare`
+    /// simultaneously from multiple threads), as LevelDB will use it
+    /// from background compaction threads.
+    pub fn set_cmp(&mut self, cmp: virtual_unique_ptr<Comparator>) {
         self.inner.cmp =
-            std::sync::Arc::new(Box::new(crate::cmp_wrapper::RustCmpWrapper::new(wrapped_cmp)));
+            std::sync::Arc::new(Box::new(crate::cmp_wrapper::RustCmpWrapper::new(cmp)));
     }
 
     /// Sets the environment for the database.
-    ///
-    /// # Safety
-    ///
-    /// `env` must be a valid, heap-allocated C++ `Env`. This function
-    /// takes ownership and will delete the object when dropped.
-    // NOTE: b/505082018 - Change the parameter type to cc_std::std::virtual_unique_ptr once mapping from virtual_unique_ptr to cc_std::unique_ptr is implemented.
-    pub unsafe fn set_env(&mut self, env: *mut cpp_env::leveldb_rs::Env) {
-        assert!(!env.is_null(), "Env pointer must not be null");
-        let wrapped_env = unsafe { virtual_unique_ptr::new(env) };
+    pub fn set_env(&mut self, env: virtual_unique_ptr<cpp_env::leveldb_rs::Env>) {
         self.inner.env =
-            std::sync::Arc::new(Box::new(crate::env_wrapper::RustEnvWrapper::new(wrapped_env)));
+            std::sync::Arc::new(Box::new(crate::env_wrapper::RustEnvWrapper::new(env)));
     }
 
     /// Sets the filter policy for the database.
-    ///
-    /// # Safety
-    ///
-    /// `filter` must be a valid, heap-allocated C++ `FilterPolicy`. This function
-    /// takes ownership and will delete the object when dropped.
-    // NOTE: b/505082018 - Change the parameter type to cc_std::std::virtual_unique_ptr once mapping from virtual_unique_ptr to cc_std::unique_ptr is implemented.
-    pub unsafe fn set_filter_policy(&mut self, filter: *mut FilterPolicy) {
-        assert!(!filter.is_null(), "FilterPolicy pointer must not be null");
-        let wrapped_filter = unsafe { virtual_unique_ptr::new(filter) };
-        self.inner.filter_policy = std::sync::Arc::new(Box::new(
-            crate::filter_wrapper::RustFilterWrapper::new(wrapped_filter),
-        ));
+    pub fn set_filter_policy(&mut self, filter: virtual_unique_ptr<FilterPolicy>) {
+        self.inner.filter_policy =
+            std::sync::Arc::new(Box::new(crate::filter_wrapper::RustFilterWrapper::new(filter)));
     }
 
     /// Sets the logger for the database.
-    ///
-    /// # Safety
-    ///
-    /// `logger` must be a valid, heap-allocated C++ `Logger`. This function
-    /// takes ownership and will delete the object when dropped.
-    // NOTE: b/505082018 - Change the parameter type to cc_std::std::virtual_unique_ptr once mapping from virtual_unique_ptr to cc_std::unique_ptr is implemented.
-    pub unsafe fn set_info_log(&mut self, logger: *mut Logger) {
-        assert!(!logger.is_null(), "Logger pointer must not be null");
-        let wrapped_logger = unsafe { virtual_unique_ptr::new(logger) };
-        let writer = crate::logger_wrapper::RustLoggerWriter::new(wrapped_logger);
+    pub fn set_info_log(&mut self, logger: virtual_unique_ptr<Logger>) {
+        let writer = crate::logger_wrapper::RustLoggerWriter::new(logger);
         let logger = rusty_leveldb::infolog::Logger(Box::new(writer));
         self.inner.log = Some(rusty_leveldb::share(logger));
     }

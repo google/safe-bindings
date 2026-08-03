@@ -108,17 +108,17 @@ void Options::SetReuseManifest(bool val) {
   rs_options_.set_reuse_manifest(val);
 }
 void Options::SetComparator(std::unique_ptr<Comparator> cmp) {
-  rs_options_.set_cmp(cmp.release());
+  rs_options_.set_cmp(std::move(cmp));
 }
 
 void Options::SetEnv(std::unique_ptr<Env> env) {
-  rs_options_.set_env(env.release());
+  rs_options_.set_env(std::move(env));
 }
 void Options::SetFilterPolicy(std::unique_ptr<FilterPolicy> filter_policy) {
-  rs_options_.set_filter_policy(filter_policy.release());
+  rs_options_.set_filter_policy(std::move(filter_policy));
 }
 void Options::SetInfoLog(std::unique_ptr<Logger> logger) {
-  rs_options_.set_info_log(logger.release());
+  rs_options_.set_info_log(std::move(logger));
 }
 
 WriteBatch::WriteBatch() = default;
