@@ -329,6 +329,10 @@ std::string SerdeJson::ToString(bool sort_keys) const {
   return FromRustRawString(json_obj_.to_string(sort_keys));
 }
 
+std::string SerdeJson::ToStringSpaced(bool sort_keys) const {
+  return FromRustRawString(json_obj_.to_string_spaced(sort_keys));
+}
+
 absl::StatusOr<std::vector<std::string>> SerdeJson::GetKeys() const {
   rs_std::Result<rust::json::VecRawString,
                  rust::raw_string::RawString>

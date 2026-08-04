@@ -76,6 +76,9 @@ class SerdeJson final {
 
   // Convert this object to string.
   std::string ToString(bool sort_keys = true) const;
+  // Convert this object to string with spaces after colons and commas.
+  // Example: {"key": "value", "num": 42}
+  std::string ToStringSpaced(bool sort_keys = true) const;
   absl::StatusOr<::google::protobuf::Struct> ToProtoStruct() const;
   absl::StatusOr<::google::protobuf::Value> ToProtoValue() const;
 

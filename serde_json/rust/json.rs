@@ -52,6 +52,43 @@ impl From<&Vec<serde_json::Value>> for VecSerdeJson {
     }
 }
 
+/// A custom JSON formatter that adds spaces after colons and commas.
+struct SpacedFormatter;
+
+impl serde_json::ser::Formatter for SpacedFormatter {
+    #[inline]
+    fn begin_object_value<W>(&mut self, writer: &mut W) -> std::io::Result<()>
+    where
+        W: ?Sized + std::io::Write,
+    {
+        writer.write_all(b": ")
+    }
+
+    #[inline]
+    fn begin_object_key<W>(&mut self, writer: &mut W, first: bool) -> std::io::Result<()>
+    where
+        W: ?Sized + std::io::Write,
+    {
+        if first {
+            Ok(())
+        } else {
+            writer.write_all(b", ")
+        }
+    }
+
+    #[inline]
+    fn begin_array_value<W>(&mut self, writer: &mut W, first: bool) -> std::io::Result<()>
+    where
+        W: ?Sized + std::io::Write,
+    {
+        if first {
+            Ok(())
+        } else {
+            writer.write_all(b", ")
+        }
+    }
+}
+
 impl SerdeJson {
     /// Creates a new [SerdeJson] from provided string buffer `raw_data`.
     pub fn parse_string(raw_data: &[u8]) -> Result<SerdeJson, RawString> {
@@ -329,14 +366,32 @@ impl SerdeJson {
         self.value.is_object()
     }
 
+    /// Serializes the JSON value using the provided formatter.
+    fn serialize_with_formatter<F: serde_json::ser::Formatter>(
+        &self,
+        sort_keys: bool,
+        formatter: F,
+    ) -> RawString {
+        let mut vec = Vec::with_capacity(128);
+        let mut serializer = serde_json::Serializer::with_formatter(&mut vec, formatter);
+        if sort_keys {
+            let mut v = self.value.clone();
+            v.sort_all_objects();
+            v.serialize(&mut serializer).expect("failed to serialize JSON");
+        } else {
+            self.value.serialize(&mut serializer).expect("failed to serialize JSON");
+        };
+        vec.into()
+    }
+
     /// Converts a [SerdeJson] to a string.
     pub fn to_string(&self, sort_keys: bool) -> RawString {
-        if sort_keys {
-            let mut value = self.value.clone();
-            value.sort_all_objects();
-            return value.to_string().into();
-        }
-        self.value.to_string().into()
+        self.serialize_with_formatter(sort_keys, serde_json::ser::CompactFormatter)
+    }
+
+    /// Converts a [SerdeJson] to a string with spaces after colons and commas.
+    pub fn to_string_spaced(&self, sort_keys: bool) -> RawString {
+        self.serialize_with_formatter(sort_keys, SpacedFormatter)
     }
 
     pub fn get_keys(&self) -> Result<VecRawString, RawString> {
