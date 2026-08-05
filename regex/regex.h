@@ -143,9 +143,7 @@
 
 #include <cstdint>
 #include <cstdlib>
-#include <iterator>
 #include <map>
-#include <memory>
 #include <optional>
 #include <string>
 #include <type_traits>
@@ -181,7 +179,9 @@ class Match {
 
   // Returns the substring of the text that matched. The returned string_view is
   // valid for the lifetime of the text.
-  absl::string_view AsStr() const { return match_.as_str(); }
+  absl::string_view AsStr() const {
+    return internal::AsStringView(match_.as_str());
+  }
 
   // Access to the inner wrapper. Required by Arg to perform numeric parsing.
   const ::rust::Match& Inner() const { return match_; }
@@ -221,7 +221,7 @@ class Captures {
   // Returns a new string by expanding placeholders in replacement (e.g., $1,
   // $name) with the values of the capture groups in this match.
   std::string Expand(absl::string_view replacement) const {
-    return captures_.expand(replacement);
+    return internal::AsString(captures_.expand(internal::AsSlice(replacement)));
   }
 
   // A range over capture matches. These ranges can only be iterated once.
@@ -432,13 +432,13 @@ class RegexSet {
 
   // Returns true if any of the regular expressions in the set match `text`.
   bool IsMatch(absl::string_view text) const {
-    return regex_set_.is_match(text);
+    return regex_set_.is_match(internal::AsSlice(text));
   }
 
   // Returns a `SetMatches` object indicating which regular expressions in the
   // set matched `text`.
   SetMatches Matches(absl::string_view text) const {
-    return SetMatches(regex_set_.matches(text));
+    return SetMatches(regex_set_.matches(internal::AsSlice(text)));
   }
 
   // Returns the number of regular expressions in the set.

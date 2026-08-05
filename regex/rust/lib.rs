@@ -8,7 +8,6 @@
 pub mod regex_rewrite;
 mod vec_u8;
 
-use cc_std::std::{string as std_string, string_view};
 use log_rs::error;
 use num_traits::Num;
 use regex::bytes::{
@@ -79,13 +78,14 @@ impl<'h> Match<'h> {
     // NOTE(b/469976097): Decide if we want to support `range()` here. It can be implemented in the
     // C++ side with `start()` and `end()` anyway.
 
-    pub fn as_str(&self) -> string_view<'h> {
+    pub fn as_str(&self) -> &'h [u8] {
         self.inner.as_ref().map_or_else(
             || {
                 error!("Use of moved-from Match");
-                string_view::from("")
+                const EMPTY: &[u8] = &[];
+                EMPTY
             },
-            |i| string_view::from(i.as_bytes()),
+            |i| i.as_bytes(),
         )
     }
 
@@ -309,14 +309,14 @@ impl<'h> Captures<'h> {
             |inner| inner.name(name).map(Match::from),
         )
     }
-    pub fn expand(&self, replacement: string_view<'_>) -> std_string {
+    pub fn expand(&self, replacement: &[u8]) -> VecU8 {
         let Some(inner) = &self.inner else {
             error!("Use of moved-from Captures");
-            return std_string::from("");
+            return VecU8::from("");
         };
         let mut dst = Vec::<u8>::new();
-        inner.expand(replacement.as_bytes(), &mut dst);
-        std_string::from(&dst)
+        inner.expand(replacement, &mut dst);
+        VecU8::from(dst)
     }
 
     // NOTE(b/259749023): implement `extract<N>` when crubit supports generic functions.
@@ -401,13 +401,13 @@ pub struct Split<'r, 'h> {
 impl<'r, 'h> Split<'r, 'h> {
     // NOTE(b/483382648): Make `Split` implement `Iterator`.
     #[allow(clippy::should_implement_trait)]
-    pub fn next(&mut self) -> Option<string_view<'h>> {
+    pub fn next(&mut self) -> Option<&'h [u8]> {
         self.inner.as_mut().map_or_else(
             || {
                 error!("Use of moved-from Split");
                 None
             },
-            |i| i.next().map(string_view::from),
+            |i| i.next(),
         )
     }
 }
@@ -422,13 +422,13 @@ pub struct SplitN<'r, 'h> {
 impl<'r, 'h> SplitN<'r, 'h> {
     // NOTE(b/483382648): Make `SplitN` implement `Iterator`.
     #[allow(clippy::should_implement_trait)]
-    pub fn next(&mut self) -> Option<string_view<'h>> {
+    pub fn next(&mut self) -> Option<&'h [u8]> {
         self.inner.as_mut().map_or_else(
             || {
                 error!("Use of moved-from SplitN");
                 None
             },
-            |i| i.next().map(string_view::from),
+            |i| i.next(),
         )
     }
 }
@@ -443,16 +443,15 @@ pub struct CaptureNames<'r> {
 impl<'r> CaptureNames<'r> {
     // NOTE(b/483382648): Make `CaptureNames` implement `Iterator`.
     #[allow(clippy::should_implement_trait)]
-    pub fn next(&mut self) -> Option<Option<string_view<'r>>> {
+    pub fn next(&mut self) -> Option<Option<&'r [u8]>> {
         // The outer Option has value if there's another capture.
-        // The inner Option has value if the capture has a name. If so, we have to convert it to a
-        // string_view before returning it to C++.
+        // The inner Option has value if the capture has a name.
         self.inner.as_mut().map_or_else(
             || {
                 error!("Use of moved-from CaptureNames");
                 None
             },
-            |i| i.next().map(|maybe_name| maybe_name.map(string_view::from)),
+            |i| i.next().map(|maybe_name| maybe_name.map(|val| val.as_bytes())),
         )
     }
 }
@@ -467,13 +466,13 @@ pub struct Regex {
 impl Regex {
     // Disable the Clippy warning in order to follow the Regex API.
     #[allow(clippy::new_ret_no_self)]
-    pub fn new(sv: string_view) -> Result<Regex, VecU8> {
+    pub fn new(val: &[u8]) -> Result<Regex, VecU8> {
         let result = (|| -> Result<Regex, VecU8> {
-            let s =
-                sv.to_string().map_err::<VecU8, _>(|_| VecU8::from("Invalid Utf8".to_string()))?;
+            let input = std::str::from_utf8(val)
+                .map_err::<VecU8, _>(|_| VecU8::from("Invalid Utf8".to_string()))?;
             Ok(Regex {
                 inner: Some(
-                    InnerRegex::new(&s)
+                    InnerRegex::new(input)
                         .map_err::<VecU8, _>(|_| VecU8::from("Invalid Utf8".to_string()))?,
                 ),
             })
@@ -491,53 +490,53 @@ impl Regex {
         )
     }
 
-    pub fn is_match(&self, haystack: string_view<'_>) -> bool {
+    pub fn is_match(&self, haystack: &[u8]) -> bool {
         self.inner.as_ref().map_or_else(
             || {
                 error!("Use of moved-from Regex");
                 false
             },
-            |i| i.is_match(haystack.as_bytes()),
+            |i| i.is_match(haystack),
         )
     }
 
-    pub fn find<'h>(&self, haystack: string_view<'h>) -> Option<Match<'h>> {
+    pub fn find<'h>(&self, haystack: &'h [u8]) -> Option<Match<'h>> {
         self.inner.as_ref().map_or_else(
             || {
                 error!("Use of moved-from Regex");
                 None
             },
-            |i| i.find(haystack.as_bytes()).map(Match::from),
+            |i| i.find(haystack).map(Match::from),
         )
     }
 
-    pub fn find_iter<'r, 'h>(&'r self, haystack: string_view<'h>) -> Matches<'r, 'h> {
+    pub fn find_iter<'r, 'h>(&'r self, haystack: &'h [u8]) -> Matches<'r, 'h> {
         self.inner.as_ref().map_or_else(
             || {
                 error!("Use of moved-from Regex");
                 Default::default()
             },
-            |i| Matches { inner: Some(i.find_iter(haystack.as_bytes())) },
+            |i| Matches { inner: Some(i.find_iter(haystack)) },
         )
     }
 
-    pub fn captures<'h>(&self, haystack: string_view<'h>) -> Option<Captures<'h>> {
+    pub fn captures<'h>(&self, haystack: &'h [u8]) -> Option<Captures<'h>> {
         self.inner.as_ref().map_or_else(
             || {
                 error!("Use of moved-from Regex");
                 None
             },
-            |i| i.captures(haystack.as_bytes()).map(Captures::from),
+            |i| i.captures(haystack).map(Captures::from),
         )
     }
 
-    pub fn captures_iter<'r, 'h>(&'r self, haystack: string_view<'h>) -> CaptureMatches<'r, 'h> {
+    pub fn captures_iter<'r, 'h>(&'r self, haystack: &'h [u8]) -> CaptureMatches<'r, 'h> {
         self.inner.as_ref().map_or_else(
             || {
                 error!("Use of moved-from Regex");
                 Default::default()
             },
-            |i| CaptureMatches { inner: Some(i.captures_iter(haystack.as_bytes())) },
+            |i| CaptureMatches { inner: Some(i.captures_iter(haystack)) },
         )
     }
 
@@ -566,55 +565,50 @@ impl Regex {
     // support `Cow`, so we always allocate a new string here for simplicity.
     // NOTE(b/469976097): The original `replace*` methods support passing a function to perform
     // replacements. Decide if we want to support this.
-    pub fn replace(&self, haystack: string_view<'_>, rep: string_view<'_>) -> std_string {
+    pub fn replace(&self, haystack: &[u8], rep: &[u8]) -> VecU8 {
         let Some(inner) = &self.inner else {
             error!("Use of moved-from Regex");
-            return std_string::from("");
+            return VecU8::from("");
         };
-        let result = inner.replace(haystack.as_bytes(), rep.as_bytes());
-        std_string::from(result.as_ref())
+        let result = inner.replace(haystack, rep);
+        VecU8::from(result.into_owned())
     }
 
-    pub fn replace_all(&self, haystack: string_view<'_>, rep: string_view<'_>) -> std_string {
+    pub fn replace_all(&self, haystack: &[u8], rep: &[u8]) -> VecU8 {
         let Some(inner) = &self.inner else {
             error!("Use of moved-from Regex");
-            return std_string::from("");
+            return VecU8::from("");
         };
-        let result = inner.replace_all(haystack.as_bytes(), rep.as_bytes());
-        std_string::from(result.as_ref())
+        let result = inner.replace_all(haystack, rep);
+        VecU8::from(result.into_owned())
     }
 
-    pub fn replacen(
-        &self,
-        haystack: string_view<'_>,
-        limit: usize,
-        rep: string_view<'_>,
-    ) -> std_string {
+    pub fn replacen(&self, haystack: &[u8], limit: usize, rep: &[u8]) -> VecU8 {
         let Some(inner) = &self.inner else {
             error!("Use of moved-from Regex");
-            return std_string::from("");
+            return VecU8::from("");
         };
-        let result = inner.replacen(haystack.as_bytes(), limit, rep.as_bytes()).to_vec();
-        std_string::from(&result)
+        let result = inner.replacen(haystack, limit, rep).to_vec();
+        VecU8::from(result)
     }
 
-    pub fn split<'r, 'h>(&'r self, haystack: string_view<'h>) -> Split<'r, 'h> {
+    pub fn split<'r, 'h>(&'r self, haystack: &'h [u8]) -> Split<'r, 'h> {
         self.inner.as_ref().map_or_else(
             || {
                 error!("Use of moved-from Regex");
                 Default::default()
             },
-            |i| Split { inner: Some(i.split(haystack.as_bytes())) },
+            |i| Split { inner: Some(i.split(haystack)) },
         )
     }
 
-    pub fn splitn<'r, 'h>(&'r self, haystack: string_view<'h>, limit: usize) -> SplitN<'r, 'h> {
+    pub fn splitn<'r, 'h>(&'r self, haystack: &'h [u8], limit: usize) -> SplitN<'r, 'h> {
         self.inner.as_ref().map_or_else(
             || {
                 error!("Use of moved-from Regex");
                 Default::default()
             },
-            |i| SplitN { inner: Some(i.splitn(haystack.as_bytes(), limit)) },
+            |i| SplitN { inner: Some(i.splitn(haystack, limit)) },
         )
     }
 }
@@ -631,8 +625,8 @@ pub struct RegexBuilder {
 }
 
 impl RegexBuilder {
-    pub fn new(pattern: string_view) -> Self {
-        let s = pattern.to_string();
+    pub fn new(pattern: &[u8]) -> Self {
+        let s = std::str::from_utf8(pattern);
         Self {
             inner: if let Ok(pattern) = s { Some(InnerRegexBuilder::new(&pattern)) } else { None },
         }
@@ -770,12 +764,13 @@ impl RegexSet {
     /// Creates a new regex set from the given patterns. If any of the patterns fails to compile,
     /// it returns an error.
     #[allow(clippy::new_ret_no_self)] // We need to return a Result because compilation can fail.
-    pub fn new(patterns: &[string_view]) -> Result<RegexSet, VecU8> {
+    pub fn new(patterns: &[&[u8]]) -> Result<RegexSet, VecU8> {
         let result = (|| -> Result<RegexSet, VecU8> {
             let mut pattern_strings = Vec::with_capacity(patterns.len());
             for p in patterns {
-                pattern_strings
-                    .push(p.to_string().map_err::<VecU8, _>(|_| "Invalid pattern".into())?);
+                pattern_strings.push(
+                    std::str::from_utf8(p).map_err::<VecU8, _>(|_| "Invalid pattern".into())?,
+                );
             }
             Ok(RegexSet {
                 inner: Some(
@@ -788,25 +783,25 @@ impl RegexSet {
     }
 
     /// Returns true iff at least one of the regexes matches the haystack.
-    pub fn is_match(&self, haystack: string_view<'_>) -> bool {
+    pub fn is_match(&self, haystack: &[u8]) -> bool {
         self.inner.as_ref().map_or_else(
             || {
                 error!("Use of moved-from RegexSet");
                 false
             },
-            |i| i.is_match(haystack.as_bytes()),
+            |i| i.is_match(haystack),
         )
     }
 
     /// Returns a SetMatches object with information about which matches (if any) match the
     /// haystack.
-    pub fn matches(&self, haystack: string_view<'_>) -> SetMatches {
+    pub fn matches(&self, haystack: &[u8]) -> SetMatches {
         self.inner.as_ref().map_or_else(
             || {
                 error!("Use of moved-from RegexSet");
                 Default::default()
             },
-            |i| SetMatches { inner: Some(i.matches(haystack.as_bytes())) },
+            |i| SetMatches { inner: Some(i.matches(haystack)) },
         )
     }
 
@@ -840,11 +835,11 @@ pub struct RegexSetBuilder {
 }
 
 impl RegexSetBuilder {
-    pub fn new(patterns: &[string_view]) -> Self {
+    pub fn new(patterns: &[&[u8]]) -> Self {
         let mut exprs = Vec::with_capacity(patterns.len());
         let mut ok = true;
         for p in patterns {
-            if let Ok(s) = p.to_string() {
+            if let Ok(s) = std::str::from_utf8(p) {
                 exprs.push(s);
             } else {
                 ok = false;

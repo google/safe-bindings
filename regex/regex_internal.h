@@ -2,18 +2,44 @@
 #define SECURITY_REGEX_REGEX_INTERNAL_H_
 
 #include <cstddef>
+#include <cstdint>
 #include <iterator>
 #include <optional>
+#include <string>
 #include <type_traits>
 #include <utility>
 
+#include "support/rs_std/slice_ref.h"
+#include "crubit/rust.h"
 #include "absl/log/check.h"
+#include "absl/strings/string_view.h"
+#include "absl/types/span.h"
 
 namespace security::regex {
 
 class Match;
 
 namespace internal {
+
+inline rs_std::SliceRef<const std::uint8_t> AsSlice(absl::string_view s) {
+  return rs_std::SliceRef<const std::uint8_t>(absl::Span<const std::uint8_t>(
+      reinterpret_cast<const std::uint8_t*>(s.data()), s.size()));
+}
+
+inline absl::string_view AsStringView(rs_std::SliceRef<const std::uint8_t> s) {
+  if (s.data() == nullptr) return {};
+  return absl::string_view(reinterpret_cast<const char*>(s.data()), s.size());
+}
+
+inline absl::string_view AsStr(const ::rust::VecU8& v) {
+  if (v.as_ptr() == nullptr) return {};
+  return absl::string_view(reinterpret_cast<const char*>(v.as_ptr()), v.len());
+}
+
+inline std::string AsString(const ::rust::VecU8& v) {
+  if (v.as_ptr() == nullptr) return {};
+  return std::string(reinterpret_cast<const char*>(v.as_ptr()), v.len());
+}
 
 template <typename Wrapper, typename Inner>
 std::optional<Wrapper> MapOptional(std::optional<Inner> opt);
@@ -44,6 +70,31 @@ struct MapOptionalHelper<std::optional<T>, Inner> {
     if (opt.has_value()) {
       // Recursively call MapOptional for the inner type.
       return MapOptional<T>(std::move(opt.value()));
+    } else {
+      return std::nullopt;
+    }
+  }
+};
+
+template <>
+struct MapOptionalHelper<absl::string_view,
+                         rs_std::SliceRef<const std::uint8_t>> {
+  static std::optional<absl::string_view> Map(
+      std::optional<rs_std::SliceRef<const std::uint8_t>> opt) {
+    if (opt.has_value()) {
+      return AsStringView(*opt);
+    } else {
+      return std::nullopt;
+    }
+  }
+};
+
+template <>
+struct MapOptionalHelper<std::string, ::rust::VecU8> {
+  static std::optional<std::string> Map(
+      std::optional<::rust::VecU8> opt) {
+    if (opt.has_value()) {
+      return AsString(*opt);
     } else {
       return std::nullopt;
     }

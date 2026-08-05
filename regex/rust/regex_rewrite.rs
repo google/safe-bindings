@@ -1,5 +1,4 @@
 use crate::VecU8;
-use cc_std::std::{string as std_string, string_view};
 use regex_syntax::ast::parse::ParserBuilder;
 use regex_syntax::ast::print::Printer;
 use regex_syntax::ast::{
@@ -20,8 +19,8 @@ pub struct RewriteError {
 }
 
 impl RewriteError {
-    pub fn message(&self) -> std_string {
-        cc_std::std::string::from(self.message.as_bytes())
+    pub fn message(&self) -> VecU8 {
+        VecU8::from(self.message.as_bytes())
     }
 }
 
@@ -36,7 +35,7 @@ impl Rewriter {
     /// Parses the given `pattern` with the specified options and returns a
     /// `Rewriter` holding the AST.
     pub fn new(
-        pattern: string_view,
+        pattern: &[u8],
         ignore_whitespace: bool,
         octal: bool,
         nest_limit: u32,
@@ -49,7 +48,7 @@ impl Rewriter {
             let mut parser = builder.build();
             // Will fail if pattern is not valid UTF-8, or if it fails to parse.
             let ast = parser
-                .parse(&pattern.to_string().map_err(|err| err.to_string())?)
+                .parse(std::str::from_utf8(pattern).map_err(|err| err.to_string())?)
                 .map_err(|err| err.to_string())?;
             Ok(Rewriter { ast })
         })();
@@ -71,7 +70,7 @@ impl Rewriter {
     }
 
     /// Prints the AST back to a string.
-    pub fn finish(&self) -> Result<VecU8, VecU8> {
+    pub fn finish(self) -> Result<VecU8, VecU8> {
         let mut printer = Printer::new();
         let mut dst = String::new();
         printer.print(&self.ast, &mut dst).map_err::<VecU8, _>(|err| err.to_string().into())?;
@@ -290,7 +289,7 @@ mod tests {
     use googletest::prelude::*;
 
     fn rewrite(pattern: &str) -> VecU8 {
-        let rewriter = Rewriter::new(pattern.as_bytes().into(), false, false, 250);
+        let rewriter = Rewriter::new(pattern.as_bytes(), false, false, 250);
         expect_true!(rewriter.is_ok());
         let mut rewriter = rewriter.unwrap();
         rewriter.rewrite_for_re2_compat(true);
@@ -329,13 +328,13 @@ mod tests {
 
     #[gtest]
     fn test_rewrite_ignore_whitespace() {
-        let rewriter = Rewriter::new("\\d \\d".as_bytes().into(), true, false, 250);
+        let rewriter = Rewriter::new("\\d \\d".as_bytes(), true, false, 250);
         expect_true!(rewriter.is_ok());
         let mut rewriter = rewriter.unwrap();
         rewriter.rewrite_for_re2_compat(true);
         expect_eq!(rewriter.finish().unwrap(), VecU8::from("[[:digit:]][[:digit:]]"));
 
-        let rewriter = Rewriter::new("\\d \\d".as_bytes().into(), false, false, 250);
+        let rewriter = Rewriter::new("\\d \\d".as_bytes(), false, false, 250);
         expect_true!(rewriter.is_ok());
         let mut rewriter = rewriter.unwrap();
         rewriter.rewrite_for_re2_compat(true);
@@ -343,7 +342,7 @@ mod tests {
     }
 
     fn expect_anchored(pattern: &str, expected: &str, ignore_whitespace: bool) {
-        let rewriter = Rewriter::new(pattern.as_bytes().into(), ignore_whitespace, false, 250);
+        let rewriter = Rewriter::new(pattern.as_bytes(), ignore_whitespace, false, 250);
         expect_true!(rewriter.is_ok());
         let mut rewriter = rewriter.unwrap();
         rewriter.add_begin_and_end_anchors();

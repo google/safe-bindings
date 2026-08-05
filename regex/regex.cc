@@ -1,12 +1,14 @@
 #include "regex.h"
 
 #include <cstddef>
+#include <cstdint>
 #include <map>
 #include <optional>
 #include <string>
 #include <utility>
 #include <vector>
 
+#include "support/rs_std/slice_ref.h"
 #include "support/rs_std/str_ref.h"
 #include "regex_internal.h"
 #include "crubit/rust.h"
@@ -63,10 +65,11 @@ absl::StatusOr<std::string> RewriteWithOptions(absl::string_view pattern,
 
   if (options.add_begin_and_end_anchors || options.re2_compatibility) {
     auto rewriter_result = rust::regex_rewrite::Rewriter::new_(
-        result, options.verbose, options.octal,
+        internal::AsSlice(result), options.verbose, options.octal,
         options.nest_limit.value_or(kDefaultNestLimit));
     if (!rewriter_result.has_value()) {
-      return absl::InvalidArgumentError(rewriter_result.err().message());
+      return absl::InvalidArgumentError(
+          internal::AsStr(rewriter_result.err().message()));
     }
     rust::regex_rewrite::Rewriter rewriter =
         std::move(rewriter_result).value();
@@ -78,15 +81,13 @@ absl::StatusOr<std::string> RewriteWithOptions(absl::string_view pattern,
       rewriter.rewrite_for_re2_compat(options.encoding == Encoding::kUtf8);
     }
 
-    auto rewrite_result = rewriter.finish();
+    auto rewrite_result = std::move(rewriter).finish();
     if (!rewrite_result.has_value()) {
       const rust::VecU8& err = rewrite_result.err();
-      return absl::InternalError(absl::string_view(
-          reinterpret_cast<const char*>(err.as_ptr()), err.len()));
+      return absl::InternalError(internal::AsStr(err));
     }
     const rust::VecU8& val = rewrite_result.value();
-    result =
-        std::string(reinterpret_cast<const char*>(val.as_ptr()), val.len());
+    result = internal::AsString(val);
   }
   return result;
 }
@@ -114,7 +115,7 @@ absl::StatusOr<Regex> Regex::Compile(absl::string_view pattern,
   }
 
   rust::RegexBuilder builder =
-      rust::RegexBuilder::new_(*final_pattern);
+      rust::RegexBuilder::new_(internal::AsSlice(*final_pattern));
   builder.unicode(options.encoding == Encoding::kUtf8);
   builder.case_insensitive(options.case_insensitive);
   builder.multi_line(options.multi_line);
@@ -136,18 +137,18 @@ absl::StatusOr<Regex> Regex::Compile(absl::string_view pattern,
   auto result = builder.build();
   if (!result.has_value()) {
     const rust::VecU8& err = result.err();
-    return absl::InvalidArgumentError(absl::string_view(
-        reinterpret_cast<const char*>(err.as_ptr()), err.len()));
+    return absl::InvalidArgumentError(internal::AsStr(err));
   }
   return Regex(std::move(result).value());
 }
 
 bool Regex::IsMatch(absl::string_view text) const {
-  return regex_.is_match(text);
+  return regex_.is_match(internal::AsSlice(text));
 }
 
 std::optional<Captures> Regex::FindCaptures(absl::string_view text) const {
-  return internal::MapOptional<Captures>(regex_.captures(text));
+  return internal::MapOptional<Captures>(
+      regex_.captures(internal::AsSlice(text)));
 }
 
 Regex::CaptureNamesResult Regex::CaptureNames() const {
@@ -155,24 +156,24 @@ Regex::CaptureNamesResult Regex::CaptureNames() const {
 }
 
 std::optional<Match> Regex::Find(absl::string_view text) const {
-  return internal::MapOptional<Match>(regex_.find(text));
+  return internal::MapOptional<Match>(regex_.find(internal::AsSlice(text)));
 }
 
 Regex::FindAllResult Regex::FindAll(absl::string_view text) const {
-  return FindAllResult(regex_.find_iter(text));
+  return FindAllResult(regex_.find_iter(internal::AsSlice(text)));
 }
 
 Regex::FindAllCapturesResult Regex::FindAllCaptures(
     absl::string_view text) const {
-  return FindAllCapturesResult(regex_.captures_iter(text));
+  return FindAllCapturesResult(regex_.captures_iter(internal::AsSlice(text)));
 }
 
 Regex::SplitResult Regex::Split(absl::string_view text) const {
-  return SplitResult(regex_.split(text));
+  return SplitResult(regex_.split(internal::AsSlice(text)));
 }
 
 Regex::SplitNResult Regex::Split(absl::string_view text, size_t limit) const {
-  return SplitNResult(regex_.splitn(text, limit));
+  return SplitNResult(regex_.splitn(internal::AsSlice(text), limit));
 }
 
 std::map<std::string, int> Regex::NamedCapturingGroups() const {
@@ -213,11 +214,11 @@ absl::StatusOr<RegexSet> RegexSet::Compile(
     rewritten_strings.push_back(*rewritten);
   }
 
-  // Create a vector of string_views to match what RegexSetBuilder expects.
-  std::vector<absl::string_view> final_patterns;
+  // Create a vector of SliceRefs to match what RegexSetBuilder expects.
+  std::vector<rs_std::SliceRef<const std::uint8_t>> final_patterns;
   final_patterns.reserve(patterns.size());
   for (const std::string& s : rewritten_strings) {
-    final_patterns.push_back(s);
+    final_patterns.push_back(internal::AsSlice(s));
   }
 
   rust::RegexSetBuilder builder =
@@ -243,8 +244,7 @@ absl::StatusOr<RegexSet> RegexSet::Compile(
   auto result = builder.build();
   if (!result.has_value()) {
     const rust::VecU8& err = result.err();
-    return absl::InvalidArgumentError(absl::string_view(
-        reinterpret_cast<const char*>(err.as_ptr()), err.len()));
+    return absl::InvalidArgumentError(internal::AsStr(err));
   }
   return RegexSet(std::move(result).value());
 }
