@@ -1,5 +1,5 @@
 use crate::*;
-use cc_std::std::string;
+use cc_std::std::string_wrapper;
 use rusty_leveldb::DB as LevelDB_DB;
 use std::option::Option;
 
@@ -14,8 +14,8 @@ pub struct DBValue {
 }
 
 impl DBValue {
-    pub fn to_string(&self) -> string {
-        string::from(self.inner.as_ref())
+    pub fn to_string(&self) -> string_wrapper {
+        string_wrapper::from(self.inner.as_ref())
     }
 }
 
