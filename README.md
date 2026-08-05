@@ -11,6 +11,7 @@ C++ wrappers (using Crubit) for Rust libraries.
 | saphyr       | [saphyr](https://crates.io/crates/saphyr)         | Compiles |
 | serde_json   | [serde_json](https://crates.io/crates/serde_json) | Compiles      |
 | kamadak_exif | [kamadak-exif](https://crates.io/crates/kamadak-exif) | Compiles      |
+| regex        | [regex](https://crates.io/crates/regex)           | Compiles |
 | zip          | [zip](https://crates.io/crates/zip)               | Compiles |
 | leveldb      | [rusty_leveldb](https://crates.io/crates/rusty_leveldb)       | Doesn't compile - NOTE: Retry after `cc_std::virtual_unique_ptr` is supported |
 

@@ -8,7 +8,7 @@
 pub mod regex_rewrite;
 mod vec_u8;
 
-use log_rs::error;
+macro_rules! error { ($($arg:tt)*) => { eprintln!($($arg)*); }; }
 use num_traits::Num;
 use regex::bytes::{
     CaptureMatches as InnerCaptureMatches, CaptureNames as InnerCaptureNames,

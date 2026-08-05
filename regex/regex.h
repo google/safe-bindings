@@ -164,6 +164,12 @@ namespace security::regex {
 // and also for substring captures.
 class Match {
  public:
+  Match() = default;
+  Match(const Match&) = default;
+  Match& operator=(const Match&) = default;
+  Match(Match&&) = default;
+  Match& operator=(Match&&) = default;
+
   // Returns the byte offset of the start of the match in the text.
   size_t Start() const { return match_.start(); }
 
@@ -200,6 +206,12 @@ class Match {
 // Represents a set of capture groups from a regular expression match.
 class Captures {
  public:
+  Captures() = default;
+  Captures(const Captures&) = default;
+  Captures& operator=(const Captures&) = default;
+  Captures(Captures&&) = default;
+  Captures& operator=(Captures&&) = default;
+
   // Returns the overall match for the whole expression.
   Match GetMatch() const { return Match(captures_.get_match()); }
 
@@ -398,6 +410,12 @@ class Regex {
 // Represents the set of matches returned by RegexSet::Matches.
 class SetMatches {
  public:
+  SetMatches() = default;
+  SetMatches(const SetMatches&) = default;
+  SetMatches& operator=(const SetMatches&) = default;
+  SetMatches(SetMatches&&) = default;
+  SetMatches& operator=(SetMatches&&) = default;
+
   // Returns true if the regex at `index` in the set matched.
   bool Matched(size_t index) const { return matches_.matched(index); }
 
