@@ -1,11 +1,13 @@
 #[macro_use]
 mod macros;
 mod iterator;
+mod json;
 mod node_owned;
 mod node_view;
 pub mod vec_u8;
 
 pub use crate::iterator::YamlIterator;
+pub use crate::json::convert_yaml_to_json;
 pub use crate::node_owned::NodeOwned;
 pub use crate::node_view::NodeView;
 pub use crate::vec_u8::VecU8;
