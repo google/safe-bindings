@@ -1,7 +1,6 @@
 #ifndef SECURITY_ZIP_CONVERTERS_H_
 #define SECURITY_ZIP_CONVERTERS_H_
 
-#include <cstdint>
 #include <utility>
 
 #include "crubit_helpers/string_conversions.h"
@@ -10,6 +9,8 @@
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
 #include "absl/strings/string_view.h"
+#include "third_party/crubit/support/rs_std/result.h"
+#include "third_party/crubit/support/rs_std/unit.h"
 
 namespace security::zip {
 
@@ -32,7 +33,7 @@ class RustVecU8Wrapper {
 absl::StatusOr<RustVecU8Wrapper> FromRustResultVecU8(
     rs_std::Result<rust::VecU8, rust::ZipError> result_vec_u8);
 absl::Status FromRustResultUnit(
-    rs_std::Result<uint8_t, rust::ZipError> result_unit);
+    rs_std::Result<rs_std::unit_t, rust::ZipError> result_unit);
 
 absl::StatusOr<rust::BufferedZipArchive> FromRustBufferedZipArchive(
     rs_std::Result<rust::BufferedZipArchive, rust::ZipError>

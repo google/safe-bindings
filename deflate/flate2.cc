@@ -11,6 +11,8 @@
 #include "absl/strings/cord.h"
 #include "absl/strings/string_view.h"
 #include "absl/types/span.h"
+#include "third_party/crubit/support/rs_std/result.h"
+#include "third_party/crubit/support/rs_std/unit.h"
 
 namespace security::deflate {
 
@@ -146,7 +148,7 @@ std::optional<GzHeader> GzDecoderImpl<RustDecoder>::header() const {
 
 template <typename RustDecoder>
 absl::Status GzDecoderImpl<RustDecoder>::write_all(absl::string_view data) {
-  rs_std::Result<uint8_t, rust::vec_u8::VecU8> result_unit =
+  rs_std::Result<rs_std::unit_t, rust::vec_u8::VecU8> result_unit =
       decoder_.write_all(absl::Span<const uint8_t>(
           reinterpret_cast<const uint8_t*>(data.data()), data.size()));
   if (!result_unit.has_value()) {
@@ -184,7 +186,7 @@ GzEncoder GzEncoder::create(Compression level) {
 }
 
 absl::Status GzEncoder::write_all(absl::string_view data) {
-  rs_std::Result<uint8_t, rust::vec_u8::VecU8> result_unit =
+  rs_std::Result<rs_std::unit_t, rust::vec_u8::VecU8> result_unit =
       encoder_.write_all(absl::Span<const uint8_t>(
           reinterpret_cast<const uint8_t*>(data.data()), data.size()));
   if (!result_unit.has_value()) {
