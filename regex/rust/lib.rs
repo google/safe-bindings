@@ -10,14 +10,9 @@ mod vec_u8;
 
 macro_rules! error { ($($arg:tt)*) => { eprintln!($($arg)*); }; }
 use num_traits::Num;
-use regex::bytes::{
-    CaptureMatches as InnerCaptureMatches, CaptureNames as InnerCaptureNames,
-    Captures as InnerCaptures, Match as InnerMatch, Matches as InnerMatches, Regex as InnerRegex,
-    RegexBuilder as InnerRegexBuilder, RegexSet as InnerRegexSet,
-    RegexSetBuilder as InnerRegexSetBuilder, SetMatches as InnerSetMatches, Split as InnerSplit,
-    SplitN as InnerSplitN, SubCaptureMatches as InnerSubCaptureMatches,
-};
+use regex_automata::{meta, util::syntax, MatchKind};
 use std::option::Option;
+use std::sync::Arc;
 pub use vec_u8::VecU8;
 
 // Wrapper structs for structs in the regex package that we need to expose. We use `Option` for the
@@ -31,66 +26,43 @@ pub use vec_u8::VecU8;
 // this is not acceptable in production code for some projects, so we return a sensible default
 // value and log an error instead.
 
-/// Opaque wrapper for `Match`. 'h is the lifetime of the haystack.
-#[derive(Default, Debug)]
+/// An opaque representation of a match found in a haystack. 'h is the lifetime of the haystack.
+#[derive(Clone, Default, Debug)]
 pub struct Match<'h> {
-    inner: Option<InnerMatch<'h>>,
+    slice: &'h [u8],
+    start: usize,
 }
 
 impl<'h> Match<'h> {
+    pub fn new(haystack: &'h [u8], start: usize, end: usize) -> Self {
+        Self { slice: &haystack[start..end], start }
+    }
+
     pub fn start(&self) -> usize {
-        self.inner.as_ref().map_or_else(
-            || {
-                error!("Use of moved-from Match");
-                0
-            },
-            |i| i.start(),
-        )
+        self.start
     }
+
     pub fn end(&self) -> usize {
-        self.inner.as_ref().map_or_else(
-            || {
-                error!("Use of moved-from Match");
-                0
-            },
-            |i| i.end(),
-        )
+        self.start + self.slice.len()
     }
+
     pub fn is_empty(&self) -> bool {
-        self.inner.as_ref().map_or_else(
-            || {
-                error!("Use of moved-from Match");
-                true
-            },
-            |i| i.is_empty(),
-        )
+        self.slice.is_empty()
     }
+
     pub fn len(&self) -> usize {
-        self.inner.as_ref().map_or_else(
-            || {
-                error!("Use of moved-from Match");
-                0
-            },
-            |i| i.len(),
-        )
+        self.slice.len()
     }
 
     // NOTE(b/469976097): Decide if we want to support `range()` here. It can be implemented in the
     // C++ side with `start()` and `end()` anyway.
 
     pub fn as_str(&self) -> &'h [u8] {
-        self.inner.as_ref().map_or_else(
-            || {
-                error!("Use of moved-from Match");
-                const EMPTY: &[u8] = &[];
-                EMPTY
-            },
-            |i| i.as_bytes(),
-        )
+        self.slice
     }
 
     pub fn as_bytes(&self) -> &'h [u8] {
-        self.inner.as_ref().unwrap().as_bytes()
+        self.slice
     }
 
     pub fn parse_as_i8(&self, radix: i32) -> Result<i8, VecU8> {
@@ -141,7 +113,7 @@ where
 
     // An ASCII string is always valid UTF-8.
     let string =
-        str::from_utf8(slice).map_err::<VecU8, _>(|_| "Invalid Utf8".to_string().into())?;
+        std::str::from_utf8(slice).map_err::<VecU8, _>(|_| "Invalid Utf8".to_string().into())?;
 
     // RE2 doesn't allow leading spaces for integers.
     if string.starts_with(|c: char| c.is_whitespace()) {
@@ -241,81 +213,91 @@ where
         return Err("Non-ASCII match is not a valid float".to_string().into());
     }
     // An ASCII string is always valid UTF-8.
-    let s = str::from_utf8(slice).map_err::<VecU8, _>(|_| "Invalid Utf8".to_string().into())?;
+    let s =
+        std::str::from_utf8(slice).map_err::<VecU8, _>(|_| "Invalid Utf8".to_string().into())?;
     // RE2 allows leading spaces for floats.
     s.trim_start().parse::<T>().map_err(|e| {
         format!("Error parsing {} as a {}: {}", s, std::any::type_name::<T>(), e).into()
     })
 }
 
-impl<'h> From<InnerMatch<'h>> for Match<'h> {
-    fn from(m: InnerMatch<'h>) -> Self {
-        Match { inner: Some(m) }
-    }
-}
-
 /// Opaque wrapper for `Matches`, an iterator over matches in a haystack.
 /// 'r is the lifetime of the compiled regex, 'h is the lifetime of the haystack.
 #[derive(Default, Debug)]
 pub struct Matches<'r, 'h> {
-    inner: Option<InnerMatches<'r, 'h>>,
+    haystack: &'h [u8],
+    inner: Option<meta::FindMatches<'r, 'h>>,
 }
 
 impl<'r, 'h> Matches<'r, 'h> {
     // NOTE(b/483382648): Make `Matches` implement `Iterator`.
     #[allow(clippy::should_implement_trait)]
     pub fn next(&mut self) -> Option<Match<'h>> {
+        let haystack = self.haystack;
         self.inner.as_mut().map_or_else(
             || {
                 error!("Use of moved-from Matches");
                 None
             },
-            |i| i.next().map(Match::from),
+            |i| i.next().map(|m| Match::new(haystack, m.start(), m.end())),
         )
     }
 }
 
 /// Opaque wrapper for `Captures`. 'h is the lifetime of the haystack.
-#[derive(Default, Debug)]
+#[derive(Clone, Default, Debug)]
 pub struct Captures<'h> {
-    inner: Option<InnerCaptures<'h>>,
+    haystack: &'h [u8],
+    inner: Option<regex_automata::util::captures::Captures>,
 }
 
 impl<'h> Captures<'h> {
+    pub fn new(haystack: &'h [u8], caps: regex_automata::util::captures::Captures) -> Self {
+        Self { haystack, inner: Some(caps) }
+    }
+
     pub fn get(&self, i: usize) -> Option<Match<'h>> {
+        let haystack = self.haystack;
         self.inner.as_ref().map_or_else(
             || {
                 error!("Use of moved-from Captures");
                 None
             },
-            |inner| inner.get(i).map(Match::from),
+            |inner| inner.get_group(i).map(|span| Match::new(haystack, span.start, span.end)),
         )
     }
+
     pub fn get_match(&self) -> Match<'h> {
+        let haystack = self.haystack;
         self.inner.as_ref().map_or_else(
             || {
                 error!("Use of moved-from Captures");
                 Default::default()
             },
-            |i| i.get_match().into(),
+            |i| i.get_match().map(|m| Match::new(haystack, m.start(), m.end())).unwrap_or_default(),
         )
     }
+
     pub fn name(&self, name: &str) -> Option<Match<'h>> {
+        let haystack = self.haystack;
         self.inner.as_ref().map_or_else(
             || {
                 error!("Use of moved-from Captures");
                 None
             },
-            |inner| inner.name(name).map(Match::from),
+            |inner| {
+                inner.get_group_by_name(name).map(|span| Match::new(haystack, span.start, span.end))
+            },
         )
     }
+
     pub fn expand(&self, replacement: &[u8]) -> VecU8 {
         let Some(inner) = &self.inner else {
             error!("Use of moved-from Captures");
             return VecU8::from("");
         };
         let mut dst = Vec::<u8>::new();
-        inner.expand(replacement, &mut dst);
+        inner.interpolate_bytes_into(self.haystack, replacement, &mut dst);
         VecU8::from(dst)
     }
 
@@ -327,9 +309,10 @@ impl<'h> Captures<'h> {
                 error!("Use of moved-from Captures");
                 Default::default()
             },
-            |i| SubCaptureMatches { inner: Some(i.iter()) },
+            |i| SubCaptureMatches { caps: Some(self), index: 0, len: i.group_len() },
         )
     }
+
     // `regex::Captures` doesn't have an `is_empty` method, so this wrapper doesn't either.
     #[allow(clippy::len_without_is_empty)]
     pub fn len(&self) -> usize {
@@ -338,35 +321,35 @@ impl<'h> Captures<'h> {
                 error!("Use of moved-from Captures");
                 0
             },
-            |i| i.len(),
+            |i| i.group_len(),
         )
     }
 }
 
-impl<'h> From<InnerCaptures<'h>> for Captures<'h> {
-    fn from(m: InnerCaptures<'h>) -> Self {
-        Captures { inner: Some(m) }
-    }
-}
-
-/// Opaque wrapper for `SubCaptureMatches`. 'c is the lifetime of the `Captures` value, and 'h is
+/// An opaque iterator over the capture groups in a single match. 'c is the lifetime of the `Captures` value, and 'h is
 /// the lifetime of the haystack.
 #[derive(Default, Debug)]
 pub struct SubCaptureMatches<'c, 'h> {
-    inner: Option<InnerSubCaptureMatches<'c, 'h>>,
+    caps: Option<&'c Captures<'h>>,
+    index: usize,
+    len: usize,
 }
 
 impl<'c, 'h> SubCaptureMatches<'c, 'h> {
     // NOTE(b/483382648): Make `SubCaptureMatches` implement `Iterator`.
     #[allow(clippy::should_implement_trait)]
     pub fn next(&mut self) -> Option<Option<Match<'h>>> {
-        self.inner.as_mut().map_or_else(
-            || {
-                error!("Use of moved-from SubCaptureMatches");
-                None
-            },
-            |i| i.next().map(|maybe_match| maybe_match.map(Match::from)),
-        )
+        if self.caps.is_none() {
+            error!("Use of moved-from SubCaptureMatches");
+            return None;
+        }
+        if self.index >= self.len {
+            return None;
+        }
+        let caps = self.caps.unwrap();
+        let res = caps.get(self.index);
+        self.index += 1;
+        Some(res)
     }
 }
 
@@ -374,19 +357,21 @@ impl<'c, 'h> SubCaptureMatches<'c, 'h> {
 /// lifetime of the haystack.
 #[derive(Default, Debug)]
 pub struct CaptureMatches<'r, 'h> {
-    inner: Option<InnerCaptureMatches<'r, 'h>>,
+    haystack: &'h [u8],
+    inner: Option<meta::CapturesMatches<'r, 'h>>,
 }
 
 impl<'r, 'h> CaptureMatches<'r, 'h> {
     // NOTE(b/483382648): Make `CaptureMatches` implement `Iterator`.
     #[allow(clippy::should_implement_trait)]
     pub fn next(&mut self) -> Option<Captures<'h>> {
+        let haystack = self.haystack;
         self.inner.as_mut().map_or_else(
             || {
                 error!("Use of moved-from CaptureMatches");
                 None
             },
-            |i| i.next().map(Captures::from),
+            |i| i.next().map(|caps| Captures::new(haystack, caps)),
         )
     }
 }
@@ -395,19 +380,21 @@ impl<'r, 'h> CaptureMatches<'r, 'h> {
 /// lifetime of the haystack.
 #[derive(Default, Debug)]
 pub struct Split<'r, 'h> {
-    inner: Option<InnerSplit<'r, 'h>>,
+    haystack: &'h [u8],
+    inner: Option<meta::Split<'r, 'h>>,
 }
 
 impl<'r, 'h> Split<'r, 'h> {
     // NOTE(b/483382648): Make `Split` implement `Iterator`.
     #[allow(clippy::should_implement_trait)]
     pub fn next(&mut self) -> Option<&'h [u8]> {
+        let haystack = self.haystack;
         self.inner.as_mut().map_or_else(
             || {
                 error!("Use of moved-from Split");
                 None
             },
-            |i| i.next(),
+            |i| i.next().map(|span| &haystack[span.start..span.end]),
         )
     }
 }
@@ -416,19 +403,21 @@ impl<'r, 'h> Split<'r, 'h> {
 /// lifetime of the haystack.
 #[derive(Default, Debug)]
 pub struct SplitN<'r, 'h> {
-    inner: Option<InnerSplitN<'r, 'h>>,
+    haystack: &'h [u8],
+    inner: Option<meta::SplitN<'r, 'h>>,
 }
 
 impl<'r, 'h> SplitN<'r, 'h> {
     // NOTE(b/483382648): Make `SplitN` implement `Iterator`.
     #[allow(clippy::should_implement_trait)]
     pub fn next(&mut self) -> Option<&'h [u8]> {
+        let haystack = self.haystack;
         self.inner.as_mut().map_or_else(
             || {
                 error!("Use of moved-from SplitN");
                 None
             },
-            |i| i.next(),
+            |i| i.next().map(|span| &haystack[span.start..span.end]),
         )
     }
 }
@@ -437,7 +426,7 @@ impl<'r, 'h> SplitN<'r, 'h> {
 /// 'r is the lifetime of the compiled regular expression.
 #[derive(Default, Debug)]
 pub struct CaptureNames<'r> {
-    inner: Option<InnerCaptureNames<'r>>,
+    inner: Option<regex_automata::util::captures::GroupInfoPatternNames<'r>>,
 }
 
 impl<'r> CaptureNames<'r> {
@@ -456,38 +445,50 @@ impl<'r> CaptureNames<'r> {
     }
 }
 
+/// Opaque wrapper for the result of a regex replacement operation, including
+/// the number of replacements made and the resulting bytes.
+#[derive(Clone, Default, Debug, PartialEq)]
+pub struct ReplaceResult {
+    count: usize,
+    result: VecU8,
+}
+
+impl ReplaceResult {
+    pub fn new(count: usize, result: VecU8) -> Self {
+        Self { count, result }
+    }
+
+    pub fn count(&self) -> usize {
+        self.count
+    }
+
+    pub fn result(&self) -> &VecU8 {
+        &self.result
+    }
+
+    pub fn into_result(self) -> VecU8 {
+        self.result
+    }
+}
+
 /// Opaque wrapper for Regex object. We keep the inner regex in an Option to make this object
 /// implement Default, and thus be movable.
 #[derive(Clone, Default, Debug)]
 pub struct Regex {
-    inner: Option<InnerRegex>,
+    inner: Option<meta::Regex>,
+    pattern: Arc<str>,
 }
 
 impl Regex {
     // Disable the Clippy warning in order to follow the Regex API.
     #[allow(clippy::new_ret_no_self)]
     pub fn new(val: &[u8]) -> Result<Regex, VecU8> {
-        let result = (|| -> Result<Regex, VecU8> {
-            let input = std::str::from_utf8(val)
-                .map_err::<VecU8, _>(|_| VecU8::from("Invalid Utf8".to_string()))?;
-            Ok(Regex {
-                inner: Some(
-                    InnerRegex::new(input)
-                        .map_err::<VecU8, _>(|_| VecU8::from("Invalid Utf8".to_string()))?,
-                ),
-            })
-        })();
-        result.into()
+        let builder = RegexBuilder::new(val);
+        builder.build()
     }
 
     pub fn as_str(&self) -> &str {
-        self.inner.as_ref().map_or_else(
-            || {
-                error!("Use of moved-from Regex");
-                ""
-            },
-            |i| i.as_str(),
-        )
+        &self.pattern
     }
 
     pub fn is_match(&self, haystack: &[u8]) -> bool {
@@ -506,7 +507,7 @@ impl Regex {
                 error!("Use of moved-from Regex");
                 None
             },
-            |i| i.find(haystack).map(Match::from),
+            |i| i.find(haystack).map(|m| Match::new(haystack, m.start(), m.end())),
         )
     }
 
@@ -516,7 +517,7 @@ impl Regex {
                 error!("Use of moved-from Regex");
                 Default::default()
             },
-            |i| Matches { inner: Some(i.find_iter(haystack)) },
+            |i| Matches { haystack, inner: Some(i.find_iter(haystack)) },
         )
     }
 
@@ -526,7 +527,15 @@ impl Regex {
                 error!("Use of moved-from Regex");
                 None
             },
-            |i| i.captures(haystack).map(Captures::from),
+            |i| {
+                let mut caps = i.create_captures();
+                i.captures(haystack, &mut caps);
+                if caps.is_match() {
+                    Some(Captures::new(haystack, caps))
+                } else {
+                    None
+                }
+            },
         )
     }
 
@@ -536,7 +545,7 @@ impl Regex {
                 error!("Use of moved-from Regex");
                 Default::default()
             },
-            |i| CaptureMatches { inner: Some(i.captures_iter(haystack)) },
+            |i| CaptureMatches { haystack, inner: Some(i.captures_iter(haystack)) },
         )
     }
 
@@ -556,7 +565,9 @@ impl Regex {
                 error!("Use of moved-from Regex");
                 Default::default()
             },
-            |i| CaptureNames { inner: Some(i.capture_names()) },
+            |i| CaptureNames {
+                inner: Some(i.group_info().pattern_names(regex_automata::PatternID::ZERO)),
+            },
         )
     }
 
@@ -566,30 +577,37 @@ impl Regex {
     // NOTE(b/469976097): The original `replace*` methods support passing a function to perform
     // replacements. Decide if we want to support this.
     pub fn replace(&self, haystack: &[u8], rep: &[u8]) -> VecU8 {
-        let Some(inner) = &self.inner else {
-            error!("Use of moved-from Regex");
-            return VecU8::from("");
-        };
-        let result = inner.replace(haystack, rep);
-        VecU8::from(result.into_owned())
+        self.replacen(haystack, 1, rep).into_result()
     }
 
     pub fn replace_all(&self, haystack: &[u8], rep: &[u8]) -> VecU8 {
-        let Some(inner) = &self.inner else {
-            error!("Use of moved-from Regex");
-            return VecU8::from("");
-        };
-        let result = inner.replace_all(haystack, rep);
-        VecU8::from(result.into_owned())
+        self.replacen(haystack, usize::MAX, rep).into_result()
     }
 
-    pub fn replacen(&self, haystack: &[u8], limit: usize, rep: &[u8]) -> VecU8 {
-        let Some(inner) = &self.inner else {
+    pub fn replacen(&self, haystack: &[u8], limit: usize, rep: &[u8]) -> ReplaceResult {
+        let Some(re) = &self.inner else {
             error!("Use of moved-from Regex");
-            return VecU8::from("");
+            return ReplaceResult::default();
         };
-        let result = inner.replacen(haystack, limit, rep).to_vec();
-        VecU8::from(result)
+        let limit = if limit == 0 { usize::MAX } else { limit };
+        let mut it = re.captures_iter(haystack);
+        let mut new = Vec::with_capacity(haystack.len());
+        let mut last_match = 0;
+        let mut count = 0;
+        while count < limit {
+            if let Some(caps) = it.next() {
+                if let Some(m) = caps.get_match() {
+                    new.extend_from_slice(&haystack[last_match..m.start()]);
+                    caps.interpolate_bytes_into(haystack, rep, &mut new);
+                    last_match = m.end();
+                    count += 1;
+                }
+            } else {
+                break;
+            }
+        }
+        new.extend_from_slice(&haystack[last_match..]);
+        ReplaceResult { count, result: VecU8::from(new) }
     }
 
     pub fn split<'r, 'h>(&'r self, haystack: &'h [u8]) -> Split<'r, 'h> {
@@ -598,7 +616,7 @@ impl Regex {
                 error!("Use of moved-from Regex");
                 Default::default()
             },
-            |i| Split { inner: Some(i.split(haystack)) },
+            |i| Split { haystack, inner: Some(i.split(haystack)) },
         )
     }
 
@@ -608,119 +626,136 @@ impl Regex {
                 error!("Use of moved-from Regex");
                 Default::default()
             },
-            |i| SplitN { inner: Some(i.splitn(haystack, limit)) },
+            |i| SplitN { haystack, inner: Some(i.splitn(haystack, limit)) },
         )
     }
 }
 
-/// An opaque wrapper for RegexBuilder.
+// Default size limits matching the standard defaults of the upstream `regex` and `regex-automata`
+// crates (from github.com/rust-lang/regex):
+// - `DEFAULT_NFA_SIZE_LIMIT` (10 MiB): Matches `regex::RegexBuilder::size_limit` and
+//   `regex_automata::meta::Config::nfa_size_limit`, preventing memory explosion during Thompson NFA
+//   construction for complex patterns.
+// - `DEFAULT_HYBRID_CACHE_CAPACITY` (2 MiB): Matches `regex::RegexBuilder::dfa_size_limit` and
+//   `regex_automata::meta::Config::hybrid_cache_capacity`, setting the capacity for the lazy Hybrid
+//   DFA transition cache.
+const DEFAULT_NFA_SIZE_LIMIT: usize = 10 * (1 << 20);
+const DEFAULT_HYBRID_CACHE_CAPACITY: usize = 2 * (1 << 20);
+
+/// An opaque builder for configuring and compiling a `Regex`.
 ///
-/// In this case, we DO use the fact that `inner` can be none. We need to create a `str` from the
-/// given pattern which, coming from C++, may contain invalid UTF-8. When it happens, we set `inner`
-/// to `None`, turn all the setters into no-ops, and return a special error for this case from
-/// `build()`. Other than that, it should behave exactly as the inner RegexBuilder.
-#[derive(Default, Debug)]
+/// In this case, we DO use the fact that `pattern` can be none. We need to create a `str` from the
+/// given pattern which, coming from C++, may contain invalid UTF-8. When it happens, we set
+/// `pattern` to `None`, turn all the setters into no-ops, and return a special error for this case
+/// from `build()`.
+#[derive(Clone, Debug)]
 pub struct RegexBuilder {
-    inner: Option<InnerRegexBuilder>,
+    pattern: Option<String>,
+    metac: meta::Config,
+    syntaxc: syntax::Config,
+}
+
+impl Default for RegexBuilder {
+    fn default() -> Self {
+        Self {
+            pattern: None,
+            metac: meta::Config::new()
+                // Standard leftmost-first match semantics (same as RE2 / PCRE).
+                .match_kind(MatchKind::LeftmostFirst)
+                // Allow empty matches on any byte offset (supports arbitrary byte haystacks).
+                .utf8_empty(false)
+                // Cap NFA memory to prevent resource exhaustion on pathological patterns.
+                .nfa_size_limit(Some(DEFAULT_NFA_SIZE_LIMIT))
+                // Lazy Hybrid DFA cache capacity (2 MiB).
+                .hybrid_cache_capacity(DEFAULT_HYBRID_CACHE_CAPACITY)
+                // Disable fully ahead-of-time (AOT) dense DFA compilation to keep regex
+                // compilation fast and lightweight; regex-automata uses the lazy Hybrid DFA
+                // and PikeVM instead.
+                .dfa(false),
+            // Parse in byte-oriented mode to support raw byte slices.
+            syntaxc: syntax::Config::new().utf8(false),
+        }
+    }
 }
 
 impl RegexBuilder {
     pub fn new(pattern: &[u8]) -> Self {
         let s = std::str::from_utf8(pattern);
-        Self {
-            inner: if let Ok(pattern) = s { Some(InnerRegexBuilder::new(&pattern)) } else { None },
+        RegexBuilder {
+            pattern: s.ok().map(|str_slice| str_slice.to_string()),
+            ..Default::default()
         }
     }
 
     pub fn build(&self) -> Result<Regex, VecU8> {
-        if let Some(inner) = &self.inner {
-            Ok(Regex {
-                inner: Some(inner.build().map_err::<VecU8, _>(|err| err.to_string().into())?),
-            })
+        if let Some(pattern) = &self.pattern {
+            let metac = self.metac.clone().match_kind(MatchKind::LeftmostFirst).utf8_empty(false);
+            let syntaxc = self.syntaxc.utf8(false);
+            let meta = meta::Builder::new()
+                .configure(metac)
+                .syntax(syntaxc)
+                .build(pattern)
+                .map_err::<VecU8, _>(|err| err.to_string().into())?;
+            Ok(Regex { inner: Some(meta), pattern: Arc::from(pattern.as_str()) })
         } else {
-            // The only reason to not have an `inner` value is if we couldn't create a pattern
-            // string from the input.
             Err("Invalid UTF-8 in pattern".to_string().into())
         }
     }
 
     pub fn unicode(&mut self, yes: bool) {
-        if let Some(inner) = &mut self.inner {
-            inner.unicode(yes);
-        }
+        self.syntaxc = self.syntaxc.unicode(yes);
     }
 
     pub fn case_insensitive(&mut self, yes: bool) {
-        if let Some(inner) = &mut self.inner {
-            inner.case_insensitive(yes);
-        }
+        self.syntaxc = self.syntaxc.case_insensitive(yes);
     }
 
     pub fn multi_line(&mut self, yes: bool) {
-        if let Some(inner) = &mut self.inner {
-            inner.multi_line(yes);
-        }
+        self.syntaxc = self.syntaxc.multi_line(yes);
     }
 
     pub fn dot_matches_new_line(&mut self, yes: bool) {
-        if let Some(inner) = &mut self.inner {
-            inner.dot_matches_new_line(yes);
-        }
+        self.syntaxc = self.syntaxc.dot_matches_new_line(yes);
     }
 
     pub fn crlf(&mut self, yes: bool) {
-        if let Some(inner) = &mut self.inner {
-            inner.crlf(yes);
-        }
+        self.syntaxc = self.syntaxc.crlf(yes);
     }
 
     pub fn line_terminator(&mut self, byte: u8) {
-        if let Some(inner) = &mut self.inner {
-            inner.line_terminator(byte);
-        }
+        self.metac = self.metac.clone().line_terminator(byte);
+        self.syntaxc = self.syntaxc.line_terminator(byte);
     }
 
     pub fn swap_greed(&mut self, yes: bool) {
-        if let Some(inner) = &mut self.inner {
-            inner.swap_greed(yes);
-        }
+        self.syntaxc = self.syntaxc.swap_greed(yes);
     }
 
     pub fn ignore_whitespace(&mut self, yes: bool) {
-        if let Some(inner) = &mut self.inner {
-            inner.ignore_whitespace(yes);
-        }
+        self.syntaxc = self.syntaxc.ignore_whitespace(yes);
     }
 
     pub fn octal(&mut self, yes: bool) {
-        if let Some(inner) = &mut self.inner {
-            inner.octal(yes);
-        }
+        self.syntaxc = self.syntaxc.octal(yes);
     }
 
     pub fn size_limit(&mut self, bytes: usize) {
-        if let Some(inner) = &mut self.inner {
-            inner.size_limit(bytes);
-        }
+        self.metac = self.metac.clone().nfa_size_limit(Some(bytes));
     }
 
     pub fn dfa_size_limit(&mut self, bytes: usize) {
-        if let Some(inner) = &mut self.inner {
-            inner.dfa_size_limit(bytes);
-        }
+        self.metac = self.metac.clone().hybrid_cache_capacity(bytes);
     }
 
     pub fn nest_limit(&mut self, limit: u32) {
-        if let Some(inner) = &mut self.inner {
-            inner.nest_limit(limit);
-        }
+        self.syntaxc = self.syntaxc.nest_limit(limit);
     }
 }
 
 /// Opaque wrapper for `SetMatches`.
 #[derive(Default, Debug)]
 pub struct SetMatches {
-    inner: Option<InnerSetMatches>,
+    inner: Option<regex_automata::PatternSet>,
 }
 
 impl SetMatches {
@@ -730,7 +765,13 @@ impl SetMatches {
                 error!("Use of moved-from SetMatches");
                 false
             },
-            |i| i.matched(regex_index),
+            |i| {
+                if let Ok(pid) = regex_automata::PatternID::new(regex_index) {
+                    i.contains(pid)
+                } else {
+                    false
+                }
+            },
         )
     }
 
@@ -743,7 +784,7 @@ impl SetMatches {
                 error!("Use of moved-from SetMatches");
                 0
             },
-            |i| i.len(),
+            |i| i.capacity(),
         )
     }
 
@@ -757,7 +798,7 @@ impl SetMatches {
 /// Opaque wrapper for RegexSet.
 #[derive(Default, Debug)]
 pub struct RegexSet {
-    inner: Option<InnerRegexSet>,
+    inner: Option<meta::Regex>,
 }
 
 impl RegexSet {
@@ -765,21 +806,8 @@ impl RegexSet {
     /// it returns an error.
     #[allow(clippy::new_ret_no_self)] // We need to return a Result because compilation can fail.
     pub fn new(patterns: &[&[u8]]) -> Result<RegexSet, VecU8> {
-        let result = (|| -> Result<RegexSet, VecU8> {
-            let mut pattern_strings = Vec::with_capacity(patterns.len());
-            for p in patterns {
-                pattern_strings.push(
-                    std::str::from_utf8(p).map_err::<VecU8, _>(|_| "Invalid pattern".into())?,
-                );
-            }
-            Ok(RegexSet {
-                inner: Some(
-                    InnerRegexSet::new(pattern_strings)
-                        .map_err::<VecU8, _>(|err| err.to_string().into())?,
-                ),
-            })
-        })();
-        result.into()
+        let builder = RegexSetBuilder::new(patterns);
+        builder.build()
     }
 
     /// Returns true iff at least one of the regexes matches the haystack.
@@ -801,7 +829,12 @@ impl RegexSet {
                 error!("Use of moved-from RegexSet");
                 Default::default()
             },
-            |i| SetMatches { inner: Some(i.matches(haystack)) },
+            |i| {
+                let mut pset = regex_automata::PatternSet::new(i.pattern_len());
+                let input = regex_automata::Input::new(haystack);
+                i.which_overlapping_matches(&input, &mut pset);
+                SetMatches { inner: Some(pset) }
+            },
         )
     }
 
@@ -812,7 +845,7 @@ impl RegexSet {
                 error!("Use of moved-from RegexSet");
                 0
             },
-            |i| i.len(),
+            |i| i.pattern_len(),
         )
     }
 
@@ -823,15 +856,40 @@ impl RegexSet {
                 error!("Use of moved-from RegexSet");
                 false
             },
-            |i| i.is_empty(),
+            |i| i.pattern_len() == 0,
         )
     }
 }
 
-/// An opaque wrapper for RegexSetBuilder.
-#[derive(Default, Debug)]
+/// An opaque builder for configuring and compiling a `RegexSet`.
+#[derive(Clone, Debug)]
 pub struct RegexSetBuilder {
-    inner: Option<InnerRegexSetBuilder>,
+    patterns: Option<Vec<String>>,
+    metac: meta::Config,
+    syntaxc: syntax::Config,
+}
+
+impl Default for RegexSetBuilder {
+    fn default() -> Self {
+        Self {
+            patterns: None,
+            metac: meta::Config::new()
+                // Report all matching pattern IDs in the set rather than stopping at the first.
+                .match_kind(MatchKind::All)
+                // Allow empty matches on any byte offset (supports arbitrary byte haystacks).
+                .utf8_empty(false)
+                // Disable capture group tracking since RegexSet only checks set membership.
+                .which_captures(regex_automata::nfa::thompson::WhichCaptures::None)
+                // Cap NFA memory to prevent resource exhaustion on pathological patterns.
+                .nfa_size_limit(Some(DEFAULT_NFA_SIZE_LIMIT))
+                // Lazy Hybrid DFA cache capacity (2 MiB).
+                .hybrid_cache_capacity(DEFAULT_HYBRID_CACHE_CAPACITY)
+                // Disable fully ahead-of-time (AOT) dense DFA compilation.
+                .dfa(false),
+            // Parse in byte-oriented mode to support raw byte slices.
+            syntaxc: syntax::Config::new().utf8(false),
+        }
+    }
 }
 
 impl RegexSetBuilder {
@@ -840,95 +898,82 @@ impl RegexSetBuilder {
         let mut ok = true;
         for p in patterns {
             if let Ok(s) = std::str::from_utf8(p) {
-                exprs.push(s);
+                exprs.push(s.to_string());
             } else {
                 ok = false;
                 break;
             }
         }
-        Self { inner: if ok { Some(InnerRegexSetBuilder::new(exprs)) } else { None } }
+        RegexSetBuilder { patterns: if ok { Some(exprs) } else { None }, ..Default::default() }
     }
 
     pub fn build(&self) -> Result<RegexSet, VecU8> {
-        if let Some(inner) = &self.inner {
-            Ok(RegexSet {
-                inner: Some(inner.build().map_err::<VecU8, _>(|err| err.to_string().into())?),
-            })
+        if let Some(patterns) = &self.patterns {
+            let metac = self
+                .metac
+                .clone()
+                .match_kind(MatchKind::All)
+                .utf8_empty(false)
+                .which_captures(regex_automata::nfa::thompson::WhichCaptures::None);
+            let syntaxc = self.syntaxc.utf8(false);
+            let meta = meta::Builder::new()
+                .configure(metac)
+                .syntax(syntaxc)
+                .build_many(patterns)
+                .map_err::<VecU8, _>(|err| err.to_string().into())?;
+            Ok(RegexSet { inner: Some(meta) })
         } else {
             Err("Invalid UTF-8 in pattern".to_string().into())
         }
     }
 
     pub fn unicode(&mut self, yes: bool) {
-        if let Some(inner) = &mut self.inner {
-            inner.unicode(yes);
-        }
+        self.syntaxc = self.syntaxc.unicode(yes);
     }
 
     pub fn case_insensitive(&mut self, yes: bool) {
-        if let Some(inner) = &mut self.inner {
-            inner.case_insensitive(yes);
-        }
+        self.syntaxc = self.syntaxc.case_insensitive(yes);
     }
 
     pub fn multi_line(&mut self, yes: bool) {
-        if let Some(inner) = &mut self.inner {
-            inner.multi_line(yes);
-        }
+        self.syntaxc = self.syntaxc.multi_line(yes);
     }
 
     pub fn dot_matches_new_line(&mut self, yes: bool) {
-        if let Some(inner) = &mut self.inner {
-            inner.dot_matches_new_line(yes);
-        }
+        self.syntaxc = self.syntaxc.dot_matches_new_line(yes);
     }
 
     pub fn crlf(&mut self, yes: bool) {
-        if let Some(inner) = &mut self.inner {
-            inner.crlf(yes);
-        }
+        self.syntaxc = self.syntaxc.crlf(yes);
     }
 
     pub fn line_terminator(&mut self, byte: u8) {
-        if let Some(inner) = &mut self.inner {
-            inner.line_terminator(byte);
-        }
+        self.metac = self.metac.clone().line_terminator(byte);
+        self.syntaxc = self.syntaxc.line_terminator(byte);
     }
 
     pub fn swap_greed(&mut self, yes: bool) {
-        if let Some(inner) = &mut self.inner {
-            inner.swap_greed(yes);
-        }
+        self.syntaxc = self.syntaxc.swap_greed(yes);
     }
 
     pub fn ignore_whitespace(&mut self, yes: bool) {
-        if let Some(inner) = &mut self.inner {
-            inner.ignore_whitespace(yes);
-        }
+        self.syntaxc = self.syntaxc.ignore_whitespace(yes);
     }
 
     pub fn octal(&mut self, yes: bool) {
-        if let Some(inner) = &mut self.inner {
-            inner.octal(yes);
-        }
+        self.syntaxc = self.syntaxc.octal(yes);
     }
 
     pub fn size_limit(&mut self, bytes: usize) {
-        if let Some(inner) = &mut self.inner {
-            inner.size_limit(bytes);
-        }
+        self.metac = self.metac.clone().nfa_size_limit(Some(bytes));
     }
 
     pub fn dfa_size_limit(&mut self, bytes: usize) {
-        if let Some(inner) = &mut self.inner {
-            inner.dfa_size_limit(bytes);
-        }
+        self.metac = self.metac.clone().hybrid_cache_capacity(bytes);
     }
 
     pub fn nest_limit(&mut self, limit: u32) {
-        if let Some(inner) = &mut self.inner {
-            inner.nest_limit(limit);
-        }
+        self.syntaxc = self.syntaxc.nest_limit(limit);
     }
 }
 
@@ -1164,5 +1209,94 @@ mod tests {
         check_parse_float!(f64, "-1e-999", -0.0);
 
         check_bad_float!(f64, "1.0.0", "invalid float");
+    }
+
+    #[gtest]
+    fn test_regex_builder_line_terminator() {
+        let mut builder = RegexBuilder::new(b".");
+        builder.line_terminator(b'z');
+        let regex = builder.build().unwrap();
+        expect_that!(regex.is_match(b"\n"), eq(true));
+        expect_that!(regex.is_match(b"z"), eq(false));
+
+        let mut builder_multiline = RegexBuilder::new(b"^abc$");
+        builder_multiline.multi_line(true);
+        builder_multiline.line_terminator(b'z');
+        let regex_multiline = builder_multiline.build().unwrap();
+        expect_that!(regex_multiline.is_match(b"zabc"), eq(true));
+        expect_that!(regex_multiline.is_match(b"abcz"), eq(true));
+        expect_that!(regex_multiline.is_match(b"\nabc"), eq(false));
+    }
+
+    #[gtest]
+    fn test_regex_set_builder_line_terminator() {
+        let mut builder = RegexSetBuilder::new(&[b"."]);
+        builder.line_terminator(b'z');
+        let set = builder.build().unwrap();
+        expect_that!(set.is_match(b"\n"), eq(true));
+        expect_that!(set.is_match(b"z"), eq(false));
+
+        let mut builder_multiline = RegexSetBuilder::new(&[b"^abc$"]);
+        builder_multiline.multi_line(true);
+        builder_multiline.line_terminator(b'z');
+        let set_multiline = builder_multiline.build().unwrap();
+        expect_that!(set_multiline.is_match(b"zabc"), eq(true));
+        expect_that!(set_multiline.is_match(b"abcz"), eq(true));
+        expect_that!(set_multiline.is_match(b"\nabc"), eq(false));
+    }
+
+    #[gtest]
+    fn test_regex_builder_options() {
+        // unicode
+        let mut builder = RegexBuilder::new(b"\\w+");
+        builder.unicode(false);
+        let r = builder.build().unwrap();
+        expect_that!(r.is_match("é".as_bytes()), eq(false));
+        expect_that!(r.is_match(b"abc"), eq(true));
+
+        // crlf
+        let mut builder = RegexBuilder::new(b"^abc$");
+        builder.multi_line(true);
+        builder.crlf(true);
+        let r = builder.build().unwrap();
+        expect_that!(r.is_match(b"abc\r\n"), eq(true));
+
+        // swap_greed
+        let mut builder = RegexBuilder::new(b"a*");
+        builder.swap_greed(true);
+        let r = builder.build().unwrap();
+        expect_that!(r.find(b"aaa").unwrap().len(), eq(0));
+
+        // octal
+        let mut builder = RegexBuilder::new(b"\\101");
+        builder.octal(true);
+        let r = builder.build().unwrap();
+        expect_that!(r.is_match(b"A"), eq(true));
+
+        // nest_limit
+        let mut builder = RegexBuilder::new(b"ab");
+        builder.nest_limit(0);
+        expect_that!(builder.build().is_err(), eq(true));
+    }
+
+    #[gtest]
+    fn test_regex_set_builder_options() {
+        // crlf
+        let mut builder = RegexSetBuilder::new(&[b"^abc$"]);
+        builder.multi_line(true);
+        builder.crlf(true);
+        let set = builder.build().unwrap();
+        expect_that!(set.is_match(b"abc\r\n"), eq(true));
+
+        // octal
+        let mut builder = RegexSetBuilder::new(&[b"\\101"]);
+        builder.octal(true);
+        let set = builder.build().unwrap();
+        expect_that!(set.is_match(b"A"), eq(true));
+
+        // nest_limit
+        let mut builder = RegexSetBuilder::new(&[b"ab"]);
+        builder.nest_limit(0);
+        expect_that!(builder.build().is_err(), eq(true));
     }
 }

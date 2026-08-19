@@ -126,6 +126,15 @@
 //     std::string s = c->Expand("$2 $1"); // "world hello"
 //   }
 //
+// You can also use Replace and GlobalReplace (similar to RE2):
+//
+//   std::string s = "yabba dabba doo";
+//   Replace(&s, "b+", "d");        // s is now "yada dabba doo"
+//   GlobalReplace(&s, "b+", "d");  // s is now "yada dada doo"
+//
+// NOTE: The `rewrite` string uses Rust's `regex` crate syntax (e.g., `$1`,
+// `${name}`) for capture groups, rather than RE2's `\1` syntax.
+//
 // -----------------------------------------------------------------------
 // NUMERIC PARSING:
 //
@@ -401,6 +410,26 @@ class Regex {
   // returns at most `limit` pieces.
   SplitNResult Split(absl::string_view text, size_t limit) const;
 
+  // Replaces the first match of the regex in `text` with `rewrite`.
+  // NOTE: The `rewrite` string uses `$1` syntax for capture groups, NOT `\1`.
+  std::string Replace(absl::string_view text, absl::string_view rewrite) const;
+
+  // Replaces all non-overlapping matches of the regex in `text` with `rewrite`.
+  // NOTE: The `rewrite` string uses `$1` syntax for capture groups, NOT `\1`.
+  std::string ReplaceAll(absl::string_view text,
+                         absl::string_view rewrite) const;
+
+  // Replaces at most `limit` non-overlapping matches of the regex in `text`
+  // with `rewrite`. If `limit` is 0, replaces all matches.
+  // NOTE: The `rewrite` string uses `$1` syntax for capture groups, NOT `\1`.
+  std::string Replacen(absl::string_view text, size_t limit,
+                       absl::string_view rewrite) const;
+
+  friend bool Replace(std::string* str, const Regex& regex,
+                      absl::string_view rewrite);
+  friend int GlobalReplace(std::string* str, const Regex& regex,
+                           absl::string_view rewrite);
+
  private:
   explicit Regex(rust::Regex inner);
 
@@ -616,21 +645,21 @@ Arg Octal(T* ptr) {
   }
 }
 
-// Matches `r` against `text` and stores captures in the given Args.
-inline bool MatchN(absl::string_view text, const Regex& r,
+// Matches `regex` against `text` and stores captures in the given Args.
+inline bool MatchN(absl::string_view text, const Regex& regex,
                    const Arg* const args[], int n) {
   if (n == 0) {
-    return r.IsMatch(text);
+    return regex.IsMatch(text);
   }
-  std::optional<Captures> c = r.FindCaptures(text);
-  if (!c.has_value()) {
+  std::optional<Captures> captures = regex.FindCaptures(text);
+  if (!captures.has_value()) {
     return false;
   }
-  if (static_cast<size_t>(n) > c->Len() - 1) {
+  if (static_cast<size_t>(n) > captures->Len() - 1) {
     return false;
   }
   for (int i = 0; i < n; ++i) {
-    if (!args[i]->Parse(c->Get(i + 1))) {
+    if (!args[i]->Parse(captures->Get(i + 1))) {
       return false;
     }
   }
@@ -638,9 +667,9 @@ inline bool MatchN(absl::string_view text, const Regex& r,
 }
 
 // Matches the pattern to any substring in the text using the array interface.
-inline bool PartialMatchN(absl::string_view text, const Regex& r,
+inline bool PartialMatchN(absl::string_view text, const Regex& regex,
                           const Arg* const args[], int n) {
-  return MatchN(text, r, args, n);
+  return MatchN(text, regex, args, n);
 }
 
 // Matches the pattern to any substring in the text (similar to
@@ -649,62 +678,85 @@ inline bool PartialMatchN(absl::string_view text, const Regex& r,
 template <typename... Args>
 bool PartialMatch(absl::string_view text, absl::string_view pattern,
                   Args&&... args) {
-  absl::StatusOr<Regex> r = Regex::Compile(pattern);
-  if (!r.ok()) {
+  absl::StatusOr<Regex> compiled_regex = Regex::Compile(pattern);
+  if (!compiled_regex.ok()) {
     return false;
   }
-  return PartialMatch(text, *r, std::forward<Args>(args)...);
+  return PartialMatch(text, *compiled_regex, std::forward<Args>(args)...);
 }
 
 // Like PartialMatch, but takes a pre-compiled Regex.
 template <typename... Args>
-bool PartialMatch(absl::string_view text, const Regex& r, Args&&... args) {
+bool PartialMatch(absl::string_view text, const Regex& regex, Args&&... args) {
   if constexpr (sizeof...(args) == 0) {
-    return MatchN(text, r, nullptr, 0);
+    return MatchN(text, regex, nullptr, 0);
   } else {
     Arg temp_args[] = {MakeArg(std::forward<Args>(args))...};
     // We need an array of pointers to Arg.
-    return []<size_t... Is>(absl::string_view text, const Regex& r,
+    return []<size_t... Is>(absl::string_view text, const Regex& regex,
                             Arg* args_array, std::index_sequence<Is...>) {
       const Arg* const ptrs[] = {&args_array[Is]...};
-      return MatchN(text, r, ptrs, sizeof...(Is));
-    }(text, r, temp_args, std::index_sequence_for<Args...>{});
+      return MatchN(text, regex, ptrs, sizeof...(Is));
+    }(text, regex, temp_args, std::index_sequence_for<Args...>{});
   }
+}
+
+// Matches the pattern to the entire text using the array interface.
+inline bool FullMatchN(absl::string_view text, const Regex& regex,
+                       const Arg* const args[], int n) {
+  std::optional<Captures> captures = regex.FindCaptures(text);
+  if (captures && captures->GetMatch().Start() == 0 &&
+      captures->GetMatch().End() == text.size()) {
+    if (static_cast<size_t>(n) > captures->Len() - 1) return false;
+    for (int i = 0; i < n; ++i) {
+      if (!args[i]->Parse(captures->Get(i + 1))) return false;
+    }
+    return true;
+  }
+  return false;
 }
 
 // Matches the pattern to the entire text (similar to RE2::FullMatch).
 // Returns true on a successful full match, false otherwise.
-//
-// This is a convenience function that only works with patterns passed as
-// strings. If you want full match on a pre-compiled regex, use PartialMatch on
-// a Regex with anchors (e.g., "\A(?:...)\z").
-//
-// The reason we don't allow passing a pre-compiled regex is that the underlying
-// Rust crate only supports partial search. Adding anchors under the hood would
-// require an expensive recompilation step, which defeats the point of passing a
-// pre-compiled regex in the first place.
 template <typename... Args>
 bool FullMatch(absl::string_view text, absl::string_view pattern,
                Args&&... args) {
   // Use \A and \z to anchor to beginning and end of string even in multiline
-  // mode, with an non-capturing group to make sure the anchors work properly
+  // mode, with a non-capturing group to make sure the anchors work properly
   // with alternation (e.g. turning 'abc|xyz' into '\Aabc|xyz\z' is wrong).
   std::string anchored = absl::StrCat("\\A(?:", pattern, ")\\z");
-  return PartialMatch(text, anchored, std::forward<Args>(args)...);
+  absl::StatusOr<Regex> compiled_regex = Regex::Compile(anchored);
+  if (!compiled_regex.ok()) return false;
+  return FullMatch(text, *compiled_regex, std::forward<Args>(args)...);
+}
+
+// Like FullMatch, but takes a pre-compiled Regex.
+template <typename... Args>
+bool FullMatch(absl::string_view text, const Regex& regex, Args&&... args) {
+  if constexpr (sizeof...(args) == 0) {
+    return FullMatchN(text, regex, nullptr, 0);
+  } else {
+    Arg temp_args[] = {MakeArg(std::forward<Args>(args))...};
+    return []<size_t... Is>(absl::string_view text, const Regex& regex,
+                            Arg* args_array, std::index_sequence<Is...>) {
+      const Arg* const ptrs[] = {&args_array[Is]...};
+      return FullMatchN(text, regex, ptrs, sizeof...(Is));
+    }(text, regex, temp_args, std::index_sequence_for<Args...>{});
+  }
 }
 
 // Matches the pattern to a prefix of the input string and advances the input
 // string view past the match using the array interface.
-inline bool ConsumeN(absl::string_view* input, const Regex& r,
+inline bool ConsumeN(absl::string_view* input, const Regex& regex,
                      const Arg* const args[], int n) {
-  std::optional<Captures> c = r.FindCaptures(*input);
+  std::optional<Captures> captures = regex.FindCaptures(*input);
   // For Consume, we require the match to be at the beginning of the string.
-  if (c && c->GetMatch().Start() == 0) {
-    if (static_cast<size_t>(n) > c->Len() - 1) return false;
+  if (captures && captures->GetMatch().Start() == 0) {
+    if (static_cast<size_t>(n) > captures->Len() - 1) return false;
     for (int i = 0; i < n; ++i) {
-      if (!args[i]->Parse(c->Get(i + 1))) return false;
+      if (!args[i]->Parse(captures->Get(i + 1))) return false;
     }
-    input->remove_prefix(c->GetMatch().End());
+    input->remove_prefix(captures->GetMatch().End());
     return true;
   }
   return false;
@@ -713,15 +765,15 @@ inline bool ConsumeN(absl::string_view* input, const Regex& r,
 // Searches for the first match anywhere in the input string, populates
 // arguments, and advances the input string view past the match using the array
 // interface.
-inline bool FindAndConsumeN(absl::string_view* input, const Regex& r,
+inline bool FindAndConsumeN(absl::string_view* input, const Regex& regex,
                             const Arg* const args[], int n) {
-  std::optional<Captures> c = r.FindCaptures(*input);
-  if (c) {
-    if (static_cast<size_t>(n) > c->Len() - 1) return false;
+  std::optional<Captures> captures = regex.FindCaptures(*input);
+  if (captures) {
+    if (static_cast<size_t>(n) > captures->Len() - 1) return false;
     for (int i = 0; i < n; ++i) {
-      if (!args[i]->Parse(c->Get(i + 1))) return false;
+      if (!args[i]->Parse(captures->Get(i + 1))) return false;
     }
-    input->remove_prefix(c->GetMatch().End());
+    input->remove_prefix(captures->GetMatch().End());
     return true;
   }
   return false;
@@ -738,23 +790,23 @@ bool Consume(absl::string_view* input, absl::string_view pattern,
   // Note that if multiple alternations could match at the beginning, the
   // first matching alternation will be picked (leftmost-first matching).
   std::string anchored = absl::StrCat("\\A(?:", pattern, ")");
-  absl::StatusOr<Regex> r = Regex::Compile(anchored);
-  if (!r.ok()) return false;
-  return Consume(input, *r, std::forward<Args>(args)...);
+  absl::StatusOr<Regex> compiled_regex = Regex::Compile(anchored);
+  if (!compiled_regex.ok()) return false;
+  return Consume(input, *compiled_regex, std::forward<Args>(args)...);
 }
 
 // Like Consume, but takes a pre-compiled Regex.
 template <typename... Args>
-bool Consume(absl::string_view* input, const Regex& r, Args&&... args) {
+bool Consume(absl::string_view* input, const Regex& regex, Args&&... args) {
   Arg temp_args[] = {MakeArg(std::forward<Args>(args))...};
   if constexpr (sizeof...(args) == 0) {
-    return ConsumeN(input, r, nullptr, 0);
+    return ConsumeN(input, regex, nullptr, 0);
   } else {
-    return []<size_t... Is>(absl::string_view* input, const Regex& r,
+    return []<size_t... Is>(absl::string_view* input, const Regex& regex,
                             Arg* args_array, std::index_sequence<Is...>) {
       const Arg* const ptrs[] = {&args_array[Is]...};
-      return ConsumeN(input, r, ptrs, sizeof...(Is));
-    }(input, r, temp_args, std::index_sequence_for<Args...>{});
+      return ConsumeN(input, regex, ptrs, sizeof...(Is));
+    }(input, regex, temp_args, std::index_sequence_for<Args...>{});
   }
 }
 
@@ -764,25 +816,49 @@ bool Consume(absl::string_view* input, const Regex& r, Args&&... args) {
 template <typename... Args>
 bool FindAndConsume(absl::string_view* input, absl::string_view pattern,
                     Args&&... args) {
-  absl::StatusOr<Regex> r = Regex::Compile(pattern);
-  if (!r.ok()) return false;
-  return FindAndConsume(input, *r, std::forward<Args>(args)...);
+  absl::StatusOr<Regex> compiled_regex = Regex::Compile(pattern);
+  if (!compiled_regex.ok()) return false;
+  return FindAndConsume(input, *compiled_regex, std::forward<Args>(args)...);
 }
 
 // Like FindAndConsume, but takes a pre-compiled Regex.
 template <typename... Args>
-bool FindAndConsume(absl::string_view* input, const Regex& r, Args&&... args) {
+bool FindAndConsume(absl::string_view* input, const Regex& regex,
+                    Args&&... args) {
   Arg temp_args[] = {MakeArg(std::forward<Args>(args))...};
   if constexpr (sizeof...(args) == 0) {
-    return FindAndConsumeN(input, r, nullptr, 0);
+    return FindAndConsumeN(input, regex, nullptr, 0);
   } else {
-    return []<size_t... Is>(absl::string_view* input, const Regex& r,
+    return []<size_t... Is>(absl::string_view* input, const Regex& regex,
                             Arg* args_array, std::index_sequence<Is...>) {
       const Arg* const ptrs[] = {&args_array[Is]...};
-      return FindAndConsumeN(input, r, ptrs, sizeof...(Is));
-    }(input, r, temp_args, std::index_sequence_for<Args...>{});
+      return FindAndConsumeN(input, regex, ptrs, sizeof...(Is));
+    }(input, regex, temp_args, std::index_sequence_for<Args...>{});
   }
 }
+
+// Replaces the first match of the pattern in `str` with `rewrite` (similar to
+// RE2::Replace).
+// Returns true if the pattern matches and a replacement occurs, false
+// otherwise. If no match occurs, `str` is not modified.
+// NOTE: The `rewrite` string uses `$1` syntax for capture groups, NOT `\1`.
+bool Replace(std::string* str, const Regex& regex, absl::string_view rewrite);
+
+// Like Replace, but compiles `pattern` on the fly.
+bool Replace(std::string* str, absl::string_view pattern,
+             absl::string_view rewrite);
+
+// Replaces successive non-overlapping occurrences of the pattern in `str` with
+// `rewrite` (similar to RE2::GlobalReplace).
+// Returns the number of replacements made.
+// If no match occurs, `str` is not modified.
+// NOTE: The `rewrite` string uses `$1` syntax for capture groups, NOT `\1`.
+int GlobalReplace(std::string* str, const Regex& regex,
+                  absl::string_view rewrite);
+
+// Like GlobalReplace, but compiles `pattern` on the fly.
+int GlobalReplace(std::string* str, absl::string_view pattern,
+                  absl::string_view rewrite);
 
 namespace internal {
 
