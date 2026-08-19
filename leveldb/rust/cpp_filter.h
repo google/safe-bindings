@@ -6,7 +6,7 @@
 
 #include "absl/strings/string_view.h"
 #include "absl/types/span.h"
-#include "third_party/crubit/support/annotations.h"
+#include "support/annotations.h"
 
 namespace leveldb_rs {
 

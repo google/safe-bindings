@@ -82,7 +82,7 @@ impl DB {
             .map_err(|e| e.into())
     }
 
-    pub fn close(&self) -> Result<u8, LevelDBError> {
+    pub fn close(&self) -> Result<(), LevelDBError> {
         let mut guard = match self.db.lock() {
             Ok(g) => g,
             Err(e) => return Err(LevelDBError::from(format!("poisoned lock: {}", e))),
@@ -91,14 +91,13 @@ impl DB {
             .take()
             .ok_or_else(|| LevelDBError::from("DB is not open"))
             .and_then(|mut db| db.close().map_err(|e| e.into()))
-            .map(|_| 0)
             .map_err(|e| e.into())
     }
 
-    pub fn put(&self, k: &[u8], v: &[u8]) -> Result<u8, LevelDBError> {
+    pub fn put(&self, k: &[u8], v: &[u8]) -> Result<(), LevelDBError> {
         // put performs a deep copy, no references are leaked.
         let mut guard = self.get_db()?;
-        guard.put(k, v).map(|_| 0).map_err(|e| e.into())
+        guard.put(k, v).map_err(|e| e.into())
     }
 
     pub fn get(&self, k: &[u8]) -> Result<Option<DBValue>, LevelDBError> {
@@ -106,19 +105,19 @@ impl DB {
         Ok(guard.get(k).map(|v| DBValue { inner: v }))
     }
 
-    pub fn delete(&self, k: &[u8]) -> Result<u8, LevelDBError> {
+    pub fn delete(&self, k: &[u8]) -> Result<(), LevelDBError> {
         let mut guard = self.get_db()?;
-        guard.delete(k).map(|_| 0).map_err(|e| e.into())
+        guard.delete(k).map_err(|e| e.into())
     }
 
-    pub fn flush(&self) -> Result<u8, LevelDBError> {
+    pub fn flush(&self) -> Result<(), LevelDBError> {
         let mut guard = self.get_db()?;
-        guard.flush().map(|_| 0).map_err(|e| e.into())
+        guard.flush().map_err(|e| e.into())
     }
 
-    pub fn write(&self, batch: WriteBatch, sync: bool) -> Result<u8, LevelDBError> {
+    pub fn write(&self, batch: WriteBatch, sync: bool) -> Result<(), LevelDBError> {
         let mut guard = self.get_db()?;
-        guard.write(batch.batch, sync).map(|_| 0).map_err(|e| e.into())
+        guard.write(batch.batch, sync).map_err(|e| e.into())
     }
 
     pub fn get_snapshot(&self) -> Result<Snapshot, LevelDBError> {
@@ -148,8 +147,8 @@ impl DB {
         guard.new_iter_at(s).map(|iter| DBIterator { iterator: Some(iter) }).map_err(|e| e.into())
     }
 
-    pub fn compact_range(&self, start: &[u8], end: &[u8]) -> Result<u8, LevelDBError> {
+    pub fn compact_range(&self, start: &[u8], end: &[u8]) -> Result<(), LevelDBError> {
         let mut guard = self.get_db()?;
-        guard.compact_range(start, end).map(|_| 0).map_err(|e| e.into())
+        guard.compact_range(start, end).map_err(|e| e.into())
     }
 }
