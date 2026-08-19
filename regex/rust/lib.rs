@@ -262,7 +262,6 @@ pub struct Matches<'r, 'h> {
 }
 
 impl<'r, 'h> Matches<'r, 'h> {
-    // NOTE(b/483382648): Make `Matches` implement `Iterator`.
     #[allow(clippy::should_implement_trait)]
     pub fn next(&mut self) -> Option<Match<'h>> {
         self.inner.as_mut().map_or_else(
@@ -357,7 +356,6 @@ pub struct SubCaptureMatches<'c, 'h> {
 }
 
 impl<'c, 'h> SubCaptureMatches<'c, 'h> {
-    // NOTE(b/483382648): Make `SubCaptureMatches` implement `Iterator`.
     #[allow(clippy::should_implement_trait)]
     pub fn next(&mut self) -> Option<Option<Match<'h>>> {
         self.inner.as_mut().map_or_else(
@@ -378,7 +376,6 @@ pub struct CaptureMatches<'r, 'h> {
 }
 
 impl<'r, 'h> CaptureMatches<'r, 'h> {
-    // NOTE(b/483382648): Make `CaptureMatches` implement `Iterator`.
     #[allow(clippy::should_implement_trait)]
     pub fn next(&mut self) -> Option<Captures<'h>> {
         self.inner.as_mut().map_or_else(
@@ -399,7 +396,6 @@ pub struct Split<'r, 'h> {
 }
 
 impl<'r, 'h> Split<'r, 'h> {
-    // NOTE(b/483382648): Make `Split` implement `Iterator`.
     #[allow(clippy::should_implement_trait)]
     pub fn next(&mut self) -> Option<&'h [u8]> {
         self.inner.as_mut().map_or_else(
@@ -420,7 +416,6 @@ pub struct SplitN<'r, 'h> {
 }
 
 impl<'r, 'h> SplitN<'r, 'h> {
-    // NOTE(b/483382648): Make `SplitN` implement `Iterator`.
     #[allow(clippy::should_implement_trait)]
     pub fn next(&mut self) -> Option<&'h [u8]> {
         self.inner.as_mut().map_or_else(
@@ -441,7 +436,6 @@ pub struct CaptureNames<'r> {
 }
 
 impl<'r> CaptureNames<'r> {
-    // NOTE(b/483382648): Make `CaptureNames` implement `Iterator`.
     #[allow(clippy::should_implement_trait)]
     pub fn next(&mut self) -> Option<Option<&'r [u8]>> {
         // The outer Option has value if there's another capture.
