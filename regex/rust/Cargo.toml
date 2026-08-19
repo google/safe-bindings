@@ -11,6 +11,7 @@ doctest = false
 [dependencies]
 num-traits = "0.2"
 regex = "1"
+regex-automata = "0.4"
 regex-syntax = "0.8"
 
 [dev-dependencies]
