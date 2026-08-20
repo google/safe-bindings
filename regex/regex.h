@@ -126,6 +126,15 @@
 //     std::string s = c->Expand("$2 $1"); // "world hello"
 //   }
 //
+// You can also use Replace and GlobalReplace (similar to RE2):
+//
+//   std::string s = "yabba dabba doo";
+//   Replace(&s, "b+", "d");        // s is now "yada dabba doo"
+//   GlobalReplace(&s, "b+", "d");  // s is now "yada dada doo"
+//
+// NOTE: The `rewrite` string uses Rust's `regex` crate syntax (e.g., `$1`,
+// `${name}`) for capture groups, rather than RE2's `\1` syntax.
+//
 // -----------------------------------------------------------------------
 // NUMERIC PARSING:
 //
@@ -402,6 +411,26 @@ class Regex {
   // string_views with the parts that DON'T match the regex. It always
   // returns at most `limit` pieces.
   SplitNResult Split(absl::string_view text, size_t limit) const;
+
+  // Replaces the first match of the regex in `text` with `rewrite`.
+  // NOTE: The `rewrite` string uses `$1` syntax for capture groups, NOT `\1`.
+  std::string Replace(absl::string_view text, absl::string_view rewrite) const;
+
+  // Replaces all non-overlapping matches of the regex in `text` with `rewrite`.
+  // NOTE: The `rewrite` string uses `$1` syntax for capture groups, NOT `\1`.
+  std::string ReplaceAll(absl::string_view text,
+                         absl::string_view rewrite) const;
+
+  // Replaces at most `limit` non-overlapping matches of the regex in `text`
+  // with `rewrite`. If `limit` is 0, replaces all matches.
+  // NOTE: The `rewrite` string uses `$1` syntax for capture groups, NOT `\1`.
+  std::string Replacen(absl::string_view text, size_t limit,
+                       absl::string_view rewrite) const;
+
+  friend bool Replace(std::string* str, const Regex& regex,
+                      absl::string_view rewrite);
+  friend int GlobalReplace(std::string* str, const Regex& regex,
+                           absl::string_view rewrite);
 
  private:
   explicit Regex(rust::Regex inner);
@@ -789,6 +818,29 @@ bool FindAndConsume(absl::string_view* input, const Regex& r, Args&&... args) {
     }(input, r, temp_args, std::index_sequence_for<Args...>{});
   }
 }
+
+// Replaces the first match of the pattern in `str` with `rewrite` (similar to
+// RE2::Replace).
+// Returns true if the pattern matches and a replacement occurs, false
+// otherwise. If no match occurs, `str` is not modified.
+// NOTE: The `rewrite` string uses `$1` syntax for capture groups, NOT `\1`.
+bool Replace(std::string* str, const Regex& regex, absl::string_view rewrite);
+
+// Like Replace, but compiles `pattern` on the fly.
+bool Replace(std::string* str, absl::string_view pattern,
+             absl::string_view rewrite);
+
+// Replaces successive non-overlapping occurrences of the pattern in `str` with
+// `rewrite` (similar to RE2::GlobalReplace).
+// Returns the number of replacements made.
+// If no match occurs, `str` is not modified.
+// NOTE: The `rewrite` string uses `$1` syntax for capture groups, NOT `\1`.
+int GlobalReplace(std::string* str, const Regex& regex,
+                  absl::string_view rewrite);
+
+// Like GlobalReplace, but compiles `pattern` on the fly.
+int GlobalReplace(std::string* str, absl::string_view pattern,
+                  absl::string_view rewrite);
 
 namespace internal {
 

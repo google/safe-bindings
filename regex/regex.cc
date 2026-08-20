@@ -176,6 +176,26 @@ Regex::SplitNResult Regex::Split(absl::string_view text, size_t limit) const {
   return SplitNResult(regex_.splitn(internal::AsSlice(text), limit));
 }
 
+std::string Regex::Replace(absl::string_view text,
+                           absl::string_view rewrite) const {
+  return internal::AsString(
+      regex_.replace(internal::AsSlice(text), internal::AsSlice(rewrite)));
+}
+
+std::string Regex::ReplaceAll(absl::string_view text,
+                              absl::string_view rewrite) const {
+  return internal::AsString(
+      regex_.replace_all(internal::AsSlice(text), internal::AsSlice(rewrite)));
+}
+
+std::string Regex::Replacen(absl::string_view text, size_t limit,
+                            absl::string_view rewrite) const {
+  return internal::AsString(
+      regex_
+          .replacen(internal::AsSlice(text), limit, internal::AsSlice(rewrite))
+          .into_result());
+}
+
 std::map<std::string, int> Regex::NamedCapturingGroups() const {
   std::map<std::string, int> result;
   int i = 0;
@@ -247,6 +267,46 @@ absl::StatusOr<RegexSet> RegexSet::Compile(
     return absl::InvalidArgumentError(internal::AsStr(err));
   }
   return RegexSet(std::move(result).value());
+}
+
+bool Replace(std::string* str, const Regex& regex, absl::string_view rewrite) {
+  if (str == nullptr) return false;
+  rust::ReplaceResult result = regex.regex_.replacen(
+      internal::AsSlice(*str), 1, internal::AsSlice(rewrite));
+  if (result.count() == 0) {
+    return false;
+  }
+  *str = internal::AsString(std::move(result).into_result());
+  return true;
+}
+
+bool Replace(std::string* str, absl::string_view pattern,
+             absl::string_view rewrite) {
+  if (str == nullptr) return false;
+  absl::StatusOr<Regex> compiled_regex = Regex::Compile(pattern);
+  if (!compiled_regex.ok()) return false;
+  return Replace(str, *compiled_regex, rewrite);
+}
+
+int GlobalReplace(std::string* str, const Regex& regex,
+                  absl::string_view rewrite) {
+  if (str == nullptr) return 0;
+  rust::ReplaceResult result = regex.regex_.replacen(
+      internal::AsSlice(*str), 0, internal::AsSlice(rewrite));
+  size_t count = result.count();
+  if (count == 0) {
+    return 0;
+  }
+  *str = internal::AsString(std::move(result).into_result());
+  return static_cast<int>(count);
+}
+
+int GlobalReplace(std::string* str, absl::string_view pattern,
+                  absl::string_view rewrite) {
+  if (str == nullptr) return 0;
+  absl::StatusOr<Regex> compiled_regex = Regex::Compile(pattern);
+  if (!compiled_regex.ok()) return 0;
+  return GlobalReplace(str, *compiled_regex, rewrite);
 }
 
 }  // namespace security::regex

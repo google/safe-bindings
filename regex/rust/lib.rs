@@ -439,6 +439,32 @@ impl<'r> CaptureNames<'r> {
     }
 }
 
+/// Opaque wrapper for the result of a regex replacement operation, including
+/// the number of replacements made and the resulting bytes.
+#[derive(Clone, Default, Debug, PartialEq)]
+pub struct ReplaceResult {
+    count: usize,
+    result: VecU8,
+}
+
+impl ReplaceResult {
+    pub fn new(count: usize, result: VecU8) -> Self {
+        Self { count, result }
+    }
+
+    pub fn count(&self) -> usize {
+        self.count
+    }
+
+    pub fn result(&self) -> &VecU8 {
+        &self.result
+    }
+
+    pub fn into_result(self) -> VecU8 {
+        self.result
+    }
+}
+
 /// Opaque wrapper for Regex object. We keep the inner regex in an Option to make this object
 /// implement Default, and thus be movable.
 #[derive(Clone, Default, Debug)]
@@ -545,17 +571,17 @@ impl Regex {
     // NOTE(b/469976097): The original `replace*` methods support passing a function to perform
     // replacements. Decide if we want to support this.
     pub fn replace(&self, haystack: &[u8], rep: &[u8]) -> VecU8 {
-        self.replacen(haystack, 1, rep)
+        self.replacen(haystack, 1, rep).into_result()
     }
 
     pub fn replace_all(&self, haystack: &[u8], rep: &[u8]) -> VecU8 {
-        self.replacen(haystack, usize::MAX, rep)
+        self.replacen(haystack, usize::MAX, rep).into_result()
     }
 
-    pub fn replacen(&self, haystack: &[u8], limit: usize, rep: &[u8]) -> VecU8 {
+    pub fn replacen(&self, haystack: &[u8], limit: usize, rep: &[u8]) -> ReplaceResult {
         let Some(re) = &self.inner else {
             error!("Use of moved-from Regex");
-            return VecU8::from("");
+            return ReplaceResult::default();
         };
         let limit = if limit == 0 { usize::MAX } else { limit };
 
@@ -578,7 +604,7 @@ impl Regex {
                 }
             }
             new.extend_from_slice(&haystack[last_match..]);
-            return VecU8::from(new);
+            return ReplaceResult { count, result: VecU8::from(new) };
         }
 
         let mut it = re.captures_iter(haystack);
@@ -598,7 +624,7 @@ impl Regex {
             }
         }
         new.extend_from_slice(&haystack[last_match..]);
-        VecU8::from(new)
+        ReplaceResult { count, result: VecU8::from(new) }
     }
 
     pub fn split<'r, 'h>(&'r self, haystack: &'h [u8]) -> Split<'r, 'h> {
