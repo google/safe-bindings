@@ -9,6 +9,7 @@ project(regex
   VERSION 0.1.0
   LANGUAGES CXX)
 
+set(CMAKE_SKIP_INSTALL_RULES ON)
 include(FetchContent)
 
 FetchContent_Declare(
@@ -31,6 +32,25 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(absl)
 
+FetchContent_Declare(
+  re2
+  GIT_REPOSITORY https://github.com/google/re2.git
+  GIT_TAG main
+  FIND_PACKAGE_ARGS NAMES re2
+)
+set(RE2_BUILD_TESTING OFF CACHE BOOL "" FORCE)
+FetchContent_MakeAvailable(re2)
+
+FetchContent_Declare(
+  google_benchmark
+  GIT_REPOSITORY https://github.com/google/benchmark.git
+  GIT_TAG main
+  FIND_PACKAGE_ARGS NAMES benchmark
+)
+set(BENCHMARK_ENABLE_TESTING OFF CACHE BOOL "" FORCE)
+set(BENCHMARK_ENABLE_INSTALL OFF CACHE BOOL "" FORCE)
+FetchContent_MakeAvailable(google_benchmark)
+
 add_library(regex regex.cc regex.h regex_internal.h)
 target_link_libraries(regex PRIVATE
   rust
@@ -48,4 +68,17 @@ target_link_libraries(regex_example PRIVATE
   regex
   absl::statusor
   absl::strings
+)
+
+add_executable(regex_benchmark regex_benchmark.cc)
+target_link_libraries(regex_benchmark PRIVATE
+  rust
+  regex
+  re2::re2
+  benchmark::benchmark
+  absl::check
+  absl::random_random
+  absl::statusor
+  absl::strings
+  absl::str_format
 )
