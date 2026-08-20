@@ -84,7 +84,7 @@
 //   auto re = Regex::Compile(R"(v(\d+)\.(?P<version>\d+))");
 //   std::optional<Captures> groups = re->FindCaptures("v1.2");
 //   if (groups) {
-//     Match whole = groups->GetMatch();      // Overall match
+//     std::optional<Match> whole = groups->GetMatch();      // Overall match
 //     std::optional<Match> m1 = groups->Get(1); // First capture group
 //     std::optional<Match> v = groups->Get("version"); // Named capture group
 //   }
@@ -213,7 +213,9 @@ class Captures {
   Captures& operator=(Captures&&) = default;
 
   // Returns the overall match for the whole expression.
-  Match GetMatch() const { return Match(captures_.get_match()); }
+  std::optional<Match> GetMatch() const {
+    return internal::MapOptional<Match>(captures_.get_match());
+  }
 
   // Returns the total number of capture groups.
   size_t Len() const { return captures_.len(); }
@@ -695,16 +697,18 @@ bool FullMatch(absl::string_view text, absl::string_view pattern,
 
 // Matches the pattern to a prefix of the input string and advances the input
 // string view past the match using the array interface.
-inline bool ConsumeN(absl::string_view* input, const Regex& r,
+inline bool ConsumeN(absl::string_view* input, const Regex& regex,
                      const Arg* const args[], int n) {
-  std::optional<Captures> c = r.FindCaptures(*input);
+  std::optional<Captures> captures = regex.FindCaptures(*input);
+  if (!captures) return false;
+  std::optional<Match> m = captures->GetMatch();
   // For Consume, we require the match to be at the beginning of the string.
-  if (c && c->GetMatch().Start() == 0) {
-    if (static_cast<size_t>(n) > c->Len() - 1) return false;
+  if (m && m->Start() == 0) {
+    if (static_cast<size_t>(n) > captures->Len() - 1) return false;
     for (int i = 0; i < n; ++i) {
-      if (!args[i]->Parse(c->Get(i + 1))) return false;
+      if (!args[i]->Parse(captures->Get(i + 1))) return false;
     }
-    input->remove_prefix(c->GetMatch().End());
+    input->remove_prefix(m->End());
     return true;
   }
   return false;
@@ -713,15 +717,17 @@ inline bool ConsumeN(absl::string_view* input, const Regex& r,
 // Searches for the first match anywhere in the input string, populates
 // arguments, and advances the input string view past the match using the array
 // interface.
-inline bool FindAndConsumeN(absl::string_view* input, const Regex& r,
+inline bool FindAndConsumeN(absl::string_view* input, const Regex& regex,
                             const Arg* const args[], int n) {
-  std::optional<Captures> c = r.FindCaptures(*input);
-  if (c) {
-    if (static_cast<size_t>(n) > c->Len() - 1) return false;
+  std::optional<Captures> captures = regex.FindCaptures(*input);
+  if (!captures) return false;
+  std::optional<Match> m = captures->GetMatch();
+  if (m) {
+    if (static_cast<size_t>(n) > captures->Len() - 1) return false;
     for (int i = 0; i < n; ++i) {
-      if (!args[i]->Parse(c->Get(i + 1))) return false;
+      if (!args[i]->Parse(captures->Get(i + 1))) return false;
     }
-    input->remove_prefix(c->GetMatch().End());
+    input->remove_prefix(m->End());
     return true;
   }
   return false;

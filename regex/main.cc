@@ -45,7 +45,7 @@ int main() {
   std::optional<security::regex::Captures> captures =
       kv_regex.FindCaptures(config);
   if (captures.has_value()) {
-    std::cout << "Full match: " << captures->GetMatch().AsStr() << "\n";
+    std::cout << "Full match: " << captures->GetMatch()->AsStr() << "\n";
     if (std::optional<security::regex::Match> key = captures->Get("key")) {
       std::cout << "Key: " << key->AsStr() << "\n";
     }

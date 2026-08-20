@@ -134,7 +134,7 @@ absl::StatusOr<Regex> Regex::Compile(absl::string_view pattern,
   if (options.nest_limit.has_value()) {
     builder.nest_limit(*options.nest_limit);
   }
-  auto result = builder.build();
+  auto result = std::move(builder).build();
   if (!result.has_value()) {
     const rust::VecU8& err = result.err();
     return absl::InvalidArgumentError(internal::AsStr(err));
@@ -241,7 +241,7 @@ absl::StatusOr<RegexSet> RegexSet::Compile(
   if (options.nest_limit.has_value()) {
     builder.nest_limit(*options.nest_limit);
   }
-  auto result = builder.build();
+  auto result = std::move(builder).build();
   if (!result.has_value()) {
     const rust::VecU8& err = result.err();
     return absl::InvalidArgumentError(internal::AsStr(err));
