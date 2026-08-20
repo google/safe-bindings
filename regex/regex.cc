@@ -10,6 +10,7 @@
 
 #include "support/rs_std/slice_ref.h"
 #include "support/rs_std/str_ref.h"
+#include "support/rs_std/vec.h"
 #include "regex_internal.h"
 #include "crubit/rust.h"
 #include "absl/status/status.h"
@@ -83,10 +84,10 @@ absl::StatusOr<std::string> RewriteWithOptions(absl::string_view pattern,
 
     auto rewrite_result = std::move(rewriter).finish();
     if (!rewrite_result.has_value()) {
-      const rust::VecU8& err = rewrite_result.err();
+      const rs_std::Vec<uint8_t>& err = rewrite_result.err();
       return absl::InternalError(internal::AsStr(err));
     }
-    const rust::VecU8& val = rewrite_result.value();
+    const rs_std::Vec<uint8_t>& val = rewrite_result.value();
     result = internal::AsString(val);
   }
   return result;
@@ -136,7 +137,7 @@ absl::StatusOr<Regex> Regex::Compile(absl::string_view pattern,
   }
   auto result = std::move(builder).build();
   if (!result.has_value()) {
-    const rust::VecU8& err = result.err();
+    const rs_std::Vec<uint8_t>& err = result.err();
     return absl::InvalidArgumentError(internal::AsStr(err));
   }
   return Regex(std::move(result).value());
@@ -263,7 +264,7 @@ absl::StatusOr<RegexSet> RegexSet::Compile(
   }
   auto result = std::move(builder).build();
   if (!result.has_value()) {
-    const rust::VecU8& err = result.err();
+    const rs_std::Vec<uint8_t>& err = result.err();
     return absl::InvalidArgumentError(internal::AsStr(err));
   }
   return RegexSet(std::move(result).value());

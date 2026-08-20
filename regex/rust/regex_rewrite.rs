@@ -1,4 +1,3 @@
-use crate::VecU8;
 use regex_syntax::ast::parse::ParserBuilder;
 use regex_syntax::ast::print::Printer;
 use regex_syntax::ast::{
@@ -19,8 +18,8 @@ pub struct RewriteError {
 }
 
 impl RewriteError {
-    pub fn message(&self) -> VecU8 {
-        VecU8::from(self.message.as_bytes())
+    pub fn message(&self) -> Vec<u8> {
+        self.message.clone().into()
     }
 }
 
@@ -70,11 +69,11 @@ impl Rewriter {
     }
 
     /// Prints the AST back to a string.
-    pub fn finish(self) -> Result<VecU8, VecU8> {
+    pub fn finish(self) -> Result<Vec<u8>, Vec<u8>> {
         let mut printer = Printer::new();
         let mut dst = String::new();
-        printer.print(&self.ast, &mut dst).map_err::<VecU8, _>(|err| err.to_string().into())?;
-        Ok(VecU8::from(dst.as_bytes()))
+        printer.print(&self.ast, &mut dst).map_err::<Vec<u8>, _>(|err| err.to_string().into())?;
+        Ok(dst.into())
     }
 }
 
@@ -288,7 +287,7 @@ mod tests {
         use super::*;
     use googletest::prelude::*;
 
-    fn rewrite(pattern: &str) -> VecU8 {
+    fn rewrite(pattern: &str) -> Vec<u8> {
         let rewriter = Rewriter::new(pattern.as_bytes(), false, false, 250);
         expect_true!(rewriter.is_ok());
         let mut rewriter = rewriter.unwrap();
@@ -298,31 +297,31 @@ mod tests {
 
     #[gtest]
     fn test_rewrite_perl_digits() {
-        expect_eq!(rewrite("\\d"), VecU8::from("[[:digit:]]"));
-        expect_eq!(rewrite("\\s"), VecU8::from("[\\t\\n\\f\\r ]"));
-        expect_eq!(rewrite("\\w"), VecU8::from("[[:word:]]"));
+        expect_eq!(rewrite("\\d"), Vec::<u8>::from("[[:digit:]]"));
+        expect_eq!(rewrite("\\s"), Vec::<u8>::from("[\\t\\n\\f\\r ]"));
+        expect_eq!(rewrite("\\w"), Vec::<u8>::from("[[:word:]]"));
     }
 
     #[gtest]
     fn test_rewrite_perl_negated() {
-        expect_eq!(rewrite("\\D"), VecU8::from("[[:^digit:]]"));
-        expect_eq!(rewrite("\\S"), VecU8::from("[^\\t\\n\\f\\r ]"));
-        expect_eq!(rewrite("\\W"), VecU8::from("[[:^word:]]"));
+        expect_eq!(rewrite("\\D"), Vec::<u8>::from("[[:^digit:]]"));
+        expect_eq!(rewrite("\\S"), Vec::<u8>::from("[^\\t\\n\\f\\r ]"));
+        expect_eq!(rewrite("\\W"), Vec::<u8>::from("[[:^word:]]"));
     }
 
     #[gtest]
     fn test_rewrite_bracketed() {
-        expect_eq!(rewrite("[a-z\\d]"), VecU8::from("[a-z[:digit:]]"));
-        expect_eq!(rewrite("[^a-z\\d]"), VecU8::from("[^a-z[:digit:]]"));
-        expect_eq!(rewrite("[a-z\\s]"), VecU8::from("[a-z[\\t\\n\\f\\r ]]"));
-        expect_eq!(rewrite("[^a-z\\s]"), VecU8::from("[^a-z[\\t\\n\\f\\r ]]"));
+        expect_eq!(rewrite("[a-z\\d]"), Vec::<u8>::from("[a-z[:digit:]]"));
+        expect_eq!(rewrite("[^a-z\\d]"), Vec::<u8>::from("[^a-z[:digit:]]"));
+        expect_eq!(rewrite("[a-z\\s]"), Vec::<u8>::from("[a-z[\\t\\n\\f\\r ]]"));
+        expect_eq!(rewrite("[^a-z\\s]"), Vec::<u8>::from("[^a-z[\\t\\n\\f\\r ]]"));
     }
 
     #[gtest]
     fn test_rewrite_complex_nested() {
         expect_eq!(
             rewrite("^foo(?:bar[a-z\\s]+|baz(\\d))xyz$"),
-            VecU8::from("^foo(?:bar[a-z[\\t\\n\\f\\r ]]+|baz([[:digit:]]))xyz$")
+            Vec::<u8>::from("^foo(?:bar[a-z[\\t\\n\\f\\r ]]+|baz([[:digit:]]))xyz$")
         );
     }
 
@@ -332,13 +331,13 @@ mod tests {
         expect_true!(rewriter.is_ok());
         let mut rewriter = rewriter.unwrap();
         rewriter.rewrite_for_re2_compat(true);
-        expect_eq!(rewriter.finish().unwrap(), VecU8::from("[[:digit:]][[:digit:]]"));
+        expect_eq!(rewriter.finish().unwrap(), Vec::<u8>::from("[[:digit:]][[:digit:]]"));
 
         let rewriter = Rewriter::new("\\d \\d".as_bytes(), false, false, 250);
         expect_true!(rewriter.is_ok());
         let mut rewriter = rewriter.unwrap();
         rewriter.rewrite_for_re2_compat(true);
-        expect_eq!(rewriter.finish().unwrap(), VecU8::from("[[:digit:]] [[:digit:]]"));
+        expect_eq!(rewriter.finish().unwrap(), Vec::<u8>::from("[[:digit:]] [[:digit:]]"));
     }
 
     fn expect_anchored(pattern: &str, expected: &str, ignore_whitespace: bool) {
@@ -346,7 +345,7 @@ mod tests {
         expect_true!(rewriter.is_ok());
         let mut rewriter = rewriter.unwrap();
         rewriter.add_begin_and_end_anchors();
-        expect_eq!(rewriter.finish().unwrap(), VecU8::from(expected));
+        expect_eq!(rewriter.finish().unwrap(), Vec::<u8>::from(expected));
     }
 
     #[gtest]
@@ -363,22 +362,24 @@ mod tests {
 
     #[gtest]
     fn test_rewrite_word_boundaries() {
-        expect_eq!(rewrite("\\b"), VecU8::from("(?-u:\\b)"));
-        expect_eq!(rewrite("\\B"), VecU8::from("(?-u:\\B)"));
-        expect_eq!(rewrite("\\bfoo\\B"), VecU8::from("(?-u:\\b)foo(?-u:\\B)"));
+        expect_eq!(rewrite("\\b"), Vec::<u8>::from("(?-u:\\b)"));
+        expect_eq!(rewrite("\\B"), Vec::<u8>::from("(?-u:\\B)"));
+        expect_eq!(rewrite("\\bfoo\\B"), Vec::<u8>::from("(?-u:\\b)foo(?-u:\\B)"));
     }
 
     #[gtest]
     fn test_rewrite_dot_flags() {
         expect_eq!(
             rewrite("."),
-            VecU8::from("(?:.|(?-u:[\\xE0-\\xEF][\\x80-\\xBF]{2}|[\\xF0-\\xF4][\\x80-\\xBF]{3}))")
+            Vec::<u8>::from(
+                "(?:.|(?-u:[\\xE0-\\xEF][\\x80-\\xBF]{2}|[\\xF0-\\xF4][\\x80-\\xBF]{3}))"
+            )
         );
-        expect_eq!(rewrite("(?-u:.)"), VecU8::from("(?-u:.)"));
-        expect_eq!(rewrite("(?-u)."), VecU8::from("(?-u)."));
+        expect_eq!(rewrite("(?-u:.)"), Vec::<u8>::from("(?-u:.)"));
+        expect_eq!(rewrite("(?-u)."), Vec::<u8>::from("(?-u)."));
         expect_eq!(
             rewrite("(?-u:.)."),
-            VecU8::from(
+            Vec::<u8>::from(
                 "(?-u:.)(?:.|(?-u:[\\xE0-\\xEF][\\x80-\\xBF]{2}|[\\xF0-\\xF4][\\x80-\\xBF]{3}))"
             )
         );

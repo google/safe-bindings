@@ -4,12 +4,14 @@
 #include <cstddef>
 #include <cstdint>
 #include <iterator>
+#include <memory>
 #include <optional>
 #include <string>
 #include <type_traits>
 #include <utility>
 
 #include "support/rs_std/slice_ref.h"
+#include "support/rs_std/vec.h"
 #include "crubit/rust.h"
 #include "absl/log/check.h"
 #include "absl/strings/string_view.h"
@@ -31,14 +33,14 @@ inline absl::string_view AsStringView(rs_std::SliceRef<const std::uint8_t> s) {
   return absl::string_view(reinterpret_cast<const char*>(s.data()), s.size());
 }
 
-inline absl::string_view AsStr(const ::rust::VecU8& v) {
-  if (v.as_ptr() == nullptr) return {};
-  return absl::string_view(reinterpret_cast<const char*>(v.as_ptr()), v.len());
+inline absl::string_view AsStr(const rs_std::Vec<uint8_t>& v) {
+  if (v.data() == nullptr) return {};
+  return absl::string_view(reinterpret_cast<const char*>(v.data()), v.size());
 }
 
-inline std::string AsString(const ::rust::VecU8& v) {
-  if (v.as_ptr() == nullptr) return {};
-  return std::string(reinterpret_cast<const char*>(v.as_ptr()), v.len());
+inline std::string AsString(const rs_std::Vec<uint8_t>& v) {
+  if (v.data() == nullptr) return {};
+  return std::string(reinterpret_cast<const char*>(v.data()), v.size());
 }
 
 template <typename Wrapper, typename Inner>
@@ -90,9 +92,9 @@ struct MapOptionalHelper<absl::string_view,
 };
 
 template <>
-struct MapOptionalHelper<std::string, ::rust::VecU8> {
+struct MapOptionalHelper<std::string, rs_std::Vec<uint8_t>> {
   static std::optional<std::string> Map(
-      std::optional<::rust::VecU8> opt) {
+      std::optional<rs_std::Vec<uint8_t>> opt) {
     if (opt.has_value()) {
       return AsString(*opt);
     } else {

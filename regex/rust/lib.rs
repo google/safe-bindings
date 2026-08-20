@@ -6,14 +6,12 @@
 //! WARNING: This crate should never be used from Rust. Use regex directly.
 
 pub mod regex_rewrite;
-mod vec_u8;
 
 macro_rules! error { ($($arg:tt)*) => { eprintln!($($arg)*); }; }
 use num_traits::Num;
 use regex_automata::{meta, util::syntax, MatchKind};
 use std::option::Option;
 use std::sync::Arc;
-pub use vec_u8::VecU8;
 
 // Wrapper structs for structs in the regex package that we need to expose. We use `Option` for the
 // inner object so that we can use `#[derive(Default)]` even when the inner types are not Default.
@@ -65,39 +63,39 @@ impl<'h> Match<'h> {
         self.slice
     }
 
-    pub fn parse_as_i8(&self, radix: i32) -> Result<i8, VecU8> {
+    pub fn parse_as_i8(&self, radix: i32) -> Result<i8, Vec<u8>> {
         parse_integer(self.as_bytes(), radix).into()
     }
-    pub fn parse_as_u8(&self, radix: i32) -> Result<u8, VecU8> {
+    pub fn parse_as_u8(&self, radix: i32) -> Result<u8, Vec<u8>> {
         parse_integer(self.as_bytes(), radix).into()
     }
-    pub fn parse_as_i16(&self, radix: i32) -> Result<i16, VecU8> {
+    pub fn parse_as_i16(&self, radix: i32) -> Result<i16, Vec<u8>> {
         parse_integer(self.as_bytes(), radix).into()
     }
-    pub fn parse_as_u16(&self, radix: i32) -> Result<u16, VecU8> {
+    pub fn parse_as_u16(&self, radix: i32) -> Result<u16, Vec<u8>> {
         parse_integer(self.as_bytes(), radix).into()
     }
-    pub fn parse_as_i32(&self, radix: i32) -> Result<i32, VecU8> {
+    pub fn parse_as_i32(&self, radix: i32) -> Result<i32, Vec<u8>> {
         parse_integer(self.as_bytes(), radix).into()
     }
-    pub fn parse_as_u32(&self, radix: i32) -> Result<u32, VecU8> {
+    pub fn parse_as_u32(&self, radix: i32) -> Result<u32, Vec<u8>> {
         parse_integer(self.as_bytes(), radix).into()
     }
-    pub fn parse_as_i64(&self, radix: i32) -> Result<i64, VecU8> {
+    pub fn parse_as_i64(&self, radix: i32) -> Result<i64, Vec<u8>> {
         parse_integer(self.as_bytes(), radix).into()
     }
-    pub fn parse_as_u64(&self, radix: i32) -> Result<u64, VecU8> {
+    pub fn parse_as_u64(&self, radix: i32) -> Result<u64, Vec<u8>> {
         parse_integer(self.as_bytes(), radix).into()
     }
-    pub fn parse_as_f32(&self) -> Result<f32, VecU8> {
+    pub fn parse_as_f32(&self) -> Result<f32, Vec<u8>> {
         parse_float(self.as_bytes()).into()
     }
-    pub fn parse_as_f64(&self) -> Result<f64, VecU8> {
+    pub fn parse_as_f64(&self) -> Result<f64, Vec<u8>> {
         parse_float(self.as_bytes()).into()
     }
 }
 
-fn parse_integer<T>(slice: &[u8], mut radix: i32) -> Result<T, VecU8>
+fn parse_integer<T>(slice: &[u8], mut radix: i32) -> Result<T, Vec<u8>>
 where
     T: Num,
     <T as Num>::FromStrRadixErr: std::fmt::Display,
@@ -113,7 +111,7 @@ where
 
     // An ASCII string is always valid UTF-8.
     let string =
-        std::str::from_utf8(slice).map_err::<VecU8, _>(|_| "Invalid Utf8".to_string().into())?;
+        std::str::from_utf8(slice).map_err::<Vec<u8>, _>(|_| "Invalid Utf8".to_string().into())?;
 
     // RE2 doesn't allow leading spaces for integers.
     if string.starts_with(|c: char| c.is_whitespace()) {
@@ -203,7 +201,7 @@ where
     })
 }
 
-fn parse_float<T>(slice: &[u8]) -> Result<T, VecU8>
+fn parse_float<T>(slice: &[u8]) -> Result<T, Vec<u8>>
 where
     T: std::str::FromStr,
     <T as std::str::FromStr>::Err: std::error::Error + Send + Sync + 'static,
@@ -214,7 +212,7 @@ where
     }
     // An ASCII string is always valid UTF-8.
     let s =
-        std::str::from_utf8(slice).map_err::<VecU8, _>(|_| "Invalid Utf8".to_string().into())?;
+        std::str::from_utf8(slice).map_err::<Vec<u8>, _>(|_| "Invalid Utf8".to_string().into())?;
     // RE2 allows leading spaces for floats.
     s.trim_start().parse::<T>().map_err(|e| {
         format!("Error parsing {} as a {}: {}", s, std::any::type_name::<T>(), e).into()
@@ -290,14 +288,14 @@ impl<'h> Captures<'h> {
         )
     }
 
-    pub fn expand(&self, replacement: &[u8]) -> VecU8 {
+    pub fn expand(&self, replacement: &[u8]) -> Vec<u8> {
         let Some(inner) = &self.inner else {
             error!("Use of moved-from Captures");
-            return VecU8::from("");
+            return Vec::new();
         };
         let mut dst = Vec::<u8>::new();
         inner.interpolate_bytes_into(self.haystack, replacement, &mut dst);
-        VecU8::from(dst)
+        dst
     }
 
     // NOTE(b/259749023): implement `extract<N>` when crubit supports generic functions.
@@ -444,11 +442,11 @@ impl<'r> CaptureNames<'r> {
 #[derive(Clone, Default, Debug, PartialEq)]
 pub struct ReplaceResult {
     count: usize,
-    result: VecU8,
+    result: Vec<u8>,
 }
 
 impl ReplaceResult {
-    pub fn new(count: usize, result: VecU8) -> Self {
+    pub fn new(count: usize, result: Vec<u8>) -> Self {
         Self { count, result }
     }
 
@@ -456,11 +454,11 @@ impl ReplaceResult {
         self.count
     }
 
-    pub fn result(&self) -> &VecU8 {
+    pub fn result(&self) -> &Vec<u8> {
         &self.result
     }
 
-    pub fn into_result(self) -> VecU8 {
+    pub fn into_result(self) -> Vec<u8> {
         self.result
     }
 }
@@ -476,7 +474,7 @@ pub struct Regex {
 impl Regex {
     // Disable the Clippy warning in order to follow the Regex API.
     #[allow(clippy::new_ret_no_self)]
-    pub fn new(val: &[u8]) -> Result<Regex, VecU8> {
+    pub fn new(val: &[u8]) -> Result<Regex, Vec<u8>> {
         let builder = RegexBuilder::new(val);
         builder.build()
     }
@@ -570,11 +568,11 @@ impl Regex {
     // support `Cow`, so we always allocate a new string here for simplicity.
     // NOTE(b/469976097): The original `replace*` methods support passing a function to perform
     // replacements. Decide if we want to support this.
-    pub fn replace(&self, haystack: &[u8], rep: &[u8]) -> VecU8 {
+    pub fn replace(&self, haystack: &[u8], rep: &[u8]) -> Vec<u8> {
         self.replacen(haystack, 1, rep).into_result()
     }
 
-    pub fn replace_all(&self, haystack: &[u8], rep: &[u8]) -> VecU8 {
+    pub fn replace_all(&self, haystack: &[u8], rep: &[u8]) -> Vec<u8> {
         self.replacen(haystack, usize::MAX, rep).into_result()
     }
 
@@ -604,7 +602,7 @@ impl Regex {
                 }
             }
             new.extend_from_slice(&haystack[last_match..]);
-            return ReplaceResult { count, result: VecU8::from(new) };
+            return ReplaceResult { count, result: new };
         }
 
         let mut it = re.captures_iter(haystack);
@@ -624,7 +622,7 @@ impl Regex {
             }
         }
         new.extend_from_slice(&haystack[last_match..]);
-        ReplaceResult { count, result: VecU8::from(new) }
+        ReplaceResult { count, result: new }
     }
 
     pub fn split<'r, 'h>(&'r self, haystack: &'h [u8]) -> Split<'r, 'h> {
@@ -703,14 +701,14 @@ impl RegexBuilder {
         }
     }
 
-    pub fn build(self) -> Result<Regex, VecU8> {
+    pub fn build(self) -> Result<Regex, Vec<u8>> {
         if let Some(pattern) = self.pattern {
             let meta = meta::Builder::new()
                 .configure(self.metac)
                 // Parse in byte-oriented mode to support raw byte slices.
                 .syntax(self.syntaxc.utf8(false))
                 .build(&pattern)
-                .map_err::<VecU8, _>(|err| err.to_string().into())?;
+                .map_err::<Vec<u8>, _>(|err| err.to_string().into())?;
             Ok(Regex { inner: Some(meta), pattern: Arc::from(pattern.as_str()) })
         } else {
             Err("Invalid UTF-8 in pattern".to_string().into())
@@ -820,7 +818,7 @@ impl RegexSet {
     /// Creates a new regex set from the given patterns. If any of the patterns fails to compile,
     /// it returns an error.
     #[allow(clippy::new_ret_no_self)] // We need to return a Result because compilation can fail.
-    pub fn new(patterns: &[&[u8]]) -> Result<RegexSet, VecU8> {
+    pub fn new(patterns: &[&[u8]]) -> Result<RegexSet, Vec<u8>> {
         let builder = RegexSetBuilder::new(patterns);
         builder.build()
     }
@@ -919,7 +917,7 @@ impl RegexSetBuilder {
         RegexSetBuilder { patterns: if ok { Some(exprs) } else { None }, ..Default::default() }
     }
 
-    pub fn build(self) -> Result<RegexSet, VecU8> {
+    pub fn build(self) -> Result<RegexSet, Vec<u8>> {
         if let Some(patterns) = self.patterns {
             let meta = meta::Builder::new()
                 .configure(
@@ -928,7 +926,7 @@ impl RegexSetBuilder {
                 // Parse in byte-oriented mode to support raw byte slices.
                 .syntax(self.syntaxc.utf8(false))
                 .build_many(&patterns)
-                .map_err::<VecU8, _>(|err| err.to_string().into())?;
+                .map_err::<Vec<u8>, _>(|err| err.to_string().into())?;
             Ok(RegexSet { inner: Some(meta) })
         } else {
             Err("Invalid UTF-8 in pattern".to_string().into())
@@ -999,8 +997,9 @@ mod tests {
     macro_rules! check_bad_integer {
         ($type:ident, $radix:expr, $in:expr, $err: expr) => {
             expect_that!(
-                parse_integer::<$type>($in.as_bytes(), $radix),
-                err(displays_as(contains_substring($err)))
+                parse_integer::<$type>($in.as_bytes(), $radix)
+                    .map_err(|e| String::from_utf8(e).unwrap()),
+                err(contains_substring($err))
             );
         };
     }
@@ -1156,8 +1155,8 @@ mod tests {
     macro_rules! check_bad_float {
         ($type:ident, $in:expr, $err: expr) => {
             expect_that!(
-                parse_float::<$type>($in.as_bytes()),
-                err(displays_as(contains_substring($err)))
+                parse_float::<$type>($in.as_bytes()).map_err(|e| String::from_utf8(e).unwrap()),
+                err(contains_substring($err))
             );
         };
     }
