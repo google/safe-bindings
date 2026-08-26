@@ -13,6 +13,7 @@ jxl = ["dep:jxl", "dep:jxl-image-rs-integration"]
 
 [dependencies]
 bytemuck = { version = "1", default-features = false, features = ["aarch64_simd", "derive", "extern_crate_alloc", "min_const_generics", "must_cast"] }
+crubit_annotate = "0.1.0"
 image = { version = "0.25", default-features = false, features = ["bmp", "exr", "gif", "hdr", "ico", "jpeg", "png", "tiff", "webp"] }
 jxl = { version = "0.8", optional = true }
 jxl-image-rs-integration = { version = "0.8", optional = true }
