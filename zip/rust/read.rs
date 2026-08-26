@@ -68,6 +68,14 @@ impl BufferedZipArchive {
         get_length_impl(&self.reader)
     }
 
+    /// Returns the comment of the zip archive.
+    pub fn get_comment(&self) -> VecU8 {
+        match self.reader.as_ref() {
+            Some(reader) => VecU8::copy_from_slice(reader.comment()),
+            None => VecU8::default(),
+        }
+    }
+
     /// Returns a zip file by its index.
     ///
     /// Returns an empty zip file if archive is not open.
@@ -166,6 +174,14 @@ impl FsZipArchive {
     /// Returns the number of files in the archive.
     pub fn get_length(&self) -> usize {
         get_length_impl(&self.reader)
+    }
+
+    /// Returns the comment of the zip archive.
+    pub fn get_comment(&self) -> VecU8 {
+        match self.reader.as_ref() {
+            Some(reader) => VecU8::copy_from_slice(reader.comment()),
+            None => VecU8::default(),
+        }
     }
 
     /// Returns a zip file by its index.
