@@ -12,4 +12,5 @@ doctest = false
 bytemuck = { version = "1", default-features = false, features = ["aarch64_simd", "derive", "extern_crate_alloc", "min_const_generics", "must_cast"] }
 image = { version = "0.25", default-features = false, features = ["bmp", "exr", "gif", "hdr", "ico", "jpeg", "png", "tiff", "webp"] }
 pic-scale-safe = "0.1"
+flate2 = ">=1.1, <1.1.10"  # NOTE(b/554658975): remove once exr and png support miniz_oxide >= 0.9 or Crubit supports multiple versions.
 tiff = { version = "0.11", features = ["deflate", "fax", "jpeg", "lzw"] }
