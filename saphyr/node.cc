@@ -205,7 +205,11 @@ absl::StatusOr<Node> Load(rs_std::StrRef input) {
         StringViewFromVecU8(std::move(result).err()));
   }
   rust::NodeOwned docs = std::move(result).value();
-  return Node(docs.get_at_index(0)->to_owned());
+  std::optional<rust::NodeView> first_doc = docs.get_at_index(0);
+  if (!first_doc.has_value()) {
+    return absl::InvalidArgumentError("Empty YAML document");
+  }
+  return Node(first_doc->to_owned());
 }
 
 rust::YamlOwned ToYaml(int64_t value) {
