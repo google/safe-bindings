@@ -511,15 +511,15 @@ Exif::Exif(rust::reader::Exif exif) : exif_(std::move(exif)) {
   mnote_fields_ = std::move(mnote_fields);
 }
 
-absl::Span<const uint8_t> Exif::buf() const {
+absl::Span<const uint8_t> Exif::buf() const& {
   return absl::Span<const uint8_t>(buf_);
 }
 
-absl::Span<const Field> Exif::fields() const {
+absl::Span<const Field> Exif::fields() const& {
   return absl::Span<const Field>(fields_);
 }
 
-absl::Span<const Field> Exif::mnote_fields() const {
+absl::Span<const Field> Exif::mnote_fields() const& {
   return absl::Span<const Field>(mnote_fields_);
 }
 
