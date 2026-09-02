@@ -442,8 +442,8 @@ class Regex {
 class SetMatches {
  public:
   SetMatches() = default;
-  SetMatches(const SetMatches&) = default;
-  SetMatches& operator=(const SetMatches&) = default;
+  SetMatches(const SetMatches&) = delete;
+  SetMatches& operator=(const SetMatches&) = delete;
   SetMatches(SetMatches&&) = default;
   SetMatches& operator=(SetMatches&&) = default;
 
