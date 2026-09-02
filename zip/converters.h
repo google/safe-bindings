@@ -21,9 +21,10 @@ class RustVecU8Wrapper {
   explicit RustVecU8Wrapper(rust::VecU8 vec_u8)
       : vec_u8_(std::move(vec_u8)) {}
 
-  absl::string_view AsStringView() const ABSL_ATTRIBUTE_LIFETIME_BOUND {
+  absl::string_view AsStringView() const& ABSL_ATTRIBUTE_LIFETIME_BOUND {
     return security::crubit_helpers::StringViewFromVecU8(vec_u8_);
   }
+  absl::string_view AsStringView() const&& = delete;
 
  private:
   rust::VecU8 vec_u8_;
