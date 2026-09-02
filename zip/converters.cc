@@ -5,6 +5,7 @@
 #include <utility>
 
 #include "crubit_helpers/string_conversions.h"
+#include "reader_status.h"
 #include "crubit/rust.h"
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
@@ -19,29 +20,40 @@ std::string FromRustVecU8(const rust::VecU8& vec) {
   return std::string(security::crubit_helpers::StringViewFromVecU8(vec));
 }
 
-absl::Status ZipErrorToStatus(rust::ZipError err) {
-  std::string msg = FromRustVecU8(err.message);
-  switch (err.code.tag) {
+absl::StatusCode ZipErrorCodeToStatusCode(rust::ZipErrorCode code) {
+  switch (code.tag) {
     case rust::ZipErrorCode::Tag::InvalidArgument:
-      return absl::InvalidArgumentError(msg);
+      return absl::StatusCode::kInvalidArgument;
     case rust::ZipErrorCode::Tag::DeadlineExceeded:
-      return absl::DeadlineExceededError(msg);
+      return absl::StatusCode::kDeadlineExceeded;
     case rust::ZipErrorCode::Tag::NotFound:
-      return absl::NotFoundError(msg);
+      return absl::StatusCode::kNotFound;
     case rust::ZipErrorCode::Tag::AlreadyExists:
-      return absl::AlreadyExistsError(msg);
+      return absl::StatusCode::kAlreadyExists;
     case rust::ZipErrorCode::Tag::PermissionDenied:
-      return absl::PermissionDeniedError(msg);
+      return absl::StatusCode::kPermissionDenied;
     case rust::ZipErrorCode::Tag::FailedPrecondition:
-      return absl::FailedPreconditionError(msg);
+      return absl::StatusCode::kFailedPrecondition;
     case rust::ZipErrorCode::Tag::OutOfRange:
-      return absl::OutOfRangeError(msg);
+      return absl::StatusCode::kOutOfRange;
     case rust::ZipErrorCode::Tag::Unimplemented:
-      return absl::UnimplementedError(msg);
+      return absl::StatusCode::kUnimplemented;
     case rust::ZipErrorCode::Tag::Internal:
-      return absl::InternalError(msg);
+      return absl::StatusCode::kInternal;
   }
-  return absl::InternalError(msg);
+  return absl::StatusCode::kInternal;
+}
+
+absl::Status ZipErrorToStatus(rust::ZipError err) {
+  absl::Status status(ZipErrorCodeToStatusCode(err.code),
+                      FromRustVecU8(err.message));
+  if (err.is_reader_callback_failure()) {
+    // Lets internal::ThroughReader tell an error caused by a failed
+    // RandomAccessReader callback, for which the reader's own status is the
+    // better report, from one the archive raised on its own.
+    return internal::MarkReaderCallbackFailure(std::move(status));
+  }
+  return status;
 }
 
 template <typename T>
@@ -88,6 +100,12 @@ absl::StatusOr<rust::FsZipArchive> FromRustFsZipArchive(
   return FromRustResult(std::move(result_fs_zip_archive));
 }
 
+absl::StatusOr<rust::CallbackZipArchive> FromRustCallbackZipArchive(
+    rs_std::Result<rust::CallbackZipArchive, rust::ZipError>
+        result_callback_zip_archive) {
+  return FromRustResult(std::move(result_callback_zip_archive));
+}
+
 absl::StatusOr<rust::BufferedZipFile> FromRustBufferedZipFile(
     rs_std::Result<rust::BufferedZipFile, rust::ZipError>
         result_buffered_zip_file) {
@@ -98,6 +116,12 @@ absl::StatusOr<rust::FsZipFile> FromRustFsZipFile(
     rs_std::Result<rust::FsZipFile, rust::ZipError>
         result_fs_zip_file) {
   return FromRustResult(std::move(result_fs_zip_file));
+}
+
+absl::StatusOr<rust::CallbackZipFile> FromRustCallbackZipFile(
+    rs_std::Result<rust::CallbackZipFile, rust::ZipError>
+        result_callback_zip_file) {
+  return FromRustResult(std::move(result_callback_zip_file));
 }
 
 absl::StatusOr<rust::ZipEntryMetadata> FromRustZipEntryMetadata(
