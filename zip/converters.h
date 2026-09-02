@@ -1,6 +1,8 @@
 #ifndef SECURITY_ZIP_CONVERTERS_H_
 #define SECURITY_ZIP_CONVERTERS_H_
 
+#include <cstddef>
+#include <cstdint>
 #include <utility>
 
 #include "crubit_helpers/string_conversions.h"
@@ -9,6 +11,7 @@
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
 #include "absl/strings/string_view.h"
+#include "absl/types/span.h"
 #include "support/rs_std/result.h"
 #include "support/rs_std/unit.h"
 
@@ -49,19 +52,50 @@ class RustVecU8Wrapper {
   //
   // Consuming inside the full-expression is safe:
   //     std::string owned(f.GetFileData()->AsStringView());      // OK
-  absl::string_view AsStringView() const& ABSL_ATTRIBUTE_LIFETIME_BOUND {
+  [[nodiscard]] absl::string_view AsStringView()
+      const& ABSL_ATTRIBUTE_LIFETIME_BOUND {
     return security::crubit_helpers::StringViewFromVecU8(vec_u8_);
   }
   absl::string_view AsStringView() const&& = delete;
+
+  // Returns a non-null-terminated pointer to the underlying bytes (must be
+  // paired with `size()`). Same lifetime rules as `AsStringView()`; see the
+  // warning above. The `const&&` overload is deleted so that the pointer cannot
+  // be taken from a temporary.
+  [[nodiscard]] const char* data() const& ABSL_ATTRIBUTE_LIFETIME_BOUND {
+    return AsStringView().data();
+  }
+  const char* data() const&& = delete;
+
+  [[nodiscard]] explicit operator absl::string_view()
+      const& ABSL_ATTRIBUTE_LIFETIME_BOUND {
+    return AsStringView();
+  }
+  explicit operator absl::string_view() const&& = delete;
+
+  // size() and empty() return by value, so they are safe on temporaries.
+  [[nodiscard]] size_t size() const { return AsStringView().size(); }
+
+  [[nodiscard]] bool empty() const { return AsStringView().empty(); }
 
  private:
   rust::VecU8 vec_u8_;
 };
 
+// Returns a non-owning byte span viewing the same bytes as `s`.
+inline absl::Span<const uint8_t> ToByteSpan(absl::string_view s) {
+  return absl::Span<const uint8_t>(reinterpret_cast<const uint8_t*>(s.data()),
+                                   s.size());
+}
+
 absl::StatusOr<RustVecU8Wrapper> FromRustResultVecU8(
     rs_std::Result<rust::VecU8, rust::ZipError> result_vec_u8);
 absl::Status FromRustResultUnit(
     rs_std::Result<rs_std::unit_t, rust::ZipError> result_unit);
+// Converts a byte count, as returned by the reads that write into a buffer the
+// caller owns rather than returning one.
+absl::StatusOr<uint64_t> FromRustResultU64(
+    rs_std::Result<uint64_t, rust::ZipError> result_u64);
 
 absl::StatusOr<rust::BufferedZipArchive> FromRustBufferedZipArchive(
     rs_std::Result<rust::BufferedZipArchive, rust::ZipError>
@@ -69,6 +103,9 @@ absl::StatusOr<rust::BufferedZipArchive> FromRustBufferedZipArchive(
 absl::StatusOr<rust::FsZipArchive> FromRustFsZipArchive(
     rs_std::Result<rust::FsZipArchive, rust::ZipError>
         result_fs_zip_archive);
+absl::StatusOr<rust::CallbackZipArchive> FromRustCallbackZipArchive(
+    rs_std::Result<rust::CallbackZipArchive, rust::ZipError>
+        result_callback_zip_archive);
 
 absl::StatusOr<rust::BufferedZipFile> FromRustBufferedZipFile(
     rs_std::Result<rust::BufferedZipFile, rust::ZipError>
@@ -76,6 +113,13 @@ absl::StatusOr<rust::BufferedZipFile> FromRustBufferedZipFile(
 absl::StatusOr<rust::FsZipFile> FromRustFsZipFile(
     rs_std::Result<rust::FsZipFile, rust::ZipError>
         result_fs_zip_file);
+absl::StatusOr<rust::CallbackZipFile> FromRustCallbackZipFile(
+    rs_std::Result<rust::CallbackZipFile, rust::ZipError>
+        result_callback_zip_file);
+
+absl::StatusOr<rust::ZipEntryMetadata> FromRustZipEntryMetadata(
+    rs_std::Result<rust::ZipEntryMetadata, rust::ZipError>
+        result_zip_entry_metadata);
 
 absl::StatusOr<rust::BufferedZipWriter> FromRustBufferedZipWriter(
     rs_std::Result<rust::BufferedZipWriter, rust::ZipError>
@@ -83,6 +127,18 @@ absl::StatusOr<rust::BufferedZipWriter> FromRustBufferedZipWriter(
 absl::StatusOr<rust::FsZipWriter> FromRustFsZipWriter(
     rs_std::Result<rust::FsZipWriter, rust::ZipError>
         result_fs_zip_writer);
+
+absl::StatusOr<rust::BufferedZipStreamReader>
+FromRustBufferedZipStreamReader(
+    rs_std::Result<rust::BufferedZipStreamReader, rust::ZipError>
+        result_buffered_zip_stream_reader);
+absl::StatusOr<rust::FsZipStreamReader> FromRustFsZipStreamReader(
+    rs_std::Result<rust::FsZipStreamReader, rust::ZipError>
+        result_fs_zip_stream_reader);
+
+absl::StatusOr<rust::FsZipStreamWriter> FromRustFsZipStreamWriter(
+    rs_std::Result<rust::FsZipStreamWriter, rust::ZipError>
+        result_fs_zip_stream_writer);
 
 }  // namespace security::zip
 
