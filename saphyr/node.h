@@ -211,27 +211,36 @@ class Node {
   // Accesses an element in a map by key.
   // Returns a `NodeView` for which `IsDefined()` is false if the node is not a
   // map or the key is not found.
-  NodeView operator[](rs_std::StrRef key) const ABSL_ATTRIBUTE_LIFETIME_BOUND;
-  NodeView operator[](const char* key) const ABSL_ATTRIBUTE_LIFETIME_BOUND {
+  NodeView operator[](rs_std::StrRef key) const& ABSL_ATTRIBUTE_LIFETIME_BOUND;
+  NodeView operator[](const char* key) const& ABSL_ATTRIBUTE_LIFETIME_BOUND {
     return operator[](rs_std::StrRef::FromUtf8Unchecked(key));
   }
-  NodeView operator[](absl::string_view key) const
-      ABSL_ATTRIBUTE_LIFETIME_BOUND {
+  NodeView operator[](
+      absl::string_view key) const& ABSL_ATTRIBUTE_LIFETIME_BOUND {
     return operator[](rs_std::StrRef::FromUtf8Unchecked(key));
   }
+  NodeView operator[](rs_std::StrRef key) const&& = delete;
+  NodeView operator[](const char* key) const&& = delete;
+  NodeView operator[](absl::string_view key) const&& = delete;
+
   // Accesses an element in a sequence by index.
   // Returns a `NodeView` for which `IsDefined()` is false if the node is not a
   // sequence or the index is out of bounds.
-  NodeView operator[](size_t index) const ABSL_ATTRIBUTE_LIFETIME_BOUND;
-  NodeView operator[](int index) const ABSL_ATTRIBUTE_LIFETIME_BOUND {
+  NodeView operator[](size_t index) const& ABSL_ATTRIBUTE_LIFETIME_BOUND;
+  NodeView operator[](int index) const& ABSL_ATTRIBUTE_LIFETIME_BOUND {
     return index < 0 ? NodeView() : operator[](static_cast<size_t>(index));
   }
+  NodeView operator[](size_t index) const&& = delete;
+  NodeView operator[](int index) const&& = delete;
 
   // A safer version of `operator[]` for sequence.
-  std::optional<NodeView> Get(size_t index) const ABSL_ATTRIBUTE_LIFETIME_BOUND;
+  std::optional<NodeView> Get(
+      size_t index) const& ABSL_ATTRIBUTE_LIFETIME_BOUND;
   // A safer version of `operator[]` for map.
-  std::optional<NodeView> Get(rs_std::StrRef key) const
-      ABSL_ATTRIBUTE_LIFETIME_BOUND;
+  std::optional<NodeView> Get(
+      rs_std::StrRef key) const& ABSL_ATTRIBUTE_LIFETIME_BOUND;
+  std::optional<NodeView> Get(size_t index) const&& = delete;
+  std::optional<NodeView> Get(rs_std::StrRef key) const&& = delete;
 
   // Sets the value at a given index in a sequence.
   // If `index` is within bounds, the existing value is replaced.
@@ -242,10 +251,13 @@ class Node {
   // Tries to convert the node to the specified type `T`.
   // Returns `std::nullopt` if the conversion fails or the node is undefined.
   template <typename T>
-  std::optional<T> as_optional() const;
+  std::optional<T> as_optional() const&;
+  template <typename T>
+  std::optional<T> as_optional() const&& = delete;
 
   // Returns a view into the node.
-  NodeView as_view() const ABSL_ATTRIBUTE_LIFETIME_BOUND;
+  NodeView as_view() const& ABSL_ATTRIBUTE_LIFETIME_BOUND;
+  NodeView as_view() const&& = delete;
 
  private:
   rust::NodeOwned node_;
