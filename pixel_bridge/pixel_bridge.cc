@@ -85,8 +85,8 @@ absl::string_view StringViewFromSpanU8(absl::Span<const uint8_t> data) {
 }
 
 absl::StatusOr<std::optional<std::string>> GetMetadata(
-    rs_std::Result<rs_std::Option<rust::vec_u8::VecU8>,
-                   rust::vec_u8::VecU8>
+    rs::Result<rs::Option<rust::vec_u8::VecU8>,
+               rust::vec_u8::VecU8>
         result_stat) {
   if (!result_stat.has_value()) {
     // NOTE: b/351976355 - Find a better error code for this Rust error.
@@ -241,7 +241,7 @@ bool ImageDecoder::IsAnimated() const { return decoder_.is_animated(); }
 
 absl::StatusOr<Frames> ImageDecoder::GetAllFrames() && {
   Format format = GetFormat();
-  rs_std::Result<rust::image::Frames, rust::vec_u8::VecU8>
+  rs::Result<rust::image::Frames, rust::vec_u8::VecU8>
       result = std::move(decoder_).all_frames();
   if (!result.has_value()) {
     rust::vec_u8::VecU8 err_msg_vec = std::move(result).err();
@@ -315,8 +315,8 @@ absl::StatusOr<std::optional<std::string>> ImageDecoder::GetIptcMetadata() {
 
 absl::StatusOr<ImageReader> ImageReader::NewFromFile(
     absl::string_view filepath) {
-  rs_std::Result<rust::reader::ImageReader,
-                 rust::vec_u8::VecU8>
+  rs::Result<rust::reader::ImageReader,
+             rust::vec_u8::VecU8>
       reader = rust::reader::ImageReader::new_from_file(
           absl::Span<const uint8_t>(
               reinterpret_cast<const uint8_t*>(filepath.data()),
@@ -348,8 +348,8 @@ void ImageReader::SetFormat(Format format) {
 }
 
 absl::StatusOr<ImageDecoder> ImageReader::IntoDecoder() && {
-  rs_std::Result<rust::image::ImageDecoder,
-                 rust::vec_u8::VecU8>
+  rs::Result<rust::image::ImageDecoder,
+             rust::vec_u8::VecU8>
       decoder = std::move(reader_).into_decoder();
   if (!decoder.has_value()) {
     return absl::InvalidArgumentError(

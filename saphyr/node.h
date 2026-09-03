@@ -58,19 +58,19 @@ class NodeView {
   // Accesses an element in a map by key.
   // Returns a `NodeView` for which `IsDefined()` is false if the node is not a
   // map or the key is not found.
-  NodeView operator[](rs_std::StrRef key) const;
+  NodeView operator[](rs::StrRef key) const;
   NodeView operator[](const char* key) const {
-    return operator[](rs_std::StrRef::FromUtf8Unchecked(key));
+    return operator[](rs::StrRef::FromUtf8Unchecked(key));
   }
   NodeView operator[](absl::string_view key) const {
-    return operator[](rs_std::StrRef::FromUtf8Unchecked(key));
+    return operator[](rs::StrRef::FromUtf8Unchecked(key));
   }
 
   // A safer version of `operator[]` for sequence.
   std::optional<NodeView> Get(size_t index) const;
 
   // A safer version of `operator[]` for map.
-  std::optional<NodeView> Get(rs_std::StrRef key) const;
+  std::optional<NodeView> Get(rs::StrRef key) const;
 
   // For map iteration by index.
   NodeView get_key_at_index(size_t index) const;
@@ -158,7 +158,7 @@ class NodeView::Iterator {
     if (!node_ || !has_value_ || !rust_iter_.has_value()) return;
 
     rust::NodeView key;
-    rs_std::Option<rust::NodeView> value;
+    rs::Option<rust::NodeView> value;
     has_value_ = rust_iter_->next(key, value);
 
     if (has_value_) {
@@ -211,13 +211,13 @@ class Node {
   // Accesses an element in a map by key.
   // Returns a `NodeView` for which `IsDefined()` is false if the node is not a
   // map or the key is not found.
-  NodeView operator[](rs_std::StrRef key) const ABSL_ATTRIBUTE_LIFETIME_BOUND;
+  NodeView operator[](rs::StrRef key) const ABSL_ATTRIBUTE_LIFETIME_BOUND;
   NodeView operator[](const char* key) const ABSL_ATTRIBUTE_LIFETIME_BOUND {
-    return operator[](rs_std::StrRef::FromUtf8Unchecked(key));
+    return operator[](rs::StrRef::FromUtf8Unchecked(key));
   }
   NodeView operator[](absl::string_view key) const
       ABSL_ATTRIBUTE_LIFETIME_BOUND {
-    return operator[](rs_std::StrRef::FromUtf8Unchecked(key));
+    return operator[](rs::StrRef::FromUtf8Unchecked(key));
   }
   // Accesses an element in a sequence by index.
   // Returns a `NodeView` for which `IsDefined()` is false if the node is not a
@@ -230,7 +230,7 @@ class Node {
   // A safer version of `operator[]` for sequence.
   std::optional<NodeView> Get(size_t index) const ABSL_ATTRIBUTE_LIFETIME_BOUND;
   // A safer version of `operator[]` for map.
-  std::optional<NodeView> Get(rs_std::StrRef key) const
+  std::optional<NodeView> Get(rs::StrRef key) const
       ABSL_ATTRIBUTE_LIFETIME_BOUND;
 
   // Sets the value at a given index in a sequence.
@@ -258,14 +258,14 @@ std::ostream& operator<<(std::ostream& out, const Node& node);
 
 // Parses a YAML string `input` and returns an owning `Node`.
 // Returns an error if parsing fails.
-absl::StatusOr<Node> Load(rs_std::StrRef input);
+absl::StatusOr<Node> Load(rs::StrRef input);
 
 inline absl::StatusOr<Node> Load(absl::string_view input) {
-  return Load(rs_std::StrRef::FromUtf8Unchecked(input));
+  return Load(rs::StrRef::FromUtf8Unchecked(input));
 }
 
 inline absl::StatusOr<Node> Load(const char* input) {
-  return Load(rs_std::StrRef::FromUtf8Unchecked(input));
+  return Load(rs::StrRef::FromUtf8Unchecked(input));
 }
 
 // Helper functions to convert primitive C++ types to `rust::YamlOwned`
