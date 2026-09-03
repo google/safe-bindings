@@ -477,6 +477,274 @@ impl SerdeJson {
     pub fn is_json_equal(&self, other: &Self) -> bool {
         self.value == other.value
     }
+
+    /// Appends an item to the JSON array.
+    pub fn append(&mut self, item: SerdeJson) -> Status {
+        if let serde_json::Value::Array(arr) = &mut self.value {
+            arr.push(item.value);
+            ok()
+        } else {
+            internal_error("JSON value is not an array")
+        }
+    }
+
+    /// Removes an item from the JSON array at `index`.
+    pub fn remove(&mut self, index: usize) -> Status {
+        if let serde_json::Value::Array(arr) = &mut self.value {
+            if index < arr.len() {
+                arr.remove(index);
+                ok()
+            } else {
+                invalid_argument_error(format!(
+                    "Index {} out of bounds for array of length {}",
+                    index,
+                    arr.len()
+                ))
+            }
+        } else {
+            internal_error("JSON value is not an array")
+        }
+    }
+
+    /// Returns the size of array, object, or string.
+    pub fn size(&self) -> Result<i64, RawString> {
+        match &self.value {
+            serde_json::Value::Array(arr) => Ok(arr.len() as i64),
+            serde_json::Value::Object(obj) => Ok(obj.len() as i64),
+            serde_json::Value::String(s) => Ok(s.len() as i64),
+            _ => Err("Size is only supported for arrays, objects, and strings".into()),
+        }
+    }
+
+    /// Returns a borrowed reference view of this SerdeJson.
+    pub fn as_ref<'a>(&'a self) -> SerdeJsonRef<'a> {
+        SerdeJsonRef { node: &self.value }
+    }
+}
+
+/// Borrowed zero-copy view of a JSON node.
+#[derive(Copy, Clone)]
+pub struct SerdeJsonRef<'a> {
+    pub(crate) node: &'a serde_json::Value,
+}
+
+impl<'a> std::fmt::Debug for SerdeJsonRef<'a> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
+        write!(f, "SerdeJsonRef")
+    }
+}
+
+impl<'a> SerdeJsonRef<'a> {
+    pub fn from_serde_json(json: &'a SerdeJson) -> Self {
+        Self { node: &json.value }
+    }
+
+    pub fn to_owned(&self) -> SerdeJson {
+        SerdeJson { value: self.node.clone() }
+    }
+
+    pub fn get_field(&self, raw_field_name: &[u8]) -> Result<SerdeJsonRef<'a>, RawString> {
+        let field_name = match std::str::from_utf8(raw_field_name) {
+            Ok(field_name) => field_name,
+            Err(err) => return Err(err.to_string().into()),
+        };
+        match self.node.get(field_name) {
+            Some(value) => Ok(Self { node: value }),
+            None => Err(format!("Field '{}' not found in JSON object", field_name).into()),
+        }
+    }
+
+    pub fn get_field_string(&self, raw_field_name: &[u8]) -> Result<RawString, RawString> {
+        let field_name = match std::str::from_utf8(raw_field_name) {
+            Ok(field_name) => field_name,
+            Err(err) => return Err(err.to_string().into()),
+        };
+        match self.node[field_name].as_str() {
+            Some(s) => Ok(s.into()),
+            None => Err(format!("Field '{}' is not string", field_name).into()),
+        }
+    }
+
+    pub fn get_field_bool(&self, raw_field_name: &[u8]) -> Result<bool, RawString> {
+        let field_name = match std::str::from_utf8(raw_field_name) {
+            Ok(field_name) => field_name,
+            Err(err) => return Err(err.to_string().into()),
+        };
+        match self.node[field_name].as_bool() {
+            Some(b) => Ok(b),
+            None => Err(format!("Field '{}' is not boolean", field_name).into()),
+        }
+    }
+
+    pub fn get_field_int(&self, raw_field_name: &[u8]) -> Result<i64, RawString> {
+        let field_name = match std::str::from_utf8(raw_field_name) {
+            Ok(field_name) => field_name,
+            Err(err) => return Err(err.to_string().into()),
+        };
+        match self.node[field_name].as_i64() {
+            Some(i) => Ok(i),
+            None => Err(format!("Field '{}' is not integer", field_name).into()),
+        }
+    }
+
+    pub fn get_field_double(&self, raw_field_name: &[u8]) -> Result<f64, RawString> {
+        let field_name = match std::str::from_utf8(raw_field_name) {
+            Ok(field_name) => field_name,
+            Err(err) => return Err(err.to_string().into()),
+        };
+        match self.node[field_name].as_f64() {
+            Some(f) => Ok(f),
+            None => Err(format!("Field '{}' is not double", field_name).into()),
+        }
+    }
+
+    pub fn get_field_object(&self, raw_field_name: &[u8]) -> Result<SerdeJsonRef<'a>, RawString> {
+        let field_name = match std::str::from_utf8(raw_field_name) {
+            Ok(field_name) => field_name,
+            Err(err) => return Err(err.to_string().into()),
+        };
+        match &self.node[field_name] {
+            o @ serde_json::Value::Object(_) => Ok(Self { node: o }),
+            _ => Err(format!("Field '{}' is not object", field_name).into()),
+        }
+    }
+
+    pub fn get_field_array_element(
+        &self,
+        raw_field_name: &[u8],
+        index: usize,
+    ) -> Result<SerdeJsonRef<'a>, GetArrayElementError> {
+        let field_name = match std::str::from_utf8(raw_field_name) {
+            Ok(field_name) => field_name,
+            Err(err) => return Err(GetArrayElementError::new_failed_precondition(err.to_string())),
+        };
+        match self.node[field_name].as_array() {
+            Some(a) => match a.get(index) {
+                Some(v) => Ok(Self { node: v }),
+                None => Err(GetArrayElementError::new_out_of_bounds(format!(
+                    "Index {} out of bounds for array field '{}' of length {}",
+                    index,
+                    field_name,
+                    a.len()
+                ))),
+            },
+            None => Err(GetArrayElementError::new_failed_precondition(format!(
+                "Field '{}' is not array",
+                field_name
+            ))),
+        }
+    }
+
+    pub fn get_bool(&self) -> Result<bool, RawString> {
+        match self.node.as_bool() {
+            Some(b) => Ok(b),
+            None => Err("This object is not boolean".into()),
+        }
+    }
+
+    pub fn get_int(&self) -> Result<i64, RawString> {
+        match self.node.as_i64() {
+            Some(i) => Ok(i),
+            None => Err("This object is not integer".into()),
+        }
+    }
+
+    pub fn get_double(&self) -> Result<f64, RawString> {
+        match self.node.as_f64() {
+            Some(f) => Ok(f),
+            None => Err("This object is not double".into()),
+        }
+    }
+
+    pub fn get_string(&self) -> Result<RawString, RawString> {
+        match self.node.as_str() {
+            Some(s) => Ok(s.into()),
+            None => Err("This object is not string".into()),
+        }
+    }
+
+    pub fn get_array_element(
+        &self,
+        index: usize,
+    ) -> Result<SerdeJsonRef<'a>, GetArrayElementError> {
+        match self.node.as_array() {
+            Some(a) => match a.get(index) {
+                Some(v) => Ok(Self { node: v }),
+                None => Err(GetArrayElementError::new_out_of_bounds(format!(
+                    "Index {} out of bounds for array of length {}",
+                    index,
+                    a.len()
+                ))),
+            },
+            None => Err(GetArrayElementError::new_failed_precondition("This object is not array")),
+        }
+    }
+
+    pub fn is_null(&self) -> bool {
+        self.node.is_null()
+    }
+
+    pub fn is_boolean(&self) -> bool {
+        self.node.is_boolean()
+    }
+
+    pub fn is_number(&self) -> bool {
+        self.node.is_number()
+    }
+
+    pub fn is_i64(&self) -> bool {
+        self.node.is_i64()
+    }
+
+    pub fn is_f64(&self) -> bool {
+        self.node.is_f64()
+    }
+
+    pub fn is_string(&self) -> bool {
+        self.node.is_string()
+    }
+
+    pub fn is_array(&self) -> bool {
+        self.node.is_array()
+    }
+
+    pub fn is_object(&self) -> bool {
+        self.node.is_object()
+    }
+
+    pub fn to_string(&self, sort_keys: bool) -> RawString {
+        if sort_keys {
+            let mut value = self.node.clone();
+            value.sort_all_objects();
+            return value.to_string().into();
+        }
+        self.node.to_string().into()
+    }
+
+    pub fn get_keys(&self) -> Result<VecRawString, RawString> {
+        let object = match self.node.as_object() {
+            Some(o) => o,
+            None => return Err("This isn't a object".into()),
+        };
+
+        Ok(object.keys().map(|k| k.as_str().into()).collect::<Vec<RawString>>().into())
+    }
+
+    pub fn has_field(&self, raw_field_name: &[u8]) -> Result<bool, RawString> {
+        match std::str::from_utf8(raw_field_name) {
+            Ok(field_name) => Ok(self.node.get(field_name).is_some()),
+            Err(err) => Err(err.to_string().into()),
+        }
+    }
+
+    pub fn size(&self) -> Result<i64, RawString> {
+        match self.node {
+            serde_json::Value::Array(arr) => Ok(arr.len() as i64),
+            serde_json::Value::Object(obj) => Ok(obj.len() as i64),
+            serde_json::Value::String(s) => Ok(s.len() as i64),
+            _ => Err("Size is only supported for arrays, objects, and strings".into()),
+        }
+    }
 }
 
 make_vec_type!(RawString, VecRawString);
