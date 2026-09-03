@@ -1,0 +1,21 @@
+[package]
+name = "xmltree_rust"
+version = "0.1.0"
+edition = "2024"
+license-file = "../../LICENSE"
+
+[lib]
+path = "xmltree.rs"
+doctest = false
+
+[dependencies]
+log = "0.4"
+nesting_depth = { path = "../nesting_depth" }
+xml = "1.4"
+# xmltree-ns is published from https://github.com/kaidokert/xmltree-rs, a fork of
+# upstream xmltree that carries https://github.com/eminence/xmltree-rs/pull/38
+# (attributes keyed by their qualified name). That is the same patch applied to
+# //third_party/rust/xmltree/v0_12 internally. Renamed to `xmltree` so the
+# source can keep using `xmltree::...`. `attribute-order` matches the internal
+# build configuration.
+xmltree = { package = "xmltree-ns", version = "0.13", features = ["attribute-order"] }

@@ -27,16 +27,17 @@ jobs:
           - saphyr
           - serde_json
           - stemming
+          - xml
           - zip
         # keep-sorted end
     steps:
       - name: Checkout code
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
           persist-credentials: false
 
       - name: Set up Rust
-        uses: actions-rust-lang/setup-rust-toolchain@46268bd060767258de96ed93c1251119784f2ab6 # v1
+        uses: actions-rust-lang/setup-rust-toolchain@46268bd060767258de96ed93c1251119784f2ab6 # v1.16.1
         with:
           # NOTE: b/530101873 - Crubit has some compiler warnings. By default rustflags is
           # "-D warnings" causing the build to fail.
@@ -47,6 +48,9 @@ jobs:
 
       - name: Build
         run: cmake --build build --parallel
+
+      - name: Run examples
+        run: ctest --test-dir build --output-on-failure --no-tests=ignore -L '^example$'
 
   summary:
     name: summary

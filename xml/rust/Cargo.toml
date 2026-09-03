@@ -1,0 +1,14 @@
+[package]
+name = "rust"
+version = "0.1.0"
+edition = "2021"
+license-file = "../../LICENSE"
+
+[lib]
+path = "lib.rs"
+doctest = false
+
+[dependencies]
+anyhow = "1.0"
+quick-xml = "0.40"
+xmlparser = "0.13"

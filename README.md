@@ -17,6 +17,7 @@ C++ wrappers (using Crubit) for Rust libraries.
 | saphyr       | [saphyr](https://crates.io/crates/saphyr)         | Compiles |
 | serde_json   | [serde_json](https://crates.io/crates/serde_json) | Compiles |
 | stemming     | [snowball](https://github.com/snowballstem/snowball) | Compiles |
+| xml          | [quick-xml](https://crates.io/crates/quick-xml), [xmltree-ns](https://crates.io/crates/xmltree-ns) | Compiles |
 | zip          | [zip](https://crates.io/crates/zip)               | Compiles |
 <!-- keep-sorted end -->
 
