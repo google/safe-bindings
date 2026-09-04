@@ -1,12 +1,15 @@
 #include "read.h"
 
 #include <cstdint>
+#include <string>
 #include <utility>
 #include <variant>
 
+#include "crubit_helpers/string_conversions.h"
 #include "converters.h"
 #include "file.h"
 #include "crubit/rust.h"
+#include "absl/status/status.h"
 #include "absl/status/status_macros.h"
 #include "absl/status/statusor.h"
 #include "absl/strings/string_view.h"
@@ -25,8 +28,20 @@ absl::StatusOr<BufferedZipArchive> BufferedZipArchive::NewFromData(
   return BufferedZipArchive(std::move(archive));
 }
 
-absl::StatusOr<uintptr_t> BufferedZipArchive::GetLength() {
+absl::StatusOr<uintptr_t> BufferedZipArchive::GetLength() const {
+  if (archive_.is_none()) {
+    return absl::InternalError("ZipArchive object used after being moved-out");
+  }
   return archive_.get_length();
+}
+
+absl::StatusOr<std::string> BufferedZipArchive::GetComment() const {
+  if (archive_.is_none()) {
+    return absl::InternalError("ZipArchive object used after being moved-out");
+  }
+  rust::VecU8 comment_vec = archive_.get_comment();
+  return std::string(
+      security::crubit_helpers::StringViewFromVecU8(comment_vec));
 }
 
 absl::StatusOr<ZipFile> BufferedZipArchive::GetFileByIndex(uintptr_t index) {
@@ -52,8 +67,20 @@ absl::StatusOr<FsZipArchive> FsZipArchive::NewFromPath(absl::string_view path) {
   return FsZipArchive(std::move(archive));
 }
 
-absl::StatusOr<uintptr_t> FsZipArchive::GetLength() {
+absl::StatusOr<uintptr_t> FsZipArchive::GetLength() const {
+  if (archive_.is_none()) {
+    return absl::InternalError("ZipArchive object used after being moved-out");
+  }
   return archive_.get_length();
+}
+
+absl::StatusOr<std::string> FsZipArchive::GetComment() const {
+  if (archive_.is_none()) {
+    return absl::InternalError("ZipArchive object used after being moved-out");
+  }
+  rust::VecU8 comment_vec = archive_.get_comment();
+  return std::string(
+      security::crubit_helpers::StringViewFromVecU8(comment_vec));
 }
 
 absl::StatusOr<ZipFile> FsZipArchive::GetFileByIndex(uintptr_t index) {
@@ -80,8 +107,12 @@ absl::StatusOr<ZipArchive> ZipArchive::FromBuffer(absl::string_view data) {
   return ZipArchive(std::move(archive));
 }
 
-absl::StatusOr<uintptr_t> ZipArchive::GetLength() {
-  return std::visit([](auto& arg) { return arg.GetLength(); }, archive_);
+absl::StatusOr<uintptr_t> ZipArchive::GetLength() const {
+  return std::visit([](const auto& arg) { return arg.GetLength(); }, archive_);
+}
+
+absl::StatusOr<std::string> ZipArchive::GetComment() const {
+  return std::visit([](const auto& arg) { return arg.GetComment(); }, archive_);
 }
 
 absl::StatusOr<ZipFile> ZipArchive::GetFileByIndex(uintptr_t index) {

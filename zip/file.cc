@@ -1,6 +1,7 @@
 #include "file.h"
 
 #include <cstddef>
+#include <cstdint>
 #include <string>
 #include <variant>
 
@@ -63,6 +64,40 @@ absl::StatusOr<CompressionMethod> BufferedZipFile::GetCompressionMethod()
   ABSL_RETURN_IF_ERROR(CheckNone());
   return ToSecurityZipCompressionMethod(zip_.get_compression_method());
 }
+absl::StatusOr<std::string> BufferedZipFile::GetComment() const {
+  ABSL_RETURN_IF_ERROR(CheckNone());
+  rust::VecU8 comment_vec = zip_.get_comment();
+  return std::string(
+      security::crubit_helpers::StringViewFromVecU8(comment_vec));
+}
+absl::StatusOr<uint64_t> BufferedZipFile::GetUncompressedSize() const {
+  ABSL_RETURN_IF_ERROR(CheckNone());
+  return zip_.get_uncompressed_size();
+}
+absl::StatusOr<uint64_t> BufferedZipFile::GetCompressedSize() const {
+  ABSL_RETURN_IF_ERROR(CheckNone());
+  return zip_.get_compressed_size();
+}
+absl::StatusOr<uint32_t> BufferedZipFile::GetCrc32() const {
+  ABSL_RETURN_IF_ERROR(CheckNone());
+  return zip_.get_crc32();
+}
+absl::StatusOr<uint16_t> BufferedZipFile::GetLastModifiedDate() const {
+  ABSL_RETURN_IF_ERROR(CheckNone());
+  return zip_.get_last_modified_date();
+}
+absl::StatusOr<uint16_t> BufferedZipFile::GetLastModifiedTime() const {
+  ABSL_RETURN_IF_ERROR(CheckNone());
+  return zip_.get_last_modified_time();
+}
+absl::StatusOr<uint32_t> BufferedZipFile::GetUnixMode() const {
+  ABSL_RETURN_IF_ERROR(CheckNone());
+  return zip_.get_unix_mode();
+}
+absl::StatusOr<RustVecU8Wrapper> BufferedZipFile::GetExtraData() const {
+  ABSL_RETURN_IF_ERROR(CheckNone());
+  return RustVecU8Wrapper(zip_.get_extra_data());
+}
 absl::StatusOr<RustVecU8Wrapper> BufferedZipFile::GetFileData() {
   ABSL_RETURN_IF_ERROR(CheckNone());
   return FromRustResultVecU8(zip_.get_file_data());
@@ -99,6 +134,40 @@ absl::StatusOr<CompressionMethod> FsZipFile::GetCompressionMethod() const {
   ABSL_RETURN_IF_ERROR(CheckNone());
   return ToSecurityZipCompressionMethod(zip_.get_compression_method());
 }
+absl::StatusOr<std::string> FsZipFile::GetComment() const {
+  ABSL_RETURN_IF_ERROR(CheckNone());
+  rust::VecU8 comment_vec = zip_.get_comment();
+  return std::string(
+      security::crubit_helpers::StringViewFromVecU8(comment_vec));
+}
+absl::StatusOr<uint64_t> FsZipFile::GetUncompressedSize() const {
+  ABSL_RETURN_IF_ERROR(CheckNone());
+  return zip_.get_uncompressed_size();
+}
+absl::StatusOr<uint64_t> FsZipFile::GetCompressedSize() const {
+  ABSL_RETURN_IF_ERROR(CheckNone());
+  return zip_.get_compressed_size();
+}
+absl::StatusOr<uint32_t> FsZipFile::GetCrc32() const {
+  ABSL_RETURN_IF_ERROR(CheckNone());
+  return zip_.get_crc32();
+}
+absl::StatusOr<uint16_t> FsZipFile::GetLastModifiedDate() const {
+  ABSL_RETURN_IF_ERROR(CheckNone());
+  return zip_.get_last_modified_date();
+}
+absl::StatusOr<uint16_t> FsZipFile::GetLastModifiedTime() const {
+  ABSL_RETURN_IF_ERROR(CheckNone());
+  return zip_.get_last_modified_time();
+}
+absl::StatusOr<uint32_t> FsZipFile::GetUnixMode() const {
+  ABSL_RETURN_IF_ERROR(CheckNone());
+  return zip_.get_unix_mode();
+}
+absl::StatusOr<RustVecU8Wrapper> FsZipFile::GetExtraData() const {
+  ABSL_RETURN_IF_ERROR(CheckNone());
+  return RustVecU8Wrapper(zip_.get_extra_data());
+}
 absl::StatusOr<RustVecU8Wrapper> FsZipFile::GetFileData() {
   ABSL_RETURN_IF_ERROR(CheckNone());
   return FromRustResultVecU8(zip_.get_file_data());
@@ -111,19 +180,48 @@ absl::StatusOr<RustVecU8Wrapper> FsZipFile::GetFileData(size_t max_size) {
 }
 
 absl::StatusOr<bool> ZipFile::IsFile() const {
-  return std::visit([](auto& zip) { return zip.IsFile(); }, zip_);
+  return std::visit([](const auto& zip) { return zip.IsFile(); }, zip_);
 }
 absl::StatusOr<bool> ZipFile::IsDir() const {
-  return std::visit([](auto& zip) { return zip.IsDir(); }, zip_);
+  return std::visit([](const auto& zip) { return zip.IsDir(); }, zip_);
 }
 bool ZipFile::IsNone() const {
-  return std::visit([](auto& zip) { return zip.IsNone(); }, zip_);
+  return std::visit([](const auto& zip) { return zip.IsNone(); }, zip_);
 }
 absl::StatusOr<std::string> ZipFile::GetFileName() const {
-  return std::visit([](auto& zip) { return zip.GetFileName(); }, zip_);
+  return std::visit([](const auto& zip) { return zip.GetFileName(); }, zip_);
 }
 absl::StatusOr<CompressionMethod> ZipFile::GetCompressionMethod() const {
-  return std::visit([](auto& zip) { return zip.GetCompressionMethod(); }, zip_);
+  return std::visit([](const auto& zip) { return zip.GetCompressionMethod(); },
+                    zip_);
+}
+absl::StatusOr<std::string> ZipFile::GetComment() const {
+  return std::visit([](const auto& zip) { return zip.GetComment(); }, zip_);
+}
+absl::StatusOr<uint64_t> ZipFile::GetUncompressedSize() const {
+  return std::visit([](const auto& zip) { return zip.GetUncompressedSize(); },
+                    zip_);
+}
+absl::StatusOr<uint64_t> ZipFile::GetCompressedSize() const {
+  return std::visit([](const auto& zip) { return zip.GetCompressedSize(); },
+                    zip_);
+}
+absl::StatusOr<uint32_t> ZipFile::GetCrc32() const {
+  return std::visit([](const auto& zip) { return zip.GetCrc32(); }, zip_);
+}
+absl::StatusOr<uint16_t> ZipFile::GetLastModifiedDate() const {
+  return std::visit([](const auto& zip) { return zip.GetLastModifiedDate(); },
+                    zip_);
+}
+absl::StatusOr<uint16_t> ZipFile::GetLastModifiedTime() const {
+  return std::visit([](const auto& zip) { return zip.GetLastModifiedTime(); },
+                    zip_);
+}
+absl::StatusOr<uint32_t> ZipFile::GetUnixMode() const {
+  return std::visit([](const auto& zip) { return zip.GetUnixMode(); }, zip_);
+}
+absl::StatusOr<RustVecU8Wrapper> ZipFile::GetExtraData() const {
+  return std::visit([](const auto& zip) { return zip.GetExtraData(); }, zip_);
 }
 absl::StatusOr<RustVecU8Wrapper> ZipFile::GetFileData() {
   return std::visit([](auto& zip) { return zip.GetFileData(); }, zip_);
