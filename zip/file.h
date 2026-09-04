@@ -34,6 +34,13 @@ class BufferedZipFile final {
   bool IsNone() const;
   absl::StatusOr<std::string> GetFileName() const;
   absl::StatusOr<CompressionMethod> GetCompressionMethod() const;
+  absl::StatusOr<std::string> GetComment() const;
+  absl::StatusOr<uint64_t> GetUncompressedSize() const;
+  absl::StatusOr<uint64_t> GetCompressedSize() const;
+  absl::StatusOr<uint32_t> GetCrc32() const;
+  absl::StatusOr<uint16_t> GetLastModifiedDate() const;
+  absl::StatusOr<uint16_t> GetLastModifiedTime() const;
+  absl::StatusOr<uint32_t> GetUnixMode() const;
   absl::StatusOr<RustVecU8Wrapper> GetFileData();
 
  private:
@@ -51,6 +58,13 @@ class FsZipFile final {
   bool IsNone() const;
   absl::StatusOr<std::string> GetFileName() const;
   absl::StatusOr<CompressionMethod> GetCompressionMethod() const;
+  absl::StatusOr<std::string> GetComment() const;
+  absl::StatusOr<uint64_t> GetUncompressedSize() const;
+  absl::StatusOr<uint64_t> GetCompressedSize() const;
+  absl::StatusOr<uint32_t> GetCrc32() const;
+  absl::StatusOr<uint16_t> GetLastModifiedDate() const;
+  absl::StatusOr<uint16_t> GetLastModifiedTime() const;
+  absl::StatusOr<uint32_t> GetUnixMode() const;
   absl::StatusOr<RustVecU8Wrapper> GetFileData();
 
  private:
@@ -75,6 +89,13 @@ class ZipFile final {
   bool IsNone() const;
   absl::StatusOr<std::string> GetFileName() const;
   absl::StatusOr<CompressionMethod> GetCompressionMethod() const;
+  absl::StatusOr<std::string> GetComment() const;
+  absl::StatusOr<uint64_t> GetUncompressedSize() const;
+  absl::StatusOr<uint64_t> GetCompressedSize() const;
+  absl::StatusOr<uint32_t> GetCrc32() const;
+  absl::StatusOr<uint16_t> GetLastModifiedDate() const;
+  absl::StatusOr<uint16_t> GetLastModifiedTime() const;
+  absl::StatusOr<uint32_t> GetUnixMode() const;
   absl::StatusOr<RustVecU8Wrapper> GetFileData();
 
  private:
