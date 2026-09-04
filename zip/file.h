@@ -34,6 +34,20 @@ class BufferedZipFile final {
   bool IsNone() const;
   absl::StatusOr<std::string> GetFileName() const;
   absl::StatusOr<CompressionMethod> GetCompressionMethod() const;
+  absl::StatusOr<std::string> GetComment() const;
+  absl::StatusOr<uint64_t> GetUncompressedSize() const;
+  absl::StatusOr<uint64_t> GetCompressedSize() const;
+  absl::StatusOr<uint32_t> GetCrc32() const;
+  // Returns the last-modified date encoded as an MS-DOS FAT date bitfield
+  // (bits 15-9: year offset from 1980, bits 8-5: month [1-12], bits 4-0: day
+  // [1-31]).
+  absl::StatusOr<uint16_t> GetLastModifiedDate() const;
+  // Returns the last-modified time encoded as an MS-DOS FAT time bitfield
+  // (bits 15-11: hour [0-23], bits 10-5: minute [0-59], bits 4-0: second / 2
+  // [0-29]).
+  absl::StatusOr<uint16_t> GetLastModifiedTime() const;
+  absl::StatusOr<uint32_t> GetUnixMode() const;
+  absl::StatusOr<RustVecU8Wrapper> GetExtraData() const;
   absl::StatusOr<RustVecU8Wrapper> GetFileData();
 
  private:
@@ -51,6 +65,20 @@ class FsZipFile final {
   bool IsNone() const;
   absl::StatusOr<std::string> GetFileName() const;
   absl::StatusOr<CompressionMethod> GetCompressionMethod() const;
+  absl::StatusOr<std::string> GetComment() const;
+  absl::StatusOr<uint64_t> GetUncompressedSize() const;
+  absl::StatusOr<uint64_t> GetCompressedSize() const;
+  absl::StatusOr<uint32_t> GetCrc32() const;
+  // Returns the last-modified date encoded as an MS-DOS FAT date bitfield
+  // (bits 15-9: year offset from 1980, bits 8-5: month [1-12], bits 4-0: day
+  // [1-31]).
+  absl::StatusOr<uint16_t> GetLastModifiedDate() const;
+  // Returns the last-modified time encoded as an MS-DOS FAT time bitfield
+  // (bits 15-11: hour [0-23], bits 10-5: minute [0-59], bits 4-0: second / 2
+  // [0-29]).
+  absl::StatusOr<uint16_t> GetLastModifiedTime() const;
+  absl::StatusOr<uint32_t> GetUnixMode() const;
+  absl::StatusOr<RustVecU8Wrapper> GetExtraData() const;
   absl::StatusOr<RustVecU8Wrapper> GetFileData();
 
  private:
@@ -75,6 +103,20 @@ class ZipFile final {
   bool IsNone() const;
   absl::StatusOr<std::string> GetFileName() const;
   absl::StatusOr<CompressionMethod> GetCompressionMethod() const;
+  absl::StatusOr<std::string> GetComment() const;
+  absl::StatusOr<uint64_t> GetUncompressedSize() const;
+  absl::StatusOr<uint64_t> GetCompressedSize() const;
+  absl::StatusOr<uint32_t> GetCrc32() const;
+  // Returns the last-modified date encoded as an MS-DOS FAT date bitfield
+  // (bits 15-9: year offset from 1980, bits 8-5: month [1-12], bits 4-0: day
+  // [1-31]).
+  absl::StatusOr<uint16_t> GetLastModifiedDate() const;
+  // Returns the last-modified time encoded as an MS-DOS FAT time bitfield
+  // (bits 15-11: hour [0-23], bits 10-5: minute [0-59], bits 4-0: second / 2
+  // [0-29]).
+  absl::StatusOr<uint16_t> GetLastModifiedTime() const;
+  absl::StatusOr<uint32_t> GetUnixMode() const;
+  absl::StatusOr<RustVecU8Wrapper> GetExtraData() const;
   absl::StatusOr<RustVecU8Wrapper> GetFileData();
 
  private:
