@@ -15,7 +15,7 @@ impl std::fmt::Debug for RustCmpWrapper {
 
 impl RustCmpWrapper {
     pub fn new(inner: virtual_unique_ptr<Comparator>) -> Self {
-        assert!(!inner.get().is_null(), "Comparator pointer must not be null");
+        assert!(!virtual_unique_ptr::is_null(&inner), "Comparator pointer must not be null");
         Self { inner }
     }
 }
@@ -25,8 +25,13 @@ impl Cmp for RustCmpWrapper {
         // SAFETY: `self.inner` is only ever populated by `RustCmpWrapper::new`, which
         // guarantees that it points to a valid C++ `Comparator` instance that remains valid
         // during this call.
-        let res =
-            unsafe { Comparator::Compare(self.inner.get().as_ref().unwrap(), a.into(), b.into()) };
+        let res = unsafe {
+            Comparator::Compare(
+                virtual_unique_ptr::as_ptr(&self.inner).as_ref().unwrap(),
+                a.into(),
+                b.into(),
+            )
+        };
         match res {
             r if r < 0 => Ordering::Less,
             r if r > 0 => Ordering::Greater,
@@ -44,7 +49,7 @@ impl Cmp for RustCmpWrapper {
         // during this call.
         let s = unsafe {
             Comparator::FindShortestSeparator(
-                self.inner.get().as_ref().unwrap(),
+                virtual_unique_ptr::as_ptr(&self.inner).as_ref().unwrap(),
                 a.into(),
                 b.into(),
             )
@@ -56,8 +61,12 @@ impl Cmp for RustCmpWrapper {
         // SAFETY: `self.inner` is only ever populated by `RustCmpWrapper::new`, which
         // guarantees that it points to a valid C++ `Comparator` instance that remains valid
         // during this call.
-        let s =
-            unsafe { Comparator::FindShortSuccessor(self.inner.get().as_ref().unwrap(), a.into()) };
+        let s = unsafe {
+            Comparator::FindShortSuccessor(
+                virtual_unique_ptr::as_ptr(&self.inner).as_ref().unwrap(),
+                a.into(),
+            )
+        };
         s.as_ref().to_vec()
     }
 }

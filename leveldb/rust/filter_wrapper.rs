@@ -14,7 +14,7 @@ impl std::fmt::Debug for RustFilterWrapper {
 
 impl RustFilterWrapper {
     pub fn new(inner: virtual_unique_ptr<FilterPolicy>) -> Self {
-        assert!(!inner.get().is_null(), "FilterPolicy pointer must not be null");
+        assert!(!virtual_unique_ptr::is_null(&inner), "FilterPolicy pointer must not be null");
         Self { inner }
     }
 }
@@ -28,7 +28,8 @@ impl RustyFilterPolicy for RustFilterWrapper {
         // instance; Crubit guarantees that this pointer remains valid and non-null
         // as long as the `RustFilterWrapper` exists.
         unsafe {
-            let name = FilterPolicy::Name(self.inner.get().as_ref().unwrap());
+            let name =
+                FilterPolicy::Name(virtual_unique_ptr::as_ptr(&self.inner).as_ref().unwrap());
             let bytes: &'static [u8] = &*<*const [u8]>::from(name);
             std::str::from_utf8(bytes).expect("FilterPolicy name must be valid UTF-8")
         }
@@ -41,7 +42,7 @@ impl RustyFilterPolicy for RustFilterWrapper {
         // as long as the `RustFilterWrapper` exists.
         let s = unsafe {
             FilterPolicy::CreateFilter(
-                self.inner.get().as_ref().unwrap(),
+                virtual_unique_ptr::as_ptr(&self.inner).as_ref().unwrap(),
                 keys.into(),
                 offsets_u64.as_slice().into(),
             )
@@ -54,7 +55,11 @@ impl RustyFilterPolicy for RustFilterWrapper {
         // instance. Crubit guarantees that this pointer remains valid and non-null
         // as long as the `RustFilterWrapper` exists.
         unsafe {
-            FilterPolicy::KeyMayMatch(self.inner.get().as_ref().unwrap(), key.into(), filter.into())
+            FilterPolicy::KeyMayMatch(
+                virtual_unique_ptr::as_ptr(&self.inner).as_ref().unwrap(),
+                key.into(),
+                filter.into(),
+            )
         }
     }
 }

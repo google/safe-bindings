@@ -8,7 +8,7 @@ pub(crate) struct RustLoggerWriter {
 
 impl RustLoggerWriter {
     pub fn new(inner: virtual_unique_ptr<Logger>) -> Self {
-        assert!(!inner.get().is_null(), "Logger pointer must not be null");
+        assert!(!virtual_unique_ptr::is_null(&inner), "Logger pointer must not be null");
         Self { inner }
     }
 }
@@ -19,7 +19,10 @@ impl Write for RustLoggerWriter {
         // instance. Crubit guarantees that this pointer remains valid and non-null
         // as long as the `RustLoggerWriter` exists.
         unsafe {
-            Logger::Log(self.inner.get().as_mut().unwrap(), buf.into());
+            Logger::Log(
+                virtual_unique_ptr::as_mut_ptr(&mut self.inner).as_mut().unwrap(),
+                buf.into(),
+            );
         }
         Ok(buf.len())
     }

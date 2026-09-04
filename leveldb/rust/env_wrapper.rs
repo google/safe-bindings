@@ -1,4 +1,4 @@
-use cc_std::std::virtual_unique_ptr;
+use cc_std::std::{unique_ptr, virtual_unique_ptr};
 use cpp_env::leveldb_rs::{ChildNameList, Env, RandomAccessFile, SequentialFile, WritableFile};
 use rusty_leveldb::env::{Env as RustyEnv, FileLock, Logger, RandomAccess};
 use rusty_leveldb::Result;
@@ -21,7 +21,7 @@ impl std::fmt::Debug for RustEnvWrapper {
 
 impl RustEnvWrapper {
     pub fn new(inner: virtual_unique_ptr<Env>) -> Self {
-        assert!(!inner.get().is_null(), "Env pointer must not be null");
+        assert!(!virtual_unique_ptr::is_null(&inner), "Env pointer must not be null");
         Self { inner, fallback: rusty_leveldb::Options::default().env }
     }
 
@@ -37,7 +37,7 @@ impl RustyEnv for RustEnvWrapper {
         // the `RustEnvWrapper` exists.
         let res = unsafe {
             Env::NewSequentialFile(
-                self.inner.get().as_ref().unwrap(),
+                virtual_unique_ptr::as_ptr(&self.inner).as_ref().unwrap(),
                 Self::path_to_bytes(path).into(),
             )
         };
@@ -57,7 +57,7 @@ impl RustyEnv for RustEnvWrapper {
         // the `RustEnvWrapper` exists.
         let res = unsafe {
             Env::NewRandomAccessFile(
-                self.inner.get().as_ref().unwrap(),
+                virtual_unique_ptr::as_ptr(&self.inner).as_ref().unwrap(),
                 Self::path_to_bytes(path).into(),
             )
         };
@@ -77,7 +77,7 @@ impl RustyEnv for RustEnvWrapper {
         // the `RustEnvWrapper` exists.
         let res = unsafe {
             Env::NewWritableFile(
-                self.inner.get().as_ref().unwrap(),
+                virtual_unique_ptr::as_ptr(&self.inner).as_ref().unwrap(),
                 Self::path_to_bytes(path).into(),
             )
         };
@@ -97,7 +97,7 @@ impl RustyEnv for RustEnvWrapper {
         // the `RustEnvWrapper` exists.
         let res = unsafe {
             Env::NewAppendableFile(
-                self.inner.get().as_ref().unwrap(),
+                virtual_unique_ptr::as_ptr(&self.inner).as_ref().unwrap(),
                 Self::path_to_bytes(path).into(),
             )
         };
@@ -116,7 +116,10 @@ impl RustyEnv for RustEnvWrapper {
         // Crubit guarantees that this pointer remains valid and non-null as long as
         // the `RustEnvWrapper` exists.
         let res = unsafe {
-            Env::FileExists(self.inner.get().as_ref().unwrap(), Self::path_to_bytes(path).into())
+            Env::FileExists(
+                virtual_unique_ptr::as_ptr(&self.inner).as_ref().unwrap(),
+                Self::path_to_bytes(path).into(),
+            )
         };
         match res {
             Err(e) if e.code().is_unimplemented() => self.fallback.exists(path),
@@ -133,7 +136,10 @@ impl RustyEnv for RustEnvWrapper {
         // Crubit guarantees that this pointer remains valid and non-null as long as
         // the `RustEnvWrapper` exists.
         let res = unsafe {
-            Env::GetFileSize(self.inner.get().as_ref().unwrap(), Self::path_to_bytes(path).into())
+            Env::GetFileSize(
+                virtual_unique_ptr::as_ptr(&self.inner).as_ref().unwrap(),
+                Self::path_to_bytes(path).into(),
+            )
         };
         match res {
             Err(e) if e.code().is_unimplemented() => self.fallback.size_of(path),
@@ -158,9 +164,12 @@ impl RustyEnv for RustEnvWrapper {
         // Crubit guarantees that this pointer remains valid and non-null as long as
         // the `RustEnvWrapper` exists.
         let res = unsafe {
-            Env::ListChildren(self.inner.get().as_ref().unwrap(), Self::path_to_bytes(path).into())
+            Env::ListChildren(
+                virtual_unique_ptr::as_ptr(&self.inner).as_ref().unwrap(),
+                Self::path_to_bytes(path).into(),
+            )
         };
-        let list = match res {
+        let mut list = match res {
             Err(e) if e.code().is_unimplemented() => return self.fallback.children(path),
             Err(e) => {
                 return Err(rusty_leveldb::Status::new(
@@ -172,8 +181,8 @@ impl RustyEnv for RustEnvWrapper {
         };
 
         let mut result = Vec::new();
-        let list_ptr = list.get();
-        // SAFETY: `list` is a `virtual_unique_ptr` to a `ChildNameList` returned by C++.
+        let list_ptr = unique_ptr::as_mut_ptr(&mut list);
+        // SAFETY: `list` is a `unique_ptr` to a `ChildNameList` returned by C++.
         // We assume the C++ side correctly implements `get_count` and `get_item`.
         unsafe {
             for i in 0..ChildNameList::get_count(list_ptr) {
@@ -189,7 +198,10 @@ impl RustyEnv for RustEnvWrapper {
         // Crubit guarantees that this pointer remains valid and non-null as long as
         // the `RustEnvWrapper` exists.
         let res = unsafe {
-            Env::DeleteFile(self.inner.get().as_ref().unwrap(), Self::path_to_bytes(path).into())
+            Env::DeleteFile(
+                virtual_unique_ptr::as_ptr(&self.inner).as_ref().unwrap(),
+                Self::path_to_bytes(path).into(),
+            )
         };
         match res {
             Err(e) if e.code().is_unimplemented() => self.fallback.delete(path),
@@ -206,7 +218,10 @@ impl RustyEnv for RustEnvWrapper {
         // Crubit guarantees that this pointer remains valid and non-null as long as
         // the `RustEnvWrapper` exists.
         let res = unsafe {
-            Env::CreateDir(self.inner.get().as_ref().unwrap(), Self::path_to_bytes(path).into())
+            Env::CreateDir(
+                virtual_unique_ptr::as_ptr(&self.inner).as_ref().unwrap(),
+                Self::path_to_bytes(path).into(),
+            )
         };
         match res {
             Err(e) if e.code().is_unimplemented() => self.fallback.mkdir(path),
@@ -223,7 +238,10 @@ impl RustyEnv for RustEnvWrapper {
         // Crubit guarantees that this pointer remains valid and non-null as long as
         // the `RustEnvWrapper` exists.
         let res = unsafe {
-            Env::DeleteDir(self.inner.get().as_ref().unwrap(), Self::path_to_bytes(path).into())
+            Env::DeleteDir(
+                virtual_unique_ptr::as_ptr(&self.inner).as_ref().unwrap(),
+                Self::path_to_bytes(path).into(),
+            )
         };
         match res {
             Err(e) if e.code().is_unimplemented() => self.fallback.rmdir(path),
@@ -241,7 +259,7 @@ impl RustyEnv for RustEnvWrapper {
         // the `RustEnvWrapper` exists.
         let res = unsafe {
             Env::RenameFile(
-                self.inner.get().as_ref().unwrap(),
+                virtual_unique_ptr::as_ptr(&self.inner).as_ref().unwrap(),
                 Self::path_to_bytes(old).into(),
                 Self::path_to_bytes(new).into(),
             )
@@ -261,7 +279,10 @@ impl RustyEnv for RustEnvWrapper {
         // Crubit guarantees that this pointer remains valid and non-null as long as
         // the `RustEnvWrapper` exists.
         let res = unsafe {
-            Env::LockFile(self.inner.get().as_ref().unwrap(), Self::path_to_bytes(path).into())
+            Env::LockFile(
+                virtual_unique_ptr::as_ptr(&self.inner).as_ref().unwrap(),
+                Self::path_to_bytes(path).into(),
+            )
         };
         match res {
             Err(e) if e.code().is_unimplemented() => self.fallback.lock(path),
@@ -277,8 +298,12 @@ impl RustyEnv for RustEnvWrapper {
         // SAFETY: `self.inner` is a `virtual_unique_ptr` that owns the C++ `Env` instance.
         // Crubit guarantees that this pointer remains valid and non-null as long as
         // the `RustEnvWrapper` exists.
-        let res =
-            unsafe { Env::UnlockFile(self.inner.get().as_ref().unwrap(), l.id.as_bytes().into()) };
+        let res = unsafe {
+            Env::UnlockFile(
+                virtual_unique_ptr::as_ptr(&self.inner).as_ref().unwrap(),
+                l.id.as_bytes().into(),
+            )
+        };
         match res {
             Err(e) if e.code().is_unimplemented() => self.fallback.unlock(l),
             Err(e) => Err(rusty_leveldb::Status::new(
@@ -297,7 +322,10 @@ impl RustyEnv for RustEnvWrapper {
         // Crubit guarantees that this pointer remains valid and non-null as long as
         // the `RustEnvWrapper` exists.
         let res = unsafe {
-            Env::NewLogger(self.inner.get().as_ref().unwrap(), path_str.as_bytes().into())
+            Env::NewLogger(
+                virtual_unique_ptr::as_ptr(&self.inner).as_ref().unwrap(),
+                path_str.as_bytes().into(),
+            )
         };
         match res {
             Err(e) if e.code().is_unimplemented() => self.fallback.new_logger(path),
@@ -316,14 +344,19 @@ impl RustyEnv for RustEnvWrapper {
         // SAFETY: `self.inner` is a `virtual_unique_ptr` that owns the C++ `Env` instance.
         // Crubit guarantees that this pointer remains valid and non-null as long as
         // the `RustEnvWrapper` exists.
-        unsafe { Env::NowMicros(self.inner.get().as_ref().unwrap()) }
+        unsafe { Env::NowMicros(virtual_unique_ptr::as_ptr(&self.inner).as_ref().unwrap()) }
     }
 
     fn sleep_for(&self, micros: u32) {
         // SAFETY: `self.inner` is a `virtual_unique_ptr` that owns the C++ `Env` instance.
         // Crubit guarantees that this pointer remains valid and non-null as long as
         // the `RustEnvWrapper` exists.
-        unsafe { Env::SleepForMicroseconds(self.inner.get().as_ref().unwrap(), micros) }
+        unsafe {
+            Env::SleepForMicroseconds(
+                virtual_unique_ptr::as_ptr(&self.inner).as_ref().unwrap(),
+                micros,
+            )
+        }
     }
 }
 
@@ -337,7 +370,12 @@ impl Read for RustSequentialFile {
         // This object was successfully created via `Env::NewSequentialFile`, which
         // checks the `absl::Status` to ensure a valid, non-null pointer is returned.
         // The pointer remains valid as long as this `RustSequentialFile` exists.
-        let res = unsafe { SequentialFile::Read(self.inner.get().as_mut().unwrap(), buf.into()) };
+        let res = unsafe {
+            SequentialFile::Read(
+                virtual_unique_ptr::as_mut_ptr(&mut self.inner).as_mut().unwrap(),
+                buf.into(),
+            )
+        };
         res.map(|s| s as usize).map_err(|e| std::io::Error::other(format!("C++ Error: {:?}", e)))
     }
 }
@@ -352,7 +390,11 @@ impl RandomAccess for RustRandomAccessFile {
         // It was created and verified via `Env::NewRandomAccessFile`. Since we own
         // the unique pointer, the underlying C++ object is guaranteed to be valid.
         let res = unsafe {
-            RandomAccessFile::Read(self.inner.get().as_ref().unwrap(), off as u64, dst.into())
+            RandomAccessFile::Read(
+                virtual_unique_ptr::as_ptr(&self.inner).as_ref().unwrap(),
+                off as u64,
+                dst.into(),
+            )
         };
         res.map(|s| s as usize).map_err(|e| {
             rusty_leveldb::Status::new(rusty_leveldb::StatusCode::IOError, &format!("{:?}", e))
@@ -369,14 +411,21 @@ impl Write for RustWritableFile {
         // SAFETY: `self.inner` is a `virtual_unique_ptr` that owns the C++ `WritableFile`.
         // This was created via `Env::NewWritableFile` or `Env::NewAppendableFile`.
         // Ownership and validity are maintained for the lifetime of this object.
-        let res = unsafe { WritableFile::Append(self.inner.get().as_mut().unwrap(), buf.into()) };
+        let res = unsafe {
+            WritableFile::Append(
+                virtual_unique_ptr::as_mut_ptr(&mut self.inner).as_mut().unwrap(),
+                buf.into(),
+            )
+        };
         res.map(|_| buf.len()).map_err(|e| std::io::Error::other(format!("C++ Error: {:?}", e)))
     }
 
     fn flush(&mut self) -> std::io::Result<()> {
         // SAFETY: `self.inner` is a `virtual_unique_ptr` that owns the C++ `WritableFile`.
         // Validity is guaranteed as described in the `write` implementation.
-        let res = unsafe { WritableFile::Flush(self.inner.get().as_mut().unwrap()) };
+        let res = unsafe {
+            WritableFile::Flush(virtual_unique_ptr::as_mut_ptr(&mut self.inner).as_mut().unwrap())
+        };
         res.map_err(|e| std::io::Error::other(format!("C++ Error: {:?}", e)))
     }
 }
