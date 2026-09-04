@@ -15,7 +15,8 @@ namespace security::zip {
 class BufferedZipArchive final {
  public:
   static absl::StatusOr<BufferedZipArchive> NewFromData(absl::string_view data);
-  absl::StatusOr<uintptr_t> GetLength();
+  absl::StatusOr<uintptr_t> GetLength() const;
+  absl::StatusOr<std::string> GetComment() const;
   // Returns a ZipFile by index. The result file returns decompressed data when
   // read.
   absl::StatusOr<ZipFile> GetFileByIndex(uintptr_t index);
@@ -34,7 +35,8 @@ class BufferedZipArchive final {
 class FsZipArchive final {
  public:
   static absl::StatusOr<FsZipArchive> NewFromPath(absl::string_view path);
-  absl::StatusOr<uintptr_t> GetLength();
+  absl::StatusOr<uintptr_t> GetLength() const;
+  absl::StatusOr<std::string> GetComment() const;
   // Returns a ZipFile by index. The result file returns decompressed data when
   // read.
   absl::StatusOr<ZipFile> GetFileByIndex(uintptr_t index);
@@ -53,8 +55,9 @@ class FsZipArchive final {
 class ZipArchive final {
  public:
   static absl::StatusOr<ZipArchive> FromFile(absl::string_view path);
-  static absl::StatusOr<ZipArchive> FromBuffer(std::string_view data);
-  absl::StatusOr<uintptr_t> GetLength();
+  static absl::StatusOr<ZipArchive> FromBuffer(absl::string_view data);
+  absl::StatusOr<uintptr_t> GetLength() const;
+  absl::StatusOr<std::string> GetComment() const;
   // Returns a ZipFile by index. The result file returns decompressed data when
   // read.
   absl::StatusOr<ZipFile> GetFileByIndex(uintptr_t index);
