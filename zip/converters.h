@@ -2,6 +2,7 @@
 #define SECURITY_ZIP_CONVERTERS_H_
 
 #include <cstdint>
+#include <string>
 #include <utility>
 
 #include "crubit_helpers/string_conversions.h"
@@ -21,8 +22,14 @@ class RustVecU8Wrapper {
   explicit RustVecU8Wrapper(rust::VecU8 vec_u8)
       : vec_u8_(std::move(vec_u8)) {}
 
-  absl::string_view AsStringView() const ABSL_ATTRIBUTE_LIFETIME_BOUND {
+  absl::string_view AsStringView() const& ABSL_ATTRIBUTE_LIFETIME_BOUND {
     return security::crubit_helpers::StringViewFromVecU8(vec_u8_);
+  }
+  absl::string_view AsStringView() const&& = delete;
+
+  std::string AsString() const& { return std::string(AsStringView()); }
+  std::string AsString() && {
+    return std::string(security::crubit_helpers::StringViewFromVecU8(vec_u8_));
   }
 
  private:
