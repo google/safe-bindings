@@ -1,6 +1,5 @@
 #include "converters.h"
 
-#include <cstdint>
 #include <string>
 #include <utility>
 
@@ -8,6 +7,8 @@
 #include "crubit/rust.h"
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
+#include "third_party/crubit/support/rs_std/result.h"
+#include "third_party/crubit/support/rs_std/unit.h"
 
 namespace security::zip {
 
@@ -43,7 +44,7 @@ absl::StatusOr<RustVecU8Wrapper> FromRustResultVecU8(
 }
 
 absl::Status FromRustResultUnit(
-    rs_std::Result<uint8_t, rust::ZipError> result_unit) {
+    rs_std::Result<rs_std::unit_t, rust::ZipError> result_unit) {
   if (!result_unit.has_value()) {
     return ZipErrorToStatus(std::move(result_unit).err());
   }
