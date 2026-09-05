@@ -473,7 +473,13 @@ class Field {
   /**
    * The value of this field.
    */
-  const Value& value() const ABSL_ATTRIBUTE_LIFETIME_BOUND { return value_; };
+  const Value& value() const& ABSL_ATTRIBUTE_LIFETIME_BOUND { return value_; }
+  const Value& value() const&& = delete;
+
+  /**
+   * Moves and returns the value of this field.
+   */
+  Value take_value() && { return std::move(value_); }
 
  private:
   friend class Exif;
@@ -504,17 +510,35 @@ class Exif final {
   /**
    * Returns the slice that contains the TIFF data.
    */
-  absl::Span<const uint8_t> buf() const ABSL_ATTRIBUTE_LIFETIME_BOUND;
+  absl::Span<const uint8_t> buf() const& ABSL_ATTRIBUTE_LIFETIME_BOUND;
+  absl::Span<const uint8_t> buf() const&& = delete;
 
   /**
    * Returns a span of Exif fields.
    */
-  absl::Span<const Field> fields() const ABSL_ATTRIBUTE_LIFETIME_BOUND;
+  absl::Span<const Field> fields() const& ABSL_ATTRIBUTE_LIFETIME_BOUND;
+  absl::Span<const Field> fields() const&& = delete;
 
   /**
    * Returns a span of MakerNote fields.
    */
-  absl::Span<const Field> mnote_fields() const ABSL_ATTRIBUTE_LIFETIME_BOUND;
+  absl::Span<const Field> mnote_fields() const& ABSL_ATTRIBUTE_LIFETIME_BOUND;
+  absl::Span<const Field> mnote_fields() const&& = delete;
+
+  /**
+   * Moves and returns the TIFF data buffer.
+   */
+  std::vector<uint8_t> take_buf() && { return std::move(buf_); }
+
+  /**
+   * Moves and returns the Exif fields.
+   */
+  std::vector<Field> take_fields() && { return std::move(fields_); }
+
+  /**
+   * Moves and returns the MakerNote fields.
+   */
+  std::vector<Field> take_mnote_fields() && { return std::move(mnote_fields_); }
 
   /**
    * Returns true if the Exif data (TIFF structure) is in the
@@ -604,8 +628,16 @@ class ExifBytes final {
   /**
    * Returns a view to the Exif data.
    */
-  absl::Span<const uint8_t> view() const ABSL_ATTRIBUTE_LIFETIME_BOUND {
+  absl::Span<const uint8_t> view() const& ABSL_ATTRIBUTE_LIFETIME_BOUND {
     return absl::Span<const uint8_t>(vec_.as_ptr(), vec_.len());
+  }
+  absl::Span<const uint8_t> view() const&& = delete;
+
+  /**
+   * Returns a copy of the Exif data as an owned std::vector.
+   */
+  std::vector<uint8_t> to_vector() const {
+    return std::vector<uint8_t>(vec_.as_ptr(), vec_.as_ptr() + vec_.len());
   }
 
  private:
