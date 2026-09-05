@@ -19,7 +19,7 @@ using ::security::crubit_helpers::StringViewFromVecU8;
 VecU8Wrapper::VecU8Wrapper(rust::vec_u8::VecU8 vec_u8)
     : vec_u8_(std::move(vec_u8)) {}
 
-absl::string_view VecU8Wrapper::as_string_view() const {
+absl::string_view VecU8Wrapper::as_string_view() const& {
   return StringViewFromVecU8(vec_u8_);
 }
 
