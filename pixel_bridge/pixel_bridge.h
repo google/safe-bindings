@@ -81,10 +81,15 @@ class Frame final {
   uint64_t GetDelayMs() const;
 
   // Get the image data of the frame.
-  std::string GetImage();
+  std::string GetImage() const;
 
-  // Get a reference to the image of the frame.
-  absl::string_view GetImageRef() ABSL_ATTRIBUTE_LIFETIME_BOUND;
+  // Get a reference to the image of the frame. The Frame object must outlive
+  // the returned view.
+  absl::string_view GetImageRef() const& ABSL_ATTRIBUTE_LIFETIME_BOUND;
+  absl::string_view GetImageRef() const&& = delete;
+
+  // Move and take the image data from an rvalue Frame.
+  std::string TakeImage() &&;
 
  private:
   friend class Frames;
