@@ -455,8 +455,8 @@ class Field {
  public:
   Field() = delete;
   Field(Tag tag, In ifd_num, Value value);
-  Field(Field&&) = default;
-  Field& operator=(Field&&) = default;
+  Field(Field&&) noexcept = default;
+  Field& operator=(Field&&) noexcept = default;
   Field(const Field&) = delete;
   Field& operator=(const Field&) = delete;
 
@@ -595,8 +595,8 @@ class Writer;
 class ExifBytes final {
  public:
   ExifBytes() = delete;
-  ExifBytes(ExifBytes&&) = default;
-  ExifBytes& operator=(ExifBytes&&) = default;
+  ExifBytes(ExifBytes&&) noexcept = default;
+  ExifBytes& operator=(ExifBytes&&) noexcept = default;
   ExifBytes(const ExifBytes&) = delete;
   ExifBytes& operator=(const ExifBytes&) = delete;
   ~ExifBytes() = default;
