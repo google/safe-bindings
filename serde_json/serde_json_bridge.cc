@@ -60,8 +60,8 @@ absl::StatusOr<SerdeJson> SerdeJson::CreateInt(int64_t value) {
 }
 
 absl::StatusOr<SerdeJson> SerdeJson::CreateDouble(double value) {
-  rs_std::Result<rust::json::SerdeJson,
-                 rust::raw_string::RawString>
+  rs::Result<rust::json::SerdeJson,
+             rust::raw_string::RawString>
       rs_result = rust::json::SerdeJson::create_double(value);
 
   if (!rs_result.has_value()) {
@@ -80,8 +80,8 @@ absl::StatusOr<SerdeJson> SerdeJson::CreateNull() {
 }
 
 absl::StatusOr<SerdeJson> SerdeJson::CreateString(absl::string_view value) {
-  rs_std::Result<rust::json::SerdeJson,
-                 rust::raw_string::RawString>
+  rs::Result<rust::json::SerdeJson,
+             rust::raw_string::RawString>
       rs_result = rust::json::SerdeJson::create_string(
           absl::Span<const uint8_t>(
               reinterpret_cast<const uint8_t*>(value.data()), value.size()));
@@ -94,8 +94,8 @@ absl::StatusOr<SerdeJson> SerdeJson::CreateString(absl::string_view value) {
 }
 
 absl::StatusOr<SerdeJson> SerdeJson::Parse(absl::string_view data) {
-  rs_std::Result<rust::json::SerdeJson,
-                 rust::raw_string::RawString>
+  rs::Result<rust::json::SerdeJson,
+             rust::raw_string::RawString>
       rs_result = rust::json::SerdeJson::parse_string(
           absl::Span<const uint8_t>(
               reinterpret_cast<const uint8_t*>(data.data()), data.size()));
@@ -108,8 +108,8 @@ absl::StatusOr<SerdeJson> SerdeJson::Parse(absl::string_view data) {
 }
 
 absl::StatusOr<SerdeJson> SerdeJson::GetField(absl::string_view key) const {
-  rs_std::Result<rust::json::SerdeJson,
-                 rust::raw_string::RawString>
+  rs::Result<rust::json::SerdeJson,
+             rust::raw_string::RawString>
       rs_result = json_obj_.get_field(absl::Span<const uint8_t>(
           reinterpret_cast<const uint8_t*>(key.data()), key.size()));
 
@@ -123,8 +123,8 @@ absl::StatusOr<SerdeJson> SerdeJson::GetField(absl::string_view key) const {
 
 absl::StatusOr<SerdeJson> SerdeJson::GetFieldObject(
     absl::string_view key) const {
-  rs_std::Result<rust::json::SerdeJson,
-                 rust::raw_string::RawString>
+  rs::Result<rust::json::SerdeJson,
+             rust::raw_string::RawString>
       rs_result = json_obj_.get_field_object(absl::Span<const uint8_t>(
           reinterpret_cast<const uint8_t*>(key.data()), key.size()));
 
@@ -137,7 +137,7 @@ absl::StatusOr<SerdeJson> SerdeJson::GetFieldObject(
 }
 
 absl::StatusOr<bool> SerdeJson::GetBool() const {
-  rs_std::Result<bool, rust::raw_string::RawString> rs_result =
+  rs::Result<bool, rust::raw_string::RawString> rs_result =
       json_obj_.get_bool();
 
   if (!rs_result.has_value()) {
@@ -149,8 +149,8 @@ absl::StatusOr<bool> SerdeJson::GetBool() const {
 }
 
 absl::StatusOr<std::string> SerdeJson::GetString() const {
-  rs_std::Result<rust::raw_string::RawString,
-                 rust::raw_string::RawString>
+  rs::Result<rust::raw_string::RawString,
+             rust::raw_string::RawString>
       rs_result = json_obj_.get_string();
 
   if (!rs_result.has_value()) {
@@ -162,8 +162,8 @@ absl::StatusOr<std::string> SerdeJson::GetString() const {
 }
 
 absl::StatusOr<int64_t> SerdeJson::GetInt() const {
-  rs_std::Result<int64_t, rust::raw_string::RawString>
-      rs_result = json_obj_.get_int();
+  rs::Result<int64_t, rust::raw_string::RawString> rs_result =
+      json_obj_.get_int();
 
   if (!rs_result.has_value()) {
     return absl::FailedPreconditionError(
@@ -174,8 +174,8 @@ absl::StatusOr<int64_t> SerdeJson::GetInt() const {
 }
 
 absl::StatusOr<double> SerdeJson::GetDouble() const {
-  rs_std::Result<double, rust::raw_string::RawString>
-      rs_result = json_obj_.get_double();
+  rs::Result<double, rust::raw_string::RawString> rs_result =
+      json_obj_.get_double();
 
   if (!rs_result.has_value()) {
     return absl::FailedPreconditionError(
@@ -186,8 +186,8 @@ absl::StatusOr<double> SerdeJson::GetDouble() const {
 }
 
 absl::StatusOr<std::vector<SerdeJson>> SerdeJson::GetArray() const {
-  rs_std::Result<rust::json::VecSerdeJson,
-                 rust::raw_string::RawString>
+  rs::Result<rust::json::VecSerdeJson,
+             rust::raw_string::RawString>
       rs_result = json_obj_.get_array();
 
   if (!rs_result.has_value()) {
@@ -199,8 +199,8 @@ absl::StatusOr<std::vector<SerdeJson>> SerdeJson::GetArray() const {
 }
 
 absl::StatusOr<SerdeJson> SerdeJson::GetArrayElement(size_t index) const {
-  rs_std::Result<rust::json::SerdeJson,
-                 rust::json::GetArrayElementError>
+  rs::Result<rust::json::SerdeJson,
+             rust::json::GetArrayElementError>
       rs_result = json_obj_.get_array_element(index);
 
   if (!rs_result.has_value()) {
@@ -218,8 +218,8 @@ absl::StatusOr<SerdeJson> SerdeJson::GetArrayElement(size_t index) const {
 
 absl::StatusOr<std::string> SerdeJson::GetFieldString(
     absl::string_view key) const {
-  rs_std::Result<rust::raw_string::RawString,
-                 rust::raw_string::RawString>
+  rs::Result<rust::raw_string::RawString,
+             rust::raw_string::RawString>
       rs_result = json_obj_.get_field_string(absl::Span<const uint8_t>(
           reinterpret_cast<const uint8_t*>(key.data()), key.size()));
 
@@ -232,7 +232,7 @@ absl::StatusOr<std::string> SerdeJson::GetFieldString(
 }
 
 absl::StatusOr<bool> SerdeJson::GetFieldBool(absl::string_view key) const {
-  rs_std::Result<bool, rust::raw_string::RawString> rs_result =
+  rs::Result<bool, rust::raw_string::RawString> rs_result =
       json_obj_.get_field_bool(absl::Span<const uint8_t>(
           reinterpret_cast<const uint8_t*>(key.data()), key.size()));
 
@@ -245,8 +245,8 @@ absl::StatusOr<bool> SerdeJson::GetFieldBool(absl::string_view key) const {
 }
 
 absl::StatusOr<int64_t> SerdeJson::GetFieldInt(absl::string_view key) const {
-  rs_std::Result<int64_t, rust::raw_string::RawString>
-      rs_result = json_obj_.get_field_int(absl::Span<const uint8_t>(
+  rs::Result<int64_t, rust::raw_string::RawString> rs_result =
+      json_obj_.get_field_int(absl::Span<const uint8_t>(
           reinterpret_cast<const uint8_t*>(key.data()), key.size()));
 
   if (!rs_result.has_value()) {
@@ -258,8 +258,8 @@ absl::StatusOr<int64_t> SerdeJson::GetFieldInt(absl::string_view key) const {
 }
 
 absl::StatusOr<double> SerdeJson::GetFieldDouble(absl::string_view key) const {
-  rs_std::Result<double, rust::raw_string::RawString>
-      rs_result = json_obj_.get_field_double(absl::Span<const uint8_t>(
+  rs::Result<double, rust::raw_string::RawString> rs_result =
+      json_obj_.get_field_double(absl::Span<const uint8_t>(
           reinterpret_cast<const uint8_t*>(key.data()), key.size()));
 
   if (!rs_result.has_value()) {
@@ -272,8 +272,8 @@ absl::StatusOr<double> SerdeJson::GetFieldDouble(absl::string_view key) const {
 
 absl::StatusOr<std::vector<SerdeJson>> SerdeJson::GetFieldArray(
     absl::string_view key) const {
-  rs_std::Result<rust::json::VecSerdeJson,
-                 rust::raw_string::RawString>
+  rs::Result<rust::json::VecSerdeJson,
+             rust::raw_string::RawString>
       rs_result = json_obj_.get_field_array(absl::Span<const uint8_t>(
           reinterpret_cast<const uint8_t*>(key.data()), key.size()));
 
@@ -287,8 +287,8 @@ absl::StatusOr<std::vector<SerdeJson>> SerdeJson::GetFieldArray(
 
 absl::StatusOr<SerdeJson> SerdeJson::GetFieldArrayElement(absl::string_view key,
                                                           size_t index) const {
-  rs_std::Result<rust::json::SerdeJson,
-                 rust::json::GetArrayElementError>
+  rs::Result<rust::json::SerdeJson,
+             rust::json::GetArrayElementError>
       rs_result = json_obj_.get_field_array_element(
           absl::Span<const uint8_t>(
               reinterpret_cast<const uint8_t*>(key.data()), key.size()),
@@ -334,8 +334,8 @@ std::string SerdeJson::ToStringSpaced(bool sort_keys) const {
 }
 
 absl::StatusOr<std::vector<std::string>> SerdeJson::GetKeys() const {
-  rs_std::Result<rust::json::VecRawString,
-                 rust::raw_string::RawString>
+  rs::Result<rust::json::VecRawString,
+             rust::raw_string::RawString>
       rs_result = json_obj_.get_keys();
 
   if (!rs_result.has_value()) {
@@ -354,7 +354,7 @@ absl::StatusOr<std::vector<std::string>> SerdeJson::GetKeys() const {
 }
 
 absl::StatusOr<bool> SerdeJson::HasField(absl::string_view key) const {
-  rs_std::Result<bool, rust::raw_string::RawString> rs_result =
+  rs::Result<bool, rust::raw_string::RawString> rs_result =
       json_obj_.has_field(absl::Span<const uint8_t>(
           reinterpret_cast<const uint8_t*>(key.data()), key.size()));
 
