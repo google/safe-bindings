@@ -11,6 +11,7 @@
 #include "absl/status/status.h"
 #include "absl/status/status_macros.h"
 #include "absl/status/statusor.h"
+
 namespace security::zip {
 
 namespace {
@@ -36,14 +37,40 @@ absl::StatusOr<CompressionMethod> ToSecurityZipCompressionMethod(
   return absl::InvalidArgumentError("Unknown compression method");
 }
 
-}  // namespace
-
-absl::Status BufferedZipFile::CheckNone() const {
-  if (IsNone()) {
+// The two backends below differ only in the Rust entry type they wrap
+// (rust::{Buffered,Fs}ZipFile), so the data-reading methods whose
+// bodies would otherwise be identical share these helpers.
+template <typename RustZipFile>
+absl::Status CheckFileOpen(const RustZipFile& zip) {
+  if (zip.is_none()) {
     return absl::InternalError("ZipFile object used after being moved-out");
   }
   return absl::OkStatus();
 }
+
+template <typename RustZipFile>
+absl::StatusOr<RustVecU8Wrapper> GetFileDataImpl(RustZipFile& zip) {
+  ABSL_RETURN_IF_ERROR(CheckFileOpen(zip));
+  return FromRustResultVecU8(zip.get_file_data());
+}
+
+template <typename RustZipFile>
+absl::StatusOr<RustVecU8Wrapper> GetFileDataImpl(RustZipFile& zip,
+                                                 size_t max_size) {
+  ABSL_RETURN_IF_ERROR(CheckFileOpen(zip));
+  return FromRustResultVecU8(zip.get_file_data_with_max_size(max_size));
+}
+
+template <typename RustZipFile>
+absl::StatusOr<RustVecU8Wrapper> ReadBytesImpl(RustZipFile& zip,
+                                               size_t max_bytes) {
+  ABSL_RETURN_IF_ERROR(CheckFileOpen(zip));
+  return FromRustResultVecU8(zip.read_bytes(max_bytes));
+}
+
+}  // namespace
+
+absl::Status BufferedZipFile::CheckNone() const { return CheckFileOpen(zip_); }
 
 bool BufferedZipFile::IsNone() const { return zip_.is_none(); }
 absl::StatusOr<bool> BufferedZipFile::IsFile() const {
@@ -99,22 +126,16 @@ absl::StatusOr<RustVecU8Wrapper> BufferedZipFile::GetExtraData() const {
   return RustVecU8Wrapper(zip_.get_extra_data());
 }
 absl::StatusOr<RustVecU8Wrapper> BufferedZipFile::GetFileData() {
-  ABSL_RETURN_IF_ERROR(CheckNone());
-  return FromRustResultVecU8(zip_.get_file_data());
+  return GetFileDataImpl(zip_);
 }
 absl::StatusOr<RustVecU8Wrapper> BufferedZipFile::GetFileData(size_t max_size) {
-  if (absl::Status status = CheckNone(); !status.ok()) {
-    return status;
-  }
-  return FromRustResultVecU8(zip_.get_file_data_with_max_size(max_size));
+  return GetFileDataImpl(zip_, max_size);
+}
+absl::StatusOr<RustVecU8Wrapper> BufferedZipFile::ReadBytes(size_t max_bytes) {
+  return ReadBytesImpl(zip_, max_bytes);
 }
 
-absl::Status FsZipFile::CheckNone() const {
-  if (IsNone()) {
-    return absl::InternalError("ZipFile object used after being moved-out");
-  }
-  return absl::OkStatus();
-}
+absl::Status FsZipFile::CheckNone() const { return CheckFileOpen(zip_); }
 
 bool FsZipFile::IsNone() const { return zip_.is_none(); }
 absl::StatusOr<bool> FsZipFile::IsFile() const {
@@ -169,14 +190,13 @@ absl::StatusOr<RustVecU8Wrapper> FsZipFile::GetExtraData() const {
   return RustVecU8Wrapper(zip_.get_extra_data());
 }
 absl::StatusOr<RustVecU8Wrapper> FsZipFile::GetFileData() {
-  ABSL_RETURN_IF_ERROR(CheckNone());
-  return FromRustResultVecU8(zip_.get_file_data());
+  return GetFileDataImpl(zip_);
 }
 absl::StatusOr<RustVecU8Wrapper> FsZipFile::GetFileData(size_t max_size) {
-  if (absl::Status status = CheckNone(); !status.ok()) {
-    return status;
-  }
-  return FromRustResultVecU8(zip_.get_file_data_with_max_size(max_size));
+  return GetFileDataImpl(zip_, max_size);
+}
+absl::StatusOr<RustVecU8Wrapper> FsZipFile::ReadBytes(size_t max_bytes) {
+  return ReadBytesImpl(zip_, max_bytes);
 }
 
 absl::StatusOr<bool> ZipFile::IsFile() const {
@@ -228,6 +248,10 @@ absl::StatusOr<RustVecU8Wrapper> ZipFile::GetFileData() {
 }
 absl::StatusOr<RustVecU8Wrapper> ZipFile::GetFileData(size_t max_size) {
   return std::visit([max_size](auto& zip) { return zip.GetFileData(max_size); },
+                    zip_);
+}
+absl::StatusOr<RustVecU8Wrapper> ZipFile::ReadBytes(size_t max_bytes) {
+  return std::visit([max_bytes](auto& zip) { return zip.ReadBytes(max_bytes); },
                     zip_);
 }
 
