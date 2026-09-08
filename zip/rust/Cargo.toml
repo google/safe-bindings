@@ -9,4 +9,7 @@ path = "lib.rs"
 doctest = false
 
 [dependencies]
-zip = { version = "6.0", features = ["deflate", "bzip2", "time", "zstd", "lzma", "xz"] }
+zip = { version = "8.6", features = ["deflate", "bzip2", "time", "zstd", "lzma", "xz"] }
+
+[features]
+deflate-zopfli = ["zip/deflate-zopfli"]
