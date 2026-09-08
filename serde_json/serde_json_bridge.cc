@@ -493,4 +493,254 @@ bool SerdeJson::operator!=(const SerdeJson& other) const {
   return !json_obj_.is_json_equal(other.json_obj_);
 }
 
+SerdeJsonRef SerdeJson::AsRef() const {
+  return SerdeJsonRef(json_obj_.as_ref());
+}
+
+absl::StatusOr<size_t> SerdeJson::Size() const { return AsRef().Size(); }
+
+absl::Status SerdeJson::Append(const SerdeJson& value) {
+  return ToStatus(json_obj_.append(value.json_obj_));
+}
+
+absl::Status SerdeJson::Append(SerdeJson&& value) {
+  return ToStatus(json_obj_.append(std::move(value.json_obj_)));
+}
+
+absl::Status SerdeJson::Remove(size_t index) {
+  return ToStatus(json_obj_.remove(index));
+}
+
+// Implementation of SerdeJsonRef
+SerdeJsonRef::SerdeJsonRef(rust::json::SerdeJsonRef rs_ref)
+    : rs_ref_(rs_ref) {}
+
+SerdeJson SerdeJsonRef::ToOwned() const {
+  return SerdeJson(rs_ref_.to_owned());
+}
+
+absl::StatusOr<int64_t> SerdeJsonRef::GetInt() const {
+  rs_std::Result<int64_t, rust::raw_string::RawString>
+      rs_result = rs_ref_.get_int();
+  if (!rs_result.has_value()) {
+    return absl::FailedPreconditionError(
+        FromRustRawString(std::move(rs_result).err()));
+  }
+  return std::move(rs_result).value();
+}
+
+absl::StatusOr<bool> SerdeJsonRef::GetBool() const {
+  rs_std::Result<bool, rust::raw_string::RawString> rs_result =
+      rs_ref_.get_bool();
+  if (!rs_result.has_value()) {
+    return absl::FailedPreconditionError(
+        FromRustRawString(std::move(rs_result).err()));
+  }
+  return std::move(rs_result).value();
+}
+
+absl::StatusOr<std::string> SerdeJsonRef::GetString() const {
+  rs_std::Result<rust::raw_string::RawString,
+                 rust::raw_string::RawString>
+      rs_result = rs_ref_.get_string();
+  if (!rs_result.has_value()) {
+    return absl::FailedPreconditionError(
+        FromRustRawString(std::move(rs_result).err()));
+  }
+  return FromRustRawString(std::move(rs_result).value());
+}
+
+absl::StatusOr<double> SerdeJsonRef::GetDouble() const {
+  rs_std::Result<double, rust::raw_string::RawString>
+      rs_result = rs_ref_.get_double();
+  if (!rs_result.has_value()) {
+    return absl::FailedPreconditionError(
+        FromRustRawString(std::move(rs_result).err()));
+  }
+  return std::move(rs_result).value();
+}
+
+absl::StatusOr<std::vector<SerdeJsonRef>> SerdeJsonRef::GetArray() const {
+  return absl::UnimplementedError("GetArray on SerdeJsonRef");
+}
+
+absl::StatusOr<SerdeJsonRef> SerdeJsonRef::GetArrayElement(size_t index) const {
+  rs_std::Result<rust::json::SerdeJsonRef,
+                 rust::json::GetArrayElementError>
+      rs_result = rs_ref_.get_array_element(index);
+  if (!rs_result.has_value()) {
+    rust::json::GetArrayElementError err =
+        std::move(rs_result).err();
+    std::string err_msg = FromRustRawString(err.msg);
+    if (err.is_out_of_bounds) {
+      return absl::OutOfRangeError(std::move(err_msg));
+    }
+    return absl::FailedPreconditionError(std::move(err_msg));
+  }
+  return SerdeJsonRef(std::move(rs_result).value());
+}
+
+absl::StatusOr<SerdeJsonRef> SerdeJsonRef::GetField(
+    absl::string_view key) const {
+  rs_std::Result<rust::json::SerdeJsonRef,
+                 rust::raw_string::RawString>
+      rs_result = rs_ref_.get_field(absl::Span<const uint8_t>(
+          reinterpret_cast<const uint8_t*>(key.data()), key.size()));
+  if (!rs_result.has_value()) {
+    return absl::FailedPreconditionError(
+        FromRustRawString(std::move(rs_result).err()));
+  }
+  return SerdeJsonRef(std::move(rs_result).value());
+}
+
+absl::StatusOr<std::string> SerdeJsonRef::GetFieldString(
+    absl::string_view key) const {
+  rs_std::Result<rust::raw_string::RawString,
+                 rust::raw_string::RawString>
+      rs_result = rs_ref_.get_field_string(absl::Span<const uint8_t>(
+          reinterpret_cast<const uint8_t*>(key.data()), key.size()));
+  if (!rs_result.has_value()) {
+    return absl::FailedPreconditionError(
+        FromRustRawString(std::move(rs_result).err()));
+  }
+  return FromRustRawString(std::move(rs_result).value());
+}
+
+absl::StatusOr<bool> SerdeJsonRef::GetFieldBool(absl::string_view key) const {
+  rs_std::Result<bool, rust::raw_string::RawString> rs_result =
+      rs_ref_.get_field_bool(absl::Span<const uint8_t>(
+          reinterpret_cast<const uint8_t*>(key.data()), key.size()));
+  if (!rs_result.has_value()) {
+    return absl::FailedPreconditionError(
+        FromRustRawString(std::move(rs_result).err()));
+  }
+  return std::move(rs_result).value();
+}
+
+absl::StatusOr<int64_t> SerdeJsonRef::GetFieldInt(absl::string_view key) const {
+  rs_std::Result<int64_t, rust::raw_string::RawString>
+      rs_result = rs_ref_.get_field_int(absl::Span<const uint8_t>(
+          reinterpret_cast<const uint8_t*>(key.data()), key.size()));
+  if (!rs_result.has_value()) {
+    return absl::FailedPreconditionError(
+        FromRustRawString(std::move(rs_result).err()));
+  }
+  return std::move(rs_result).value();
+}
+
+absl::StatusOr<double> SerdeJsonRef::GetFieldDouble(
+    absl::string_view key) const {
+  rs_std::Result<double, rust::raw_string::RawString>
+      rs_result = rs_ref_.get_field_double(absl::Span<const uint8_t>(
+          reinterpret_cast<const uint8_t*>(key.data()), key.size()));
+  if (!rs_result.has_value()) {
+    return absl::FailedPreconditionError(
+        FromRustRawString(std::move(rs_result).err()));
+  }
+  return std::move(rs_result).value();
+}
+
+absl::StatusOr<SerdeJsonRef> SerdeJsonRef::GetFieldObject(
+    absl::string_view key) const {
+  rs_std::Result<rust::json::SerdeJsonRef,
+                 rust::raw_string::RawString>
+      rs_result = rs_ref_.get_field_object(absl::Span<const uint8_t>(
+          reinterpret_cast<const uint8_t*>(key.data()), key.size()));
+  if (!rs_result.has_value()) {
+    return absl::FailedPreconditionError(
+        FromRustRawString(std::move(rs_result).err()));
+  }
+  return SerdeJsonRef(std::move(rs_result).value());
+}
+
+absl::StatusOr<std::vector<SerdeJsonRef>> SerdeJsonRef::GetFieldArray(
+    absl::string_view key) const {
+  return absl::UnimplementedError("GetFieldArray on SerdeJsonRef");
+}
+
+absl::StatusOr<SerdeJsonRef> SerdeJsonRef::GetFieldArrayElement(
+    absl::string_view key, size_t index) const {
+  rs_std::Result<rust::json::SerdeJsonRef,
+                 rust::json::GetArrayElementError>
+      rs_result = rs_ref_.get_field_array_element(
+          absl::Span<const uint8_t>(
+              reinterpret_cast<const uint8_t*>(key.data()), key.size()),
+          index);
+  if (!rs_result.has_value()) {
+    rust::json::GetArrayElementError err =
+        std::move(rs_result).err();
+    std::string err_msg = FromRustRawString(err.msg);
+    if (err.is_out_of_bounds) {
+      return absl::OutOfRangeError(std::move(err_msg));
+    }
+    return absl::FailedPreconditionError(std::move(err_msg));
+  }
+  return SerdeJsonRef(std::move(rs_result).value());
+}
+
+bool SerdeJsonRef::IsNull() const { return rs_ref_.is_null(); }
+bool SerdeJsonRef::IsEmpty() const {
+  absl::StatusOr<size_t> sz = Size();
+  return sz.ok() && *sz == 0;
+}
+bool SerdeJsonRef::IsObject() const { return rs_ref_.is_object(); }
+bool SerdeJsonRef::IsArray() const { return rs_ref_.is_array(); }
+bool SerdeJsonRef::IsString() const { return rs_ref_.is_string(); }
+bool SerdeJsonRef::IsNumber() const { return rs_ref_.is_number(); }
+bool SerdeJsonRef::IsDouble() const { return rs_ref_.is_f64(); }
+bool SerdeJsonRef::IsBool() const { return rs_ref_.is_boolean(); }
+bool SerdeJsonRef::IsInt() const { return rs_ref_.is_i64(); }
+
+absl::StatusOr<bool> SerdeJsonRef::HasField(absl::string_view key) const {
+  rs_std::Result<bool, rust::raw_string::RawString> rs_result =
+      rs_ref_.has_field(absl::Span<const uint8_t>(
+          reinterpret_cast<const uint8_t*>(key.data()), key.size()));
+  if (!rs_result.has_value()) {
+    return absl::FailedPreconditionError(
+        FromRustRawString(std::move(rs_result).err()));
+  }
+  return std::move(rs_result).value();
+}
+
+absl::StatusOr<std::vector<std::string>> SerdeJsonRef::GetKeys() const {
+  rs_std::Result<rust::json::VecRawString,
+                 rust::raw_string::RawString>
+      rs_result = rs_ref_.get_keys();
+  if (!rs_result.has_value()) {
+    return absl::FailedPreconditionError(
+        FromRustRawString(std::move(rs_result).err()));
+  }
+  rust::json::VecRawString vec = std::move(rs_result).value();
+  std::vector<std::string> keys;
+  keys.reserve(vec.len());
+  for (size_t i = 0; i < vec.len(); ++i) {
+    keys.push_back(FromRustRawString(vec.as_ptr()[i]));
+  }
+  return keys;
+}
+
+absl::StatusOr<size_t> SerdeJsonRef::Size() const {
+  rs_std::Result<int64_t, rust::raw_string::RawString>
+      rs_result = rs_ref_.size();
+  if (!rs_result.has_value()) {
+    return absl::FailedPreconditionError(
+        FromRustRawString(std::move(rs_result).err()));
+  }
+  return static_cast<size_t>(std::move(rs_result).value());
+}
+
+std::string SerdeJsonRef::ToString(bool sort_keys) const {
+  rust::raw_string::RawString raw_str =
+      rs_ref_.to_string(sort_keys);
+  return FromRustRawString(raw_str);
+}
+
+absl::StatusOr<::google::protobuf::Struct> SerdeJsonRef::ToProtoStruct() const {
+  return ToOwned().ToProtoStruct();
+}
+
+absl::StatusOr<::google::protobuf::Value> SerdeJsonRef::ToProtoValue() const {
+  return ToOwned().ToProtoValue();
+}
+
 }  // namespace security::json::serde_json_bridge
