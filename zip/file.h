@@ -32,7 +32,7 @@ class BufferedZipFile final {
       : zip_(std::move(zip)) {}
   absl::StatusOr<bool> IsFile() const;
   absl::StatusOr<bool> IsDir() const;
-  bool IsNone() const;
+  [[nodiscard]] bool IsNone() const;
   // WARNING: Path Traversal ("Zip Slip") Hazard: The returned file name is
   // extracted directly from the archive header without sanitization. If using
   // this path for filesystem operations, callers MUST sanitize and validate
@@ -41,12 +41,27 @@ class BufferedZipFile final {
   // separators).
   absl::StatusOr<std::string> GetFileName() const;
   absl::StatusOr<CompressionMethod> GetCompressionMethod() const;
+  absl::StatusOr<std::string> GetComment() const;
+  absl::StatusOr<uint64_t> GetUncompressedSize() const;
+  absl::StatusOr<uint64_t> GetCompressedSize() const;
+  absl::StatusOr<uint32_t> GetCrc32() const;
+  // Returns the last-modified date encoded as an MS-DOS FAT date bitfield
+  // (bits 15-9: year offset from 1980, bits 8-5: month [1-12], bits 4-0: day
+  // [1-31]).
+  absl::StatusOr<uint16_t> GetLastModifiedDate() const;
+  // Returns the last-modified time encoded as an MS-DOS FAT time bitfield
+  // (bits 15-11: hour [0-23], bits 10-5: minute [0-59], bits 4-0: second / 2
+  // [0-29]).
+  absl::StatusOr<uint16_t> GetLastModifiedTime() const;
+  absl::StatusOr<uint32_t> GetUnixMode() const;
+  absl::StatusOr<RustVecU8Wrapper> GetExtraData() const;
 
   // WARNING: Decompression Bomb Hazard: This overload decompresses the entire
   // entry into an unbounded heap buffer. For untrusted zip archives, prefer
   // `GetFileData(size_t max_size)` below to cap memory allocation and defend
   // against zip bomb memory exhaustion (OOM) attacks.
   absl::StatusOr<RustVecU8Wrapper> GetFileData();
+  absl::StatusOr<RustVecU8Wrapper> ReadBytes(size_t max_bytes);
 
   // Decompresses at most `max_size` bytes from the entry, returning
   // `absl::StatusCode::kOutOfRange` if the decompressed size exceeds
@@ -65,7 +80,7 @@ class FsZipFile final {
   explicit FsZipFile(rust::FsZipFile zip) : zip_(std::move(zip)) {}
   absl::StatusOr<bool> IsFile() const;
   absl::StatusOr<bool> IsDir() const;
-  bool IsNone() const;
+  [[nodiscard]] bool IsNone() const;
 
   // WARNING: Path Traversal ("Zip Slip") Hazard: The returned file name is
   // extracted directly from the archive header without sanitization. If using
@@ -75,12 +90,27 @@ class FsZipFile final {
   // separators).
   absl::StatusOr<std::string> GetFileName() const;
   absl::StatusOr<CompressionMethod> GetCompressionMethod() const;
+  absl::StatusOr<std::string> GetComment() const;
+  absl::StatusOr<uint64_t> GetUncompressedSize() const;
+  absl::StatusOr<uint64_t> GetCompressedSize() const;
+  absl::StatusOr<uint32_t> GetCrc32() const;
+  // Returns the last-modified date encoded as an MS-DOS FAT date bitfield
+  // (bits 15-9: year offset from 1980, bits 8-5: month [1-12], bits 4-0: day
+  // [1-31]).
+  absl::StatusOr<uint16_t> GetLastModifiedDate() const;
+  // Returns the last-modified time encoded as an MS-DOS FAT time bitfield
+  // (bits 15-11: hour [0-23], bits 10-5: minute [0-59], bits 4-0: second / 2
+  // [0-29]).
+  absl::StatusOr<uint16_t> GetLastModifiedTime() const;
+  absl::StatusOr<uint32_t> GetUnixMode() const;
+  absl::StatusOr<RustVecU8Wrapper> GetExtraData() const;
 
   // WARNING: Decompression Bomb Hazard: This overload decompresses the entire
   // entry into an unbounded heap buffer. For untrusted zip archives, prefer
   // `GetFileData(size_t max_size)` below to cap memory allocation and defend
   // against zip bomb memory exhaustion (OOM) attacks.
   absl::StatusOr<RustVecU8Wrapper> GetFileData();
+  absl::StatusOr<RustVecU8Wrapper> ReadBytes(size_t max_bytes);
 
   // Decompresses at most `max_size` bytes from the entry, returning
   // `absl::StatusCode::kOutOfRange` if the decompressed size exceeds
@@ -106,7 +136,7 @@ class ZipFile final {
 
   absl::StatusOr<bool> IsFile() const;
   absl::StatusOr<bool> IsDir() const;
-  bool IsNone() const;
+  [[nodiscard]] bool IsNone() const;
 
   // WARNING: Path Traversal ("Zip Slip") Hazard: The returned file name is
   // extracted directly from the archive header without sanitization. If using
@@ -116,12 +146,27 @@ class ZipFile final {
   // separators).
   absl::StatusOr<std::string> GetFileName() const;
   absl::StatusOr<CompressionMethod> GetCompressionMethod() const;
+  absl::StatusOr<std::string> GetComment() const;
+  absl::StatusOr<uint64_t> GetUncompressedSize() const;
+  absl::StatusOr<uint64_t> GetCompressedSize() const;
+  absl::StatusOr<uint32_t> GetCrc32() const;
+  // Returns the last-modified date encoded as an MS-DOS FAT date bitfield
+  // (bits 15-9: year offset from 1980, bits 8-5: month [1-12], bits 4-0: day
+  // [1-31]).
+  absl::StatusOr<uint16_t> GetLastModifiedDate() const;
+  // Returns the last-modified time encoded as an MS-DOS FAT time bitfield
+  // (bits 15-11: hour [0-23], bits 10-5: minute [0-59], bits 4-0: second / 2
+  // [0-29]).
+  absl::StatusOr<uint16_t> GetLastModifiedTime() const;
+  absl::StatusOr<uint32_t> GetUnixMode() const;
+  absl::StatusOr<RustVecU8Wrapper> GetExtraData() const;
 
   // WARNING: Decompression Bomb Hazard: This overload decompresses the entire
   // entry into an unbounded heap buffer. For untrusted zip archives, prefer
   // `GetFileData(size_t max_size)` below to cap memory allocation and defend
   // against zip bomb memory exhaustion (OOM) attacks.
   absl::StatusOr<RustVecU8Wrapper> GetFileData();
+  absl::StatusOr<RustVecU8Wrapper> ReadBytes(size_t max_bytes);
 
   // Decompresses at most `max_size` bytes from the entry, returning
   // `absl::StatusCode::kOutOfRange` if the decompressed size exceeds
