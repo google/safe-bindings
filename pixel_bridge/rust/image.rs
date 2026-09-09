@@ -163,6 +163,7 @@ pub enum PixelType {
     F32,
 }
 
+#[doc(hidden)]
 impl From<RustColorType> for PixelType {
     fn from(value: RustColorType) -> Self {
         match value {
@@ -204,6 +205,7 @@ pub struct Strides {
     pub channels: usize,
 }
 
+#[doc(hidden)]
 impl From<RustColorType> for ColorType {
     fn from(value: RustColorType) -> Self {
         match value {
