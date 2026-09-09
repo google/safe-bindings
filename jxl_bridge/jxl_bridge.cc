@@ -130,7 +130,9 @@ absl::StatusOr<std::vector<uint8_t>> DecodeJxl(absl::Span<const uint8_t> data,
         "Image buffer size overflows: dimensions * channels * bps");
   }
   buffer_size *= pixel_bytes;
-  if (buffer_size > sample_limit) {
+
+  // sample_limit 0 is treated as no limit.
+  if (sample_limit > 0 && buffer_size > sample_limit) {
     return absl::OutOfRangeError("Image buffer size exceeds sample limit");
   }
   std::vector<uint8_t> output(buffer_size);

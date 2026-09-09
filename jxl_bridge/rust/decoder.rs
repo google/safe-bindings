@@ -17,7 +17,7 @@ use jxl::error::Error as JxlError;
 
 use status::{NewStatus as Status, NewStatusOr as StatusOr, StatusError};
 
-/// Maps a [`JxlError`] to an appropriate `StatusError`.
+/// Maps a `JxlError` to an appropriate `StatusError`.
 fn to_status(e: JxlError) -> StatusError {
     let msg = e.to_string();
     match e {
@@ -84,10 +84,6 @@ fn precondition_status(msg: &str) -> Status {
 }
 
 /// Tracks which decoding state the bridge is currently in.
-///
-/// Unlike the jxl crate's typestate API (which encodes the state in the Rust
-/// type system), this is a plain runtime enum — C++ callers cannot express
-/// typestates, so we enforce the correct call order with runtime checks.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum DecoderState {
     /// Initial state, waiting for header data.
@@ -100,26 +96,18 @@ enum DecoderState {
     Done,
 }
 
-/// Opaque decoder handle. Holds a boxed [`JxlBridgeInner`] across its various
-/// decoding states.
+/// Stateful JXL decoder handle.
 ///
 /// # Usage from C++:
-/// 1. `JxlBridgeDecoder::new_()` → decoder
-/// 2. `decoder.decode_header(data)` until `HeaderReady` → returns bytes consumed
-/// 3. `decoder.basic_info()` → image info
+/// 1. `JxlBridgeDecoder::new_()` -> decoder
+/// 2. `decoder.decode_header(data)` until `HeaderReady` -> returns bytes consumed
+/// 3. `decoder.basic_info()` -> image info
 /// 4. `decoder.set_output_format(color_type, data_type)`
-/// 5. Optionally `decoder.decode_frame_header(data)` → returns bytes consumed
-/// 6. `decoder.decode_frame(data, output)` → returns bytes consumed
+/// 5. Optionally `decoder.decode_frame_header(data)` -> returns bytes consumed
+/// 6. `decoder.decode_frame(data, output)` -> returns bytes consumed
 /// 7. For animation: repeat steps 5-6 for each frame
 pub struct JxlBridgeDecoder {
-    inner: Box<JxlBridgeInner>,
-}
-
-/// Private inner state holding the [`JxlDecoderInner`] and all cached metadata.
-/// Boxed inside [`JxlBridgeDecoder`] to keep jxl crate types opaque to Crubit
-/// (prevents jxl.h from being included in the generated C++ header).
-struct JxlBridgeInner {
-    decoder: JxlDecoderInner,
+    decoder: Box<JxlDecoderInner>,
     state: DecoderState,
     /// Cached basic info after header decode.
     basic_info: Option<JxlBridgeBasicInfo>,
@@ -163,157 +151,26 @@ impl JxlBridgeDecoder {
         let coalescing = options.coalescing;
         let jxl_options = options.to_jxl_options();
         Self {
-            inner: Box::new(JxlBridgeInner {
-                decoder: JxlDecoderInner::new(jxl_options),
-                state: DecoderState::Initializing,
-                basic_info: None,
-                pixel_format: None,
-                output_color_type: JxlBridgeColorType::default(),
-                output_data_type: JxlBridgeDataType::default(),
-                jxl_info: None,
-                frame_header: None,
-                coalescing,
-            }),
+            decoder: Box::new(JxlDecoderInner::new(jxl_options)),
+            state: DecoderState::Initializing,
+            basic_info: None,
+            pixel_format: None,
+            output_color_type: JxlBridgeColorType::default(),
+            output_data_type: JxlBridgeDataType::default(),
+            jxl_info: None,
+            frame_header: None,
+            coalescing,
         }
     }
 
     /// Decodes the image header from the provided input data.
     ///
-    /// Returns the feed state result and the number of bytes consumed. The caller should advance its
-    /// input span by `bytes_consumed`.
+    /// Returns the feed state result and the number of bytes consumed. The caller should advance
+    /// its input span by `bytes_consumed`.
     ///
-    /// - `HeaderReady`: header parsed, call `basic_info()` and
-    ///   `set_output_format()`.
+    /// - `HeaderReady`: header parsed, call `basic_info()` and `set_output_format()`.
     /// - `NeedsMoreInput`: provide more data and call again.
     pub fn decode_header(&mut self, data: &[u8]) -> StatusOr<JxlBridgeProcessResult> {
-        self.inner.decode_header_impl(data)
-    }
-
-    /// Decodes the next frame header from the provided input data.
-    ///
-    /// Returns the feed state result and the number of bytes consumed. The caller should advance its
-    /// input span by `bytes_consumed`.
-    ///
-    /// Requires `set_output_format()` to have been called.
-    /// After success, call `frame_header()` to retrieve the header.
-    ///
-    /// - `NeedsMoreInput`: provide more data and call again.
-    /// - `FrameHeaderReady`: frame header parsed, call `frame_header()`.
-    pub fn decode_frame_header(&mut self, data: &[u8]) -> StatusOr<JxlBridgeProcessResult> {
-        self.inner.decode_frame_header_impl(data)
-    }
-
-    /// Decodes the next frame from the provided input data into the output
-    /// buffer.
-    ///
-    /// Returns the feed state result and the number of bytes consumed. The caller should advance its
-    /// input span by `bytes_consumed`.
-    ///
-    /// - `NeedsMoreInput`: provide more data and call again.
-    /// - `FrameReady`: frame decoded, more frames remain.
-    /// - `Done`: last frame decoded.
-    pub fn decode_frame(
-        &mut self,
-        data: &[u8],
-        output: &mut [u8],
-    ) -> StatusOr<JxlBridgeProcessResult> {
-        self.inner.decode_frame_impl(data, output)
-    }
-
-    /// Returns basic image information such as dimensions and animation metadata.
-    ///
-    /// Must be called after [`decode_header`](Self::decode_header) has successfully
-    /// parsed the image header (`HeaderReady`).
-    pub fn basic_info(&self) -> StatusOr<JxlBridgeBasicInfo> {
-        match &self.inner.basic_info {
-            Some(info) => status::ok(info.clone()),
-            None => precondition_err("Header has not been decoded yet; call decode_header first"),
-        }
-    }
-
-    /// Sets the desired output pixel format (color type and data type) for decoded frames.
-    ///
-    /// Must be called after the header is parsed (`HeaderReady`) and before decoding frames.
-    pub fn set_output_format(
-        &mut self,
-        color_type: JxlBridgeColorType,
-        data_type: JxlBridgeDataType,
-    ) -> Status {
-        self.inner.set_output_format(color_type, data_type)
-    }
-
-    /// Returns true if `set_output_format` has been called successfully.
-    #[must_use]
-    pub fn has_output_format(&self) -> bool {
-        self.inner.pixel_format.is_some()
-    }
-
-    /// Returns the output color type, or the default if not yet set.
-    #[must_use]
-    pub fn output_color_type(&self) -> JxlBridgeColorType {
-        self.inner.output_color_type
-    }
-
-    /// Returns the output data type, or the default if not yet set.
-    #[must_use]
-    pub fn output_data_type(&self) -> JxlBridgeDataType {
-        self.inner.output_data_type
-    }
-
-    /// Returns `true` if there are more frames left to decode in the image.
-    #[must_use]
-    pub fn has_more_frames(&self) -> bool {
-        self.inner.state != DecoderState::Done && self.inner.decoder.has_more_frames()
-    }
-
-    /// Returns the frame header for the next frame to be decoded.
-    ///
-    /// Must be called after `decode_frame_header()` has successfully parsed a
-    /// frame header (i.e. the decoder is in
-    /// [`DecoderState::FrameHeaderDecoded`] state).
-    /// The returned header is cached; calling this multiple times returns
-    /// the same result.
-    pub fn frame_header(&self) -> StatusOr<JxlBridgeFrameHeader> {
-        match &self.inner.frame_header {
-            Some(fh) => status::ok(fh.clone()),
-            None => precondition_err(
-                "frame_header can only be called after decode_frame_header \
-                 has successfully parsed a frame header",
-            ),
-        }
-    }
-}
-
-impl JxlBridgeInner {
-    fn set_output_format(
-        &mut self,
-        color_type: JxlBridgeColorType,
-        data_type: JxlBridgeDataType,
-    ) -> Status {
-        let Some(jxl_info) = self.jxl_info.as_ref() else {
-            return precondition_status(
-                "Header has not been decoded yet; call decode_header until HeaderReady",
-            );
-        };
-
-        if self.state != DecoderState::HeaderDecoded {
-            return precondition_status("set_output_format can only be called after HeaderReady");
-        }
-
-        let num_extra = jxl_info.extra_channels.len();
-        let pixel_format = types::build_pixel_format(&color_type, &data_type, num_extra);
-
-        self.decoder.set_pixel_format(pixel_format);
-        // Re-read from the decoder to capture any adjustments.
-        self.pixel_format = self.decoder.current_pixel_format().cloned();
-        self.output_color_type = color_type;
-        self.output_data_type = data_type;
-        status::ok(())
-    }
-
-    /// Decodes the image header. Drives the `Initializing` → `HeaderDecoded`
-    /// transition.
-    fn decode_header_impl(&mut self, data: &[u8]) -> StatusOr<JxlBridgeProcessResult> {
         if self.state == DecoderState::HeaderDecoded {
             // Header already decoded.
             return status::ok(JxlBridgeProcessResult {
@@ -355,9 +212,17 @@ impl JxlBridgeInner {
         }
     }
 
-    /// Decodes the next frame header. Drives the `HeaderDecoded` →
-    /// `FrameHeaderDecoded` transition.
-    fn decode_frame_header_impl(&mut self, data: &[u8]) -> StatusOr<JxlBridgeProcessResult> {
+    /// Decodes the next frame header from the provided input data.
+    ///
+    /// Returns the feed state result and the number of bytes consumed. The caller should advance
+    /// its input span by `bytes_consumed`.
+    ///
+    /// Requires `set_output_format()` to have been called.
+    /// After success, call `frame_header()` to retrieve the header.
+    ///
+    /// - `NeedsMoreInput`: provide more data and call again.
+    /// - `FrameHeaderReady`: frame header parsed, call `frame_header()`.
+    pub fn decode_frame_header(&mut self, data: &[u8]) -> StatusOr<JxlBridgeProcessResult> {
         if self.pixel_format.is_none() {
             return precondition_err("set_output_format must be called before decode_frame_header");
         }
@@ -401,8 +266,16 @@ impl JxlBridgeInner {
         }
     }
 
-    /// Decodes the next frame into the output buffer.
-    fn decode_frame_impl(
+    /// Decodes the next frame from the provided input data into the output
+    /// buffer.
+    ///
+    /// Returns the feed state result and the number of bytes consumed. The caller should advance its
+    /// input span by `bytes_consumed`.
+    ///
+    /// - `NeedsMoreInput`: provide more data and call again.
+    /// - `FrameReady`: frame decoded, more frames remain.
+    /// - `Done`: last frame decoded.
+    pub fn decode_frame(
         &mut self,
         data: &[u8],
         output: &mut [u8],
@@ -426,7 +299,7 @@ impl JxlBridgeInner {
         let image_size = jxl_info.size;
 
         // Drive through frame header if needed, then decode the frame.
-        let header_result = self.decode_frame_header_impl(data)?;
+        let header_result = self.decode_frame_header(data)?;
         let header_consumed = header_result.consumed;
         if header_result.status == JxlBridgeFeedResult::NeedsMoreInput {
             return status::ok(header_result);
@@ -500,6 +373,87 @@ impl JxlBridgeInner {
                 status: JxlBridgeFeedResult::NeedsMoreInput,
                 consumed: total_consumed,
             }),
+        }
+    }
+
+    /// Returns basic image information such as dimensions and animation metadata.
+    ///
+    /// Must be called after `decode_header` has successfully parsed the image header
+    /// (`HeaderReady`).
+    pub fn basic_info(&self) -> StatusOr<JxlBridgeBasicInfo> {
+        match &self.basic_info {
+            Some(info) => status::ok(info.clone()),
+            None => precondition_err("Header has not been decoded yet; call decode_header first"),
+        }
+    }
+
+    /// Sets the desired output pixel format (color type and data type) for decoded frames.
+    ///
+    /// Must be called after the header is parsed (`HeaderReady`) and before decoding frames.
+    pub fn set_output_format(
+        &mut self,
+        color_type: JxlBridgeColorType,
+        data_type: JxlBridgeDataType,
+    ) -> Status {
+        let Some(jxl_info) = self.jxl_info.as_ref() else {
+            return precondition_status(
+                "Header has not been decoded yet; call decode_header until HeaderReady",
+            );
+        };
+
+        if self.state != DecoderState::HeaderDecoded {
+            return precondition_status("set_output_format can only be called after HeaderReady");
+        }
+
+        let num_extra = jxl_info.extra_channels.len();
+        let pixel_format = types::build_pixel_format(&color_type, &data_type, num_extra);
+
+        self.decoder.set_pixel_format(pixel_format);
+        // Re-read from the decoder to capture any adjustments.
+        self.pixel_format = self.decoder.current_pixel_format().cloned();
+        self.output_color_type = color_type;
+        self.output_data_type = data_type;
+        status::ok(())
+    }
+
+    /// Returns true if `set_output_format` has been called successfully.
+    #[must_use]
+    pub fn has_output_format(&self) -> bool {
+        self.pixel_format.is_some()
+    }
+
+    /// Returns the output color type, or the default if not yet set.
+    #[must_use]
+    pub fn output_color_type(&self) -> JxlBridgeColorType {
+        self.output_color_type
+    }
+
+    /// Returns the output data type, or the default if not yet set.
+    #[must_use]
+    pub fn output_data_type(&self) -> JxlBridgeDataType {
+        self.output_data_type
+    }
+
+    /// Returns `true` if there are more frames left to decode in the image.
+    #[must_use]
+    pub fn has_more_frames(&self) -> bool {
+        self.state != DecoderState::Done && self.decoder.has_more_frames()
+    }
+
+    /// Returns the frame header for the next frame to be decoded.
+    ///
+    /// Must be called after `decode_frame_header()` has successfully parsed a
+    /// frame header (i.e. the decoder is in
+    /// [`DecoderState::FrameHeaderDecoded`] state).
+    /// The returned header is cached; calling this multiple times returns
+    /// the same result.
+    pub fn frame_header(&self) -> StatusOr<JxlBridgeFrameHeader> {
+        match &self.frame_header {
+            Some(fh) => status::ok(fh.clone()),
+            None => precondition_err(
+                "frame_header can only be called after decode_frame_header \
+                 has successfully parsed a frame header",
+            ),
         }
     }
 }
