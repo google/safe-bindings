@@ -1,0 +1,36 @@
+# Copyright 2026 Google LLC
+#
+# Licensed under the Apache License, Version 2.0 <LICENSE or
+# https://www.apache.org/licenses/LICENSE-2.0>.
+# This file may not be copied, modified, or distributed
+# except according to those terms.
+
+[package]
+name = "regex-cpp-bindings"
+description = "C++ bindings for the regex crate using crubit"
+version = "0.1.0-prerelease"
+license-file = "LICENSE"
+edition = "2024"
+repository = "https://github.com/google/safe-bindings"
+
+include = [
+    "Cargo.toml",
+    "README.md",
+    "LICENSE",
+    "rust/*.rs",
+    "*.h",
+    "*.cc",
+    "CMakeLists.txt",
+]
+
+[lib]
+path = "rust/lib.rs"
+doctest = false
+
+[dependencies]
+num-traits = "0.2"
+regex-automata = "0.4"
+regex-syntax = "0.8"
+
+[dev-dependencies]
+googletest = "0.14"

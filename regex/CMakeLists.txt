@@ -22,8 +22,38 @@ FetchContent_Declare(
 
 FetchContent_MakeAvailable(Corrosion)
 
-corrosion_experimental_crubit(rust)
-corrosion_import_crate(MANIFEST_PATH rust/Cargo.toml)
+corrosion_experimental_crubit(regex_cpp_bindings)
+corrosion_import_crate(MANIFEST_PATH Cargo.toml)
+
+
+# NOTE(b/555854776) - remove this workaround.
+# Crubit generates crubit/regex_cpp_bindings.h in namespace regex_cpp_bindings.
+# Provide crubit/rust.h alias for compatibility with the C++ wrapper code.
+file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/include/crubit/rust.h"
+"#pragma once
+#include \"crubit/regex_cpp_bindings.h\"
+namespace rust = regex_cpp_bindings;
+")
+target_include_directories(regex_cpp_bindings INTERFACE "${CMAKE_CURRENT_BINARY_DIR}/include")
+
+# Crubit names the static library after the package (libregex-cpp-bindings.a),
+# while Corrosion expects Cargo library target naming (libregex_cpp_bindings.a).
+# Copy the byproduct before Corrosion attempts to copy it.
+file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/copy_crubit_lib.cmake"
+"file(GLOB_RECURSE libs
+  \"${CMAKE_CURRENT_BINARY_DIR}/cargo/*regex-cpp-bindings.a\"
+  \"${CMAKE_CURRENT_BINARY_DIR}/cargo/*regex-cpp-bindings.lib\"
+)
+foreach(lib IN LISTS libs)
+  string(REPLACE \"regex-cpp-bindings\" \"regex_cpp_bindings\" target_lib \"\${lib}\")
+  file(COPY_FILE \"\${lib}\" \"\${target_lib}\")
+endforeach()
+")
+add_custom_command(
+  TARGET _cargo-build_regex_cpp_bindings
+  POST_BUILD
+  COMMAND ${CMAKE_COMMAND} -P "${CMAKE_CURRENT_BINARY_DIR}/copy_crubit_lib.cmake"
+)
 
 FetchContent_Declare(
   absl
@@ -53,7 +83,7 @@ FetchContent_MakeAvailable(google_benchmark)
 
 add_library(regex regex.cc regex.h regex_internal.h)
 target_link_libraries(regex PRIVATE
-  rust
+  regex_cpp_bindings
   absl::check
   absl::status
   absl::statusor
@@ -64,7 +94,7 @@ target_link_libraries(regex PRIVATE
 
 add_executable(regex_example main.cc)
 target_link_libraries(regex_example PRIVATE
-  rust
+  regex_cpp_bindings
   regex
   absl::statusor
   absl::strings
@@ -72,7 +102,7 @@ target_link_libraries(regex_example PRIVATE
 
 add_executable(regex_benchmark regex_benchmark.cc)
 target_link_libraries(regex_benchmark PRIVATE
-  rust
+  regex_cpp_bindings
   regex
   re2::re2
   benchmark::benchmark
