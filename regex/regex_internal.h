@@ -13,7 +13,7 @@
 #include "support/rs_std/slice_ref.h"
 #include "support/rs_std/vec.h"
 #include "crubit/rust.h"
-#include "absl/log/check.h"
+#include "absl/log/absl_check.h"
 #include "absl/strings/string_view.h"
 #include "absl/types/span.h"
 
@@ -150,7 +150,7 @@ class RustIteratorRange {
   };
 
   auto begin() {
-    CHECK(!consumed_) << "Range can only be iterated once.";
+    ABSL_CHECK(!consumed_) << "Range can only be iterated once.";
     consumed_ = true;
     return Iterator{inner_it_.get(),
                     MapOptional<WrapperType>(inner_it_->next())};

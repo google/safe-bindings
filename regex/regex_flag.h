@@ -95,7 +95,7 @@
 #include <vector>
 
 #include "regex.h"
-#include "absl/log/check.h"
+#include "absl/log/absl_check.h"
 #include "absl/strings/match.h"
 #include "absl/strings/str_cat.h"
 #include "absl/strings/str_join.h"
@@ -108,14 +108,14 @@ template <typename Options>
 class RegexFlagWithOptions {
  public:
   const Regex& operator*() const {
-    CHECK(re_ != nullptr)
+    ABSL_CHECK(re_ != nullptr)
         << "Dereferencing a RegexFlagWithOptions that has not been "
            "initialized. Ensure the flag has a default value set using "
            "RegexFlagWithOptions::OrDie.";
     return *get();
   }
   const Regex* operator->() const {
-    CHECK(re_ != nullptr)
+    ABSL_CHECK(re_ != nullptr)
         << "Dereferencing a RegexFlagWithOptions that has not been "
            "initialized. Ensure the flag has a default value set using "
            "RegexFlagWithOptions::OrDie.";
@@ -130,7 +130,7 @@ class RegexFlagWithOptions {
   static RegexFlagWithOptions OrDie(absl::string_view pattern) {
     RegexFlagWithOptions flag;
     std::string error;
-    CHECK(AbslParseFlag(pattern, &flag, &error)) << error;
+    ABSL_CHECK(AbslParseFlag(pattern, &flag, &error)) << error;
     return flag;
   }
 
@@ -166,7 +166,7 @@ class RegexListFlagWithOptions {
     // Enforce the invariant that regexes can't contain commas. Otherwise
     // unparsing the flag would return an incorrect result.
     for (auto pattern : patterns) {
-      CHECK(!absl::StrContains(pattern, ','))
+      ABSL_CHECK(!absl::StrContains(pattern, ','))
           << "RegexListFlag does not support commas in the patterns, escape "
              "the commas using \\x2c: "
           << pattern;
