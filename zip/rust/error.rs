@@ -37,3 +37,17 @@ impl ZipError {
         Self::new(message, ZipErrorCode::Internal)
     }
 }
+
+impl From<zip::result::ZipError> for ZipError {
+    fn from(err: zip::result::ZipError) -> Self {
+        match err {
+            zip::result::ZipError::Io(e) => ZipError::internal(e.to_string()),
+            zip::result::ZipError::InvalidArchive(e) => ZipError::invalid_argument(e.as_ref()),
+            zip::result::ZipError::UnsupportedArchive(e) => {
+                ZipError::failed_precondition(e.as_ref())
+            }
+            zip::result::ZipError::FileNotFound => ZipError::out_of_range("File not found"),
+            _ => ZipError::internal(err.to_string()),
+        }
+    }
+}
