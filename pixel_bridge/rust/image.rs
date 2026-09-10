@@ -2,24 +2,41 @@ use crate::{
     reader::{Format, ReadSeek},
     vec_u8::VecU8,
 };
+#[cfg(not(png_only))]
+use image::codecs::bmp::BmpDecoder as RustBmpDecoder;
+#[cfg(not(png_only))]
+use image::codecs::gif::GifDecoder as RustGifDecoder;
+#[cfg(not(png_only))]
+use image::codecs::ico::IcoDecoder as RustIcoDecoder;
+#[cfg(not(png_only))]
+use image::codecs::jpeg::JpegDecoder as RustJpegDecoder;
+#[cfg(not(png_only))]
+use image::codecs::tiff::TiffDecoder as RustTiffDecoder;
+#[cfg(not(png_only))]
+use image::codecs::webp::WebPDecoder as RustWebPDecoder;
+#[cfg(not(png_only))]
+use image::AnimationDecoder;
+
 use image::{
-    codecs::bmp::BmpDecoder as RustBmpDecoder, codecs::gif::GifDecoder as RustGifDecoder,
-    codecs::ico::IcoDecoder as RustIcoDecoder, codecs::jpeg::JpegDecoder as RustJpegDecoder,
-    codecs::png::PngDecoder as RustPngDecoder, codecs::tiff::TiffDecoder as RustTiffDecoder,
-    codecs::webp::WebPDecoder as RustWebPDecoder, flat::SampleLayout as RustSampleLayout,
-    AnimationDecoder, ColorType as RustColorType, ExtendedColorType as RustExtendedColorType,
-    Frame as RustFrame, ImageBuffer as RustImageBuffer, ImageDecoder as RustImageDecoder,
-    Rgba as RustRgba,
+    codecs::png::PngDecoder as RustPngDecoder, flat::SampleLayout as RustSampleLayout,
+    ColorType as RustColorType, ExtendedColorType as RustExtendedColorType, Frame as RustFrame,
+    ImageBuffer as RustImageBuffer, ImageDecoder as RustImageDecoder, Rgba as RustRgba,
 };
 use std::collections::VecDeque;
 
 pub(crate) enum GenericImageDecoder {
     Png(Box<RustPngDecoder<Box<dyn ReadSeek>>>),
+    #[cfg(not(png_only))]
     Gif(Box<RustGifDecoder<Box<dyn ReadSeek>>>),
+    #[cfg(not(png_only))]
     Jpeg(Box<RustJpegDecoder<Box<dyn ReadSeek>>>),
+    #[cfg(not(png_only))]
     WebP(Box<RustWebPDecoder<Box<dyn ReadSeek>>>),
+    #[cfg(not(png_only))]
     Tiff(Box<RustTiffDecoder<Box<dyn ReadSeek>>>),
+    #[cfg(not(png_only))]
     Bmp(Box<RustBmpDecoder<Box<dyn ReadSeek>>>),
+    #[cfg(not(png_only))]
     Ico(Box<RustIcoDecoder<Box<dyn ReadSeek>>>),
 }
 
@@ -27,11 +44,17 @@ macro_rules! call_generic_decoder {
     ($var:expr, $decoder:ident,$expr:expr) => {
         match $var {
             &GenericImageDecoder::Png(ref $decoder) => $expr,
+            #[cfg(not(png_only))]
             &GenericImageDecoder::Gif(ref $decoder) => $expr,
+            #[cfg(not(png_only))]
             &GenericImageDecoder::Jpeg(ref $decoder) => $expr,
+            #[cfg(not(png_only))]
             &GenericImageDecoder::WebP(ref $decoder) => $expr,
+            #[cfg(not(png_only))]
             &GenericImageDecoder::Tiff(ref $decoder) => $expr,
+            #[cfg(not(png_only))]
             &GenericImageDecoder::Bmp(ref $decoder) => $expr,
+            #[cfg(not(png_only))]
             &GenericImageDecoder::Ico(ref $decoder) => $expr,
         }
     };
@@ -41,11 +64,17 @@ macro_rules! call_generic_decoder_mut {
     ($var:expr, $decoder:ident,$expr:expr) => {
         match $var {
             &mut GenericImageDecoder::Png(ref mut $decoder) => $expr,
+            #[cfg(not(png_only))]
             &mut GenericImageDecoder::Gif(ref mut $decoder) => $expr,
+            #[cfg(not(png_only))]
             &mut GenericImageDecoder::Jpeg(ref mut $decoder) => $expr,
+            #[cfg(not(png_only))]
             &mut GenericImageDecoder::WebP(ref mut $decoder) => $expr,
+            #[cfg(not(png_only))]
             &mut GenericImageDecoder::Tiff(ref mut $decoder) => $expr,
+            #[cfg(not(png_only))]
             &mut GenericImageDecoder::Bmp(ref mut $decoder) => $expr,
+            #[cfg(not(png_only))]
             &mut GenericImageDecoder::Ico(ref mut $decoder) => $expr,
         }
     };
@@ -55,11 +84,17 @@ macro_rules! call_generic_decoder_owned {
     ($var:expr, $decoder:ident,$expr:expr) => {
         match $var {
             GenericImageDecoder::Png($decoder) => $expr,
+            #[cfg(not(png_only))]
             GenericImageDecoder::Gif($decoder) => $expr,
+            #[cfg(not(png_only))]
             GenericImageDecoder::Jpeg($decoder) => $expr,
+            #[cfg(not(png_only))]
             GenericImageDecoder::WebP($decoder) => $expr,
+            #[cfg(not(png_only))]
             GenericImageDecoder::Tiff($decoder) => $expr,
+            #[cfg(not(png_only))]
             GenericImageDecoder::Bmp($decoder) => $expr,
+            #[cfg(not(png_only))]
             GenericImageDecoder::Ico($decoder) => $expr,
         }
     };
@@ -121,6 +156,7 @@ impl RustImageDecoder for GenericImageDecoder {
 #[derive(Default)]
 pub struct ImageDecoder {
     inner: Option<GenericImageDecoder>,
+    #[allow(dead_code)]
     sample_layout: Option<RustSampleLayout>,
     background_subs: Option<(RustRgba<u8>, RustRgba<u16>)>,
     pub(crate) should_premultiply: bool,
@@ -197,10 +233,13 @@ pub enum ColorType {
 /// Information about strides (offset to the next sample).
 pub struct Strides {
     /// Add this to an index to get to the next sample in x-direction.
+    #[allow(dead_code)]
     pub width: usize,
     /// Add this to an index to get to the next sample in y-direction.
+    #[allow(dead_code)]
     pub height: usize,
     /// Add this to an index to get to the sample in the next channel.
+    #[allow(dead_code)]
     pub channels: usize,
 }
 
@@ -274,6 +313,7 @@ impl Frame {
 }
 
 impl Frames {
+    #[allow(dead_code)]
     fn new(frames: Vec<RustFrame>) -> Self {
         Self {
             // As per Rust docs: Creating a `VecDeque` from a `Vec` is O(1) and guaranteed
@@ -340,24 +380,33 @@ where
 
 impl ImageDecoder {
     /// Creates a new `ImageDecoder`.
+    #[allow(unused_variables)]
     pub(crate) fn new(rust_decoder: GenericImageDecoder) -> Self {
         let (width, height) = rust_decoder.dimensions();
+        let sample_layout = match &rust_decoder.color_type() {
+            #[cfg(not(png_only))]
+            RustColorType::L16 | RustColorType::L8 => {
+                Some(RustSampleLayout::row_major_packed(1, width, height))
+            }
+            #[cfg(not(png_only))]
+            RustColorType::La16 | RustColorType::La8 => {
+                Some(RustSampleLayout::row_major_packed(2, width, height))
+            }
+            #[cfg(not(png_only))]
+            RustColorType::Rgb32F | RustColorType::Rgb16 | RustColorType::Rgb8 => {
+                Some(RustSampleLayout::row_major_packed(3, width, height))
+            }
+            #[cfg(not(png_only))]
+            RustColorType::Rgba32F | RustColorType::Rgba16 | RustColorType::Rgba8 => {
+                Some(RustSampleLayout::row_major_packed(4, width, height))
+            }
+            #[cfg(png_only)]
+            _ => None,
+            #[cfg(not(png_only))]
+            _ => None,
+        };
         Self {
-            sample_layout: match &rust_decoder.color_type() {
-                RustColorType::L16 | RustColorType::L8 => {
-                    Some(RustSampleLayout::row_major_packed(1, width, height))
-                }
-                RustColorType::La16 | RustColorType::La8 => {
-                    Some(RustSampleLayout::row_major_packed(2, width, height))
-                }
-                RustColorType::Rgb32F | RustColorType::Rgb16 | RustColorType::Rgb8 => {
-                    Some(RustSampleLayout::row_major_packed(3, width, height))
-                }
-                RustColorType::Rgba32F | RustColorType::Rgba16 | RustColorType::Rgba8 => {
-                    Some(RustSampleLayout::row_major_packed(4, width, height))
-                }
-                _ => None,
-            },
+            sample_layout,
             inner: Some(rust_decoder),
             background_subs: None,
             should_premultiply: false,
@@ -475,11 +524,17 @@ impl ImageDecoder {
         };
         match inner {
             GenericImageDecoder::Png(_) => Format::Png,
+            #[cfg(not(png_only))]
             GenericImageDecoder::Gif(_) => Format::Gif,
+            #[cfg(not(png_only))]
             GenericImageDecoder::Jpeg(_) => Format::Jpeg,
+            #[cfg(not(png_only))]
             GenericImageDecoder::WebP(_) => Format::WebP,
+            #[cfg(not(png_only))]
             GenericImageDecoder::Tiff(_) => Format::Tiff,
+            #[cfg(not(png_only))]
             GenericImageDecoder::Bmp(_) => Format::Bmp,
+            #[cfg(not(png_only))]
             GenericImageDecoder::Ico(_) => Format::Ico,
         }
     }
@@ -532,26 +587,37 @@ impl ImageDecoder {
 
     /// Returns the strides of the image data produced by this decoder.
     pub fn strides(&self) -> Strides {
+        #[cfg(not(png_only))]
         let (channels, width, height) =
             self.sample_layout.as_ref().map_or((0, 0, 0), |layout| layout.strides_cwh());
+        #[cfg(png_only)]
+        let (channels, width, height) = (0, 0, 0);
         Strides { channels, width, height }
     }
 
     /// Whether this decoder is able to return a series of animated frames.
+    #[cfg(not(png_only))]
     pub fn is_animated(&self) -> bool {
         matches!(self.inner, Some(GenericImageDecoder::Gif(_) | GenericImageDecoder::WebP(_)))
+    }
+
+    #[cfg(png_only)]
+    pub fn is_animated(&self) -> bool {
+        false
     }
 
     /// Returns all animated frames of the image. This only returns data for decoders, where
     /// `is_animated` returns true.
     pub fn all_frames(self) -> Result<Frames, VecU8> {
         run_fallible_result(move || match self.inner {
+            #[cfg(not(png_only))]
             Some(GenericImageDecoder::Gif(gif_decoder)) => {
                 match gif_decoder.into_frames().collect_frames() {
                     Ok(frames) => Ok(Frames::new(frames)),
                     Err(err) => Err(err.to_string().into()),
                 }
             }
+            #[cfg(not(png_only))]
             Some(GenericImageDecoder::WebP(webp_decoder)) => {
                 match webp_decoder.into_frames().collect_frames() {
                     Ok(frames) => Ok(Frames::new(frames)),
