@@ -12,7 +12,7 @@
 #include "support/rs_std/str_ref.h"
 #include "support/rs_std/vec.h"
 #include "regex_internal.h"
-#include "crubit/rust.h"
+#include "crubit/regex_cpp_bindings.h"
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
 #include "absl/strings/str_format.h"
@@ -65,14 +65,14 @@ absl::StatusOr<std::string> RewriteWithOptions(absl::string_view pattern,
   }
 
   if (options.add_begin_and_end_anchors || options.re2_compatibility) {
-    auto rewriter_result = rust::regex_rewrite::Rewriter::new_(
+    auto rewriter_result = regex_cpp_bindings::regex_rewrite::Rewriter::new_(
         internal::AsSlice(result), options.verbose, options.octal,
         options.nest_limit.value_or(kDefaultNestLimit));
     if (!rewriter_result.has_value()) {
       return absl::InvalidArgumentError(
           internal::AsStr(rewriter_result.err().message()));
     }
-    rust::regex_rewrite::Rewriter rewriter =
+    regex_cpp_bindings::regex_rewrite::Rewriter rewriter =
         std::move(rewriter_result).value();
 
     if (options.add_begin_and_end_anchors) {
@@ -105,7 +105,7 @@ std::optional<Match> Captures::Get(absl::string_view name) const {
   return internal::MapOptional<Match>(captures_.name(*name_ref));
 }
 
-Regex::Regex(rust::Regex inner) : regex_(std::move(inner)) {}
+Regex::Regex(regex_cpp_bindings::Regex inner) : regex_(std::move(inner)) {}
 
 absl::StatusOr<Regex> Regex::Compile(absl::string_view pattern,
                                      Options options) {
@@ -115,8 +115,8 @@ absl::StatusOr<Regex> Regex::Compile(absl::string_view pattern,
     return final_pattern.status();
   }
 
-  rust::RegexBuilder builder =
-      rust::RegexBuilder::new_(internal::AsSlice(*final_pattern));
+  regex_cpp_bindings::RegexBuilder builder =
+      regex_cpp_bindings::RegexBuilder::new_(internal::AsSlice(*final_pattern));
   builder.unicode(options.encoding == Encoding::kUtf8);
   builder.case_insensitive(options.case_insensitive);
   builder.multi_line(options.multi_line);
@@ -242,8 +242,8 @@ absl::StatusOr<RegexSet> RegexSet::Compile(
     final_patterns.push_back(internal::AsSlice(s));
   }
 
-  rust::RegexSetBuilder builder =
-      rust::RegexSetBuilder::new_(final_patterns);
+  regex_cpp_bindings::RegexSetBuilder builder =
+      regex_cpp_bindings::RegexSetBuilder::new_(final_patterns);
   builder.unicode(options.encoding == Encoding::kUtf8);
   builder.case_insensitive(options.case_insensitive);
   builder.multi_line(options.multi_line);
@@ -272,7 +272,7 @@ absl::StatusOr<RegexSet> RegexSet::Compile(
 
 bool Replace(std::string* str, const Regex& regex, absl::string_view rewrite) {
   if (str == nullptr) return false;
-  rust::ReplaceResult result = regex.regex_.replacen(
+  regex_cpp_bindings::ReplaceResult result = regex.regex_.replacen(
       internal::AsSlice(*str), 1, internal::AsSlice(rewrite));
   if (result.count() == 0) {
     return false;
@@ -292,7 +292,7 @@ bool Replace(std::string* str, absl::string_view pattern,
 int GlobalReplace(std::string* str, const Regex& regex,
                   absl::string_view rewrite) {
   if (str == nullptr) return 0;
-  rust::ReplaceResult result = regex.regex_.replacen(
+  regex_cpp_bindings::ReplaceResult result = regex.regex_.replacen(
       internal::AsSlice(*str), 0, internal::AsSlice(rewrite));
   size_t count = result.count();
   if (count == 0) {

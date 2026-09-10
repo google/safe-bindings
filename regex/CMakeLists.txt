@@ -25,17 +25,6 @@ FetchContent_MakeAvailable(Corrosion)
 corrosion_experimental_crubit(regex_cpp_bindings)
 corrosion_import_crate(MANIFEST_PATH Cargo.toml)
 
-
-# NOTE(b/555854776) - remove this workaround.
-# Crubit generates crubit/regex_cpp_bindings.h in namespace regex_cpp_bindings.
-# Provide crubit/rust.h alias for compatibility with the C++ wrapper code.
-file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/include/crubit/rust.h"
-"#pragma once
-#include \"crubit/regex_cpp_bindings.h\"
-namespace rust = regex_cpp_bindings;
-")
-target_include_directories(regex_cpp_bindings INTERFACE "${CMAKE_CURRENT_BINARY_DIR}/include")
-
 # Crubit names the static library after the package (libregex-cpp-bindings.a),
 # while Corrosion expects Cargo library target naming (libregex_cpp_bindings.a).
 # Copy the byproduct before Corrosion attempts to copy it.

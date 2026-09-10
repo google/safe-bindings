@@ -160,7 +160,7 @@
 #include <vector>
 
 #include "regex_internal.h"
-#include "crubit/rust.h"
+#include "crubit/regex_cpp_bindings.h"
 #include "absl/status/statusor.h"
 #include "absl/strings/str_cat.h"
 #include "absl/strings/string_view.h"
@@ -198,7 +198,7 @@ class Match {
   }
 
   // Access to the inner wrapper. Required by Arg to perform numeric parsing.
-  const ::rust::Match& Inner() const { return match_; }
+  const ::regex_cpp_bindings::Match& Inner() const { return match_; }
 
  private:
   friend class Captures;
@@ -206,9 +206,9 @@ class Match {
   template <typename Wrapper, typename Inner>
   friend struct internal::MapOptionalHelper;
 
-  explicit Match(rust::Match inner) : match_(std::move(inner)) {}
+  explicit Match(regex_cpp_bindings::Match inner) : match_(std::move(inner)) {}
 
-  rust::Match match_;
+  regex_cpp_bindings::Match match_;
 };
 
 // Represents a set of capture groups from a regular expression match.
@@ -248,7 +248,7 @@ class Captures {
 
   // A range over capture matches. These ranges can only be iterated once.
   using SubCaptureMatches =
-      internal::RustIteratorRange<rust::SubCaptureMatches,
+      internal::RustIteratorRange<regex_cpp_bindings::SubCaptureMatches,
                                   std::optional<Match>>;
 
   // Returns a range over all capture groups. The first element is always the
@@ -262,10 +262,10 @@ class Captures {
   template <typename Wrapper, typename Inner>
   friend struct internal::MapOptionalHelper;
 
-  explicit Captures(rust::Captures inner)
+  explicit Captures(regex_cpp_bindings::Captures inner)
       : captures_(std::move(inner)) {}
 
-  rust::Captures captures_;
+  regex_cpp_bindings::Captures captures_;
 };
 
 // The encoding of the input text. Note that patterns must always be valid
@@ -354,7 +354,7 @@ class Regex {
 
   // A range over capture group names. These ranges can only be iterated once.
   using CaptureNamesResult =
-      internal::RustIteratorRange<rust::CaptureNames,
+      internal::RustIteratorRange<regex_cpp_bindings::CaptureNames,
                                   std::optional<absl::string_view>>;
 
   // Returns a range over the names of all the capture groups. The unnamed
@@ -379,7 +379,7 @@ class Regex {
   // A range over all matches of a regex. These ranges can only be iterated
   // once.
   using FindAllResult =
-      internal::RustIteratorRange<rust::Matches, Match>;
+      internal::RustIteratorRange<regex_cpp_bindings::Matches, Match>;
 
   // Returns a range with all matches of the regex in `text`.
   FindAllResult FindAll(absl::string_view text) const;
@@ -387,7 +387,7 @@ class Regex {
   // A range over all capture matches of a regex. These ranges can only be
   // iterated once.
   using FindAllCapturesResult =
-      internal::RustIteratorRange<rust::CaptureMatches, Captures>;
+      internal::RustIteratorRange<regex_cpp_bindings::CaptureMatches, Captures>;
 
   // Returns a range with all matches of the regex in `text`.
   FindAllCapturesResult FindAllCaptures(absl::string_view text) const;
@@ -395,7 +395,7 @@ class Regex {
   // A range over substrings separated by regex matches. These ranges can only
   // be iterated once.
   using SplitResult =
-      internal::RustIteratorRange<rust::Split, absl::string_view>;
+      internal::RustIteratorRange<regex_cpp_bindings::Split, absl::string_view>;
 
   // Splits `text` using the regex as a delimiter, and returns a range of
   // string_views with the parts that DON'T match the regex.
@@ -404,7 +404,7 @@ class Regex {
   // A range over at most N substrings separated by regex matches. These ranges
   // can only be iterated once.
   using SplitNResult =
-      internal::RustIteratorRange<rust::SplitN, absl::string_view>;
+      internal::RustIteratorRange<regex_cpp_bindings::SplitN, absl::string_view>;
 
   // Splits `text` using the regex as a delimiter, and returns a range of
   // string_views with the parts that DON'T match the regex. It always
@@ -432,9 +432,9 @@ class Regex {
                            absl::string_view rewrite);
 
  private:
-  explicit Regex(rust::Regex inner);
+  explicit Regex(regex_cpp_bindings::Regex inner);
 
-  rust::Regex regex_;
+  regex_cpp_bindings::Regex regex_;
 };
 
 // Represents the set of matches returned by RegexSet::Matches.
@@ -465,10 +465,10 @@ class SetMatches {
 
  private:
   friend class RegexSet;
-  explicit SetMatches(rust::SetMatches inner)
+  explicit SetMatches(regex_cpp_bindings::SetMatches inner)
       : matches_(std::move(inner)) {}
 
-  rust::SetMatches matches_;
+  regex_cpp_bindings::SetMatches matches_;
 };
 
 // Represents a compiled set of regular expressions.
@@ -511,10 +511,10 @@ class RegexSet {
   }
 
  private:
-  explicit RegexSet(rust::RegexSet inner)
+  explicit RegexSet(regex_cpp_bindings::RegexSet inner)
       : regex_set_(std::move(inner)) {}
 
-  rust::RegexSet regex_set_;
+  regex_cpp_bindings::RegexSet regex_set_;
 };
 
 // Represents a pointer to a value that will be populated by a regex capture.

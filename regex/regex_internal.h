@@ -12,7 +12,7 @@
 
 #include "support/rs_std/slice_ref.h"
 #include "support/rs_std/vec.h"
-#include "crubit/rust.h"
+#include "crubit/regex_cpp_bindings.h"
 #include "absl/log/absl_check.h"
 #include "absl/strings/string_view.h"
 #include "absl/types/span.h"
@@ -65,7 +65,7 @@ struct MapOptionalHelper {
 
 // Partial specialization for when Wrapper is itself a std::optional.
 // This is needed when mapping nested optionals where the inner conversion
-// might be explicit (like Match from rust::Match).
+// might be explicit (like Match from regex_cpp_bindings::Match).
 template <typename T, typename Inner>
 struct MapOptionalHelper<std::optional<T>, Inner> {
   static std::optional<std::optional<T>> Map(std::optional<Inner> opt) {
