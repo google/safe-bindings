@@ -1,9 +1,11 @@
 #include "converters.h"
 
+#include <cstdint>
 #include <string>
 #include <utility>
 
 #include "crubit_helpers/string_conversions.h"
+#include "reader.h"
 #include "crubit/rust.h"
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
@@ -18,19 +20,49 @@ std::string FromRustVecU8(const rust::VecU8& vec) {
   return std::string(security::crubit_helpers::StringViewFromVecU8(vec));
 }
 
-absl::Status ZipErrorToStatus(rust::ZipError err) {
-  std::string msg = FromRustVecU8(err.message);
-  switch (err.code.tag) {
+absl::StatusCode ZipErrorCodeToStatusCode(rust::ZipErrorCode code) {
+  switch (code.tag) {
     case rust::ZipErrorCode::Tag::InvalidArgument:
-      return absl::InvalidArgumentError(msg);
-    case rust::ZipErrorCode::Tag::OutOfRange:
-      return absl::OutOfRangeError(msg);
+      return absl::StatusCode::kInvalidArgument;
+    case rust::ZipErrorCode::Tag::DeadlineExceeded:
+      return absl::StatusCode::kDeadlineExceeded;
+    case rust::ZipErrorCode::Tag::NotFound:
+      return absl::StatusCode::kNotFound;
+    case rust::ZipErrorCode::Tag::AlreadyExists:
+      return absl::StatusCode::kAlreadyExists;
+    case rust::ZipErrorCode::Tag::PermissionDenied:
+      return absl::StatusCode::kPermissionDenied;
     case rust::ZipErrorCode::Tag::FailedPrecondition:
-      return absl::FailedPreconditionError(msg);
+      return absl::StatusCode::kFailedPrecondition;
+    case rust::ZipErrorCode::Tag::OutOfRange:
+      return absl::StatusCode::kOutOfRange;
+    case rust::ZipErrorCode::Tag::Unimplemented:
+      return absl::StatusCode::kUnimplemented;
     case rust::ZipErrorCode::Tag::Internal:
-      return absl::InternalError(msg);
+      return absl::StatusCode::kInternal;
   }
-  return absl::InternalError(msg);
+  return absl::StatusCode::kInternal;
+}
+
+absl::Status ZipErrorToStatus(rust::ZipError err) {
+  absl::Status status(ZipErrorCodeToStatusCode(err.code),
+                      FromRustVecU8(err.message));
+  if (err.is_reader_callback_failure()) {
+    // Lets internal::ThroughReader tell an error caused by a failed
+    // RandomAccessReader callback, for which the reader's own status is the
+    // better report, from one the archive raised on its own.
+    return internal::MarkReaderCallbackFailure(std::move(status));
+  }
+  return status;
+}
+
+template <typename T>
+absl::StatusOr<T> FromRustResult(
+    rs_std::Result<T, rust::ZipError>&& result) {
+  if (!result.has_value()) {
+    return ZipErrorToStatus(std::move(result).err());
+  }
+  return std::move(result).value();
 }
 
 }  // namespace
@@ -51,58 +83,82 @@ absl::Status FromRustResultUnit(
   return absl::OkStatus();
 }
 
+absl::StatusOr<uint64_t> FromRustResultU64(
+    rs_std::Result<uint64_t, rust::ZipError> result_u64) {
+  return FromRustResult(std::move(result_u64));
+}
+
 absl::StatusOr<rust::BufferedZipArchive> FromRustBufferedZipArchive(
     rs_std::Result<rust::BufferedZipArchive, rust::ZipError>
         result_buffered_zip_archive) {
-  if (!result_buffered_zip_archive.has_value()) {
-    return ZipErrorToStatus(std::move(result_buffered_zip_archive).err());
-  }
-  return std::move(result_buffered_zip_archive).value();
+  return FromRustResult(std::move(result_buffered_zip_archive));
 }
 
 absl::StatusOr<rust::FsZipArchive> FromRustFsZipArchive(
     rs_std::Result<rust::FsZipArchive, rust::ZipError>
         result_fs_zip_archive) {
-  if (!result_fs_zip_archive.has_value()) {
-    return ZipErrorToStatus(std::move(result_fs_zip_archive).err());
-  }
-  return std::move(result_fs_zip_archive).value();
+  return FromRustResult(std::move(result_fs_zip_archive));
+}
+
+absl::StatusOr<rust::CallbackZipArchive> FromRustCallbackZipArchive(
+    rs_std::Result<rust::CallbackZipArchive, rust::ZipError>
+        result_callback_zip_archive) {
+  return FromRustResult(std::move(result_callback_zip_archive));
 }
 
 absl::StatusOr<rust::BufferedZipFile> FromRustBufferedZipFile(
     rs_std::Result<rust::BufferedZipFile, rust::ZipError>
         result_buffered_zip_file) {
-  if (!result_buffered_zip_file.has_value()) {
-    return ZipErrorToStatus(std::move(result_buffered_zip_file).err());
-  }
-  return std::move(result_buffered_zip_file).value();
+  return FromRustResult(std::move(result_buffered_zip_file));
 }
 
 absl::StatusOr<rust::FsZipFile> FromRustFsZipFile(
     rs_std::Result<rust::FsZipFile, rust::ZipError>
         result_fs_zip_file) {
-  if (!result_fs_zip_file.has_value()) {
-    return ZipErrorToStatus(std::move(result_fs_zip_file).err());
-  }
-  return std::move(result_fs_zip_file).value();
+  return FromRustResult(std::move(result_fs_zip_file));
+}
+
+absl::StatusOr<rust::CallbackZipFile> FromRustCallbackZipFile(
+    rs_std::Result<rust::CallbackZipFile, rust::ZipError>
+        result_callback_zip_file) {
+  return FromRustResult(std::move(result_callback_zip_file));
+}
+
+absl::StatusOr<rust::ZipEntryMetadata> FromRustZipEntryMetadata(
+    rs_std::Result<rust::ZipEntryMetadata, rust::ZipError>
+        result_zip_entry_metadata) {
+  return FromRustResult(std::move(result_zip_entry_metadata));
 }
 
 absl::StatusOr<rust::BufferedZipWriter> FromRustBufferedZipWriter(
     rs_std::Result<rust::BufferedZipWriter, rust::ZipError>
         result_buffered_zip_writer) {
-  if (!result_buffered_zip_writer.has_value()) {
-    return ZipErrorToStatus(std::move(result_buffered_zip_writer).err());
-  }
-  return std::move(result_buffered_zip_writer).value();
+  return FromRustResult(std::move(result_buffered_zip_writer));
 }
 
 absl::StatusOr<rust::FsZipWriter> FromRustFsZipWriter(
     rs_std::Result<rust::FsZipWriter, rust::ZipError>
         result_fs_zip_writer) {
-  if (!result_fs_zip_writer.has_value()) {
-    return ZipErrorToStatus(std::move(result_fs_zip_writer).err());
-  }
-  return std::move(result_fs_zip_writer).value();
+  return FromRustResult(std::move(result_fs_zip_writer));
+}
+
+absl::StatusOr<rust::BufferedZipStreamReader>
+FromRustBufferedZipStreamReader(
+    rs_std::Result<rust::BufferedZipStreamReader, rust::ZipError>
+        result_buffered_zip_stream_reader) {
+  return FromRustResult(std::move(result_buffered_zip_stream_reader));
+}
+
+absl::StatusOr<rust::FsZipStreamReader> FromRustFsZipStreamReader(
+    rs_std::Result<rust::FsZipStreamReader, rust::ZipError>
+        result_fs_zip_stream_reader) {
+  return FromRustResult(std::move(result_fs_zip_stream_reader));
+}
+
+absl::StatusOr<rust::FsZipStreamWriter> FromRustFsZipStreamWriter(
+    rs_std::Result<rust::FsZipStreamWriter, rust::ZipError>
+        result_fs_zip_stream_writer) {
+  return FromRustResult(std::move(result_fs_zip_stream_writer));
 }
 
 }  // namespace security::zip
