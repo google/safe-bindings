@@ -1,0 +1,12 @@
+[package]
+name = "roaring_bridge"
+version = "0.1.0"
+edition = "2024"
+license-file = "../../LICENSE"
+
+[lib]
+path = "lib.rs"
+doctest = false
+
+[dependencies]
+roaring = "0.11"

@@ -13,7 +13,7 @@
 //   roaring_bridge::RoaringBitmap32 result = a & b;
 
 // IWYU pragma: begin_exports
-#include "crubit/rust.h"
+#include "crubit/roaring_bridge.h"
 #include "roaring_operators.h"
 // IWYU pragma: end_exports
 

@@ -4,16 +4,19 @@ C++ wrappers (using Crubit) for Rust libraries.
 
 ## Bindings
 
+<!-- keep-sorted start skip_lines=2 -->
 | Wrapper      | Wrapped crate                                     | Status   |
 | ------------ | ------------------------------------------------- | -------- |
 | deflate      | [flate2](https://crates.io/crates/flate2)         | Compiles |
-| pixel_bridge | [image](https://crates.io/crates/image)           | Compiles |
-| saphyr       | [saphyr](https://crates.io/crates/saphyr)         | Compiles |
-| serde_json   | [serde_json](https://crates.io/crates/serde_json) | Compiles      |
 | kamadak_exif | [kamadak-exif](https://crates.io/crates/kamadak-exif) | Compiles      |
-| regex        | [regex](https://crates.io/crates/regex)           | Compiles |
-| zip          | [zip](https://crates.io/crates/zip)               | Compiles |
 | leveldb      | [rusty_leveldb](https://crates.io/crates/rusty_leveldb)       | Doesn't compile - NOTE: Retry after `cc_std::virtual_unique_ptr` is supported |
+| pixel_bridge | [image](https://crates.io/crates/image)           | Compiles |
+| regex        | [regex](https://crates.io/crates/regex)           | Compiles |
+| roaring      | [roaring](https://crates.io/crates/roaring)       | Compiles |
+| saphyr       | [saphyr](https://crates.io/crates/saphyr)         | Compiles |
+| serde_json   | [serde_json](https://crates.io/crates/serde_json) | Compiles |
+| zip          | [zip](https://crates.io/crates/zip)               | Compiles |
+<!-- keep-sorted end -->
 
 ## Contributing
 

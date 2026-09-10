@@ -13,7 +13,7 @@
 //   roaring_bridge::RoaringBitmap32 a, b;
 //   roaring_bridge::RoaringBitmap32 result = a & b;
 
-#include "crubit/rust.h"
+#include "crubit/roaring_bridge.h"
 
 namespace roaring_bridge {
 
