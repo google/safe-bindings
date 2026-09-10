@@ -4,7 +4,7 @@
 #include <cstdint>
 #include <optional>
 
-#include "crubit/rust.h"
+#include "crubit/deflate_cpp_bindings.h"
 #include "absl/base/attributes.h"
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
@@ -31,8 +31,8 @@ class GzDecoderImpl final {
   RustDecoder decoder_;
 };
 
-using GzDecoder = GzDecoderImpl<rust::read::GzDecoder>;
-using MultiGzDecoder = GzDecoderImpl<rust::read::MultiGzDecoder>;
+using GzDecoder = GzDecoderImpl<deflate_cpp_bindings::read::GzDecoder>;
+using MultiGzDecoder = GzDecoderImpl<deflate_cpp_bindings::read::MultiGzDecoder>;
 
 class GzEncoder final {
  public:
@@ -40,8 +40,8 @@ class GzEncoder final {
   absl::StatusOr<VecU8Wrapper> read_to_end();
 
  private:
-  explicit GzEncoder(rust::read::GzEncoder encoder);
-  rust::read::GzEncoder encoder_;
+  explicit GzEncoder(deflate_cpp_bindings::read::GzEncoder encoder);
+  deflate_cpp_bindings::read::GzEncoder encoder_;
 };
 
 }  // namespace read
@@ -62,8 +62,8 @@ class GzDecoderImpl final {
   RustDecoder decoder_;
 };
 
-using GzDecoder = GzDecoderImpl<rust::write::GzDecoder>;
-using MultiGzDecoder = GzDecoderImpl<rust::write::MultiGzDecoder>;
+using GzDecoder = GzDecoderImpl<deflate_cpp_bindings::write::GzDecoder>;
+using MultiGzDecoder = GzDecoderImpl<deflate_cpp_bindings::write::MultiGzDecoder>;
 
 class GzEncoder final {
  public:
@@ -72,8 +72,8 @@ class GzEncoder final {
   absl::StatusOr<VecU8Wrapper> finish() &&;
 
  private:
-  explicit GzEncoder(rust::write::GzEncoder encoder);
-  rust::write::GzEncoder encoder_;
+  explicit GzEncoder(deflate_cpp_bindings::write::GzEncoder encoder);
+  deflate_cpp_bindings::write::GzEncoder encoder_;
 };
 
 }  // namespace write
@@ -87,10 +87,10 @@ class Compression final {
  private:
   friend class read::GzEncoder;
   friend class write::GzEncoder;
-  explicit Compression(rust::Compression compression);
-  rust::Compression get() const;
+  explicit Compression(deflate_cpp_bindings::Compression compression);
+  deflate_cpp_bindings::Compression get() const;
 
-  rust::Compression compression_;
+  deflate_cpp_bindings::Compression compression_;
 };
 
 class GzHeader final {
@@ -99,22 +99,22 @@ class GzHeader final {
   uint32_t mtime() const;
 
   static std::optional<GzHeader> FromRustOptionGzHeader(
-      std::optional<rust::GzHeader> header);
+      std::optional<deflate_cpp_bindings::GzHeader> header);
 
  private:
-  explicit GzHeader(rust::GzHeader gz_header);
+  explicit GzHeader(deflate_cpp_bindings::GzHeader gz_header);
 
-  rust::GzHeader gz_header_;
+  deflate_cpp_bindings::GzHeader gz_header_;
 };
 
 class VecU8Wrapper {
  public:
-  explicit VecU8Wrapper(rust::vec_u8::VecU8 vec_u8);
+  explicit VecU8Wrapper(deflate_cpp_bindings::vec_u8::VecU8 vec_u8);
   absl::string_view as_string_view() const ABSL_ATTRIBUTE_LIFETIME_BOUND;
   absl::Cord as_cord() &&;
 
  private:
-  rust::vec_u8::VecU8 vec_u8_;
+  deflate_cpp_bindings::vec_u8::VecU8 vec_u8_;
 };
 
 }  // namespace security::deflate
