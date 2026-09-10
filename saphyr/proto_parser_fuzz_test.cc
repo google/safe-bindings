@@ -2,8 +2,8 @@
 
 #include <google/protobuf/struct.pb.h>
 #include "proto_parser.h"
-#include "testing/base/public/gmock.h"
-#include "testing/base/public/gunit.h"
+#include <gmock/gmock.h>
+#include <gtest/gtest.h>
 #include "testing/fuzzing/fuzztest.h"
 #include "absl/status/statusor.h"
 

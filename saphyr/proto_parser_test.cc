@@ -3,8 +3,8 @@
 #include <string>
 
 #include <google/protobuf/struct.pb.h>
-#include "testing/base/public/gmock.h"
-#include "testing/base/public/gunit.h"
+#include <gmock/gmock.h>
+#include <gtest/gtest.h>
 #include "absl/status/status.h"
 
 namespace security::yaml {
