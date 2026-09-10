@@ -10,6 +10,7 @@ name = "regex-cpp-bindings"
 description = "C++ bindings for the regex crate using crubit"
 version = "0.1.0-prerelease"
 license-file = "LICENSE"
+license = "Apache-2.0"
 edition = "2024"
 repository = "https://github.com/google/safe-bindings"
 
