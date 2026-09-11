@@ -2,7 +2,7 @@
 #define SECURITY_LEVELDB_RUST_CPP_LOGGER_H_
 
 #include "absl/strings/string_view.h"
-#include "third_party/crubit/support/annotations.h"
+#include "support/annotations.h"
 
 namespace leveldb_rs {
 
