@@ -244,7 +244,7 @@ impl Default for Reader {
 
 #[cfg(test)]
 mod rust_tests {
-    use super::*;
+        use super::*;
     use googletest::prelude::*;
 
     #[gtest]

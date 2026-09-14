@@ -36,10 +36,10 @@
 //! The input/output `nembed` and `stride` arguments allow specifying non-contiguous arrays, with
 //! semantics similar to the FFTW function arguments with the same names:
 //!
-//! - `nembed` is the shape of a larger array that contains the subarray we're transforming. It
-//!   must have the same dimensions as `shape` and each dimension must be of greater or equal
-//!   value than the corresponding dimension in `shape`.Passing the same value as `shape` means
-//!   we're transforming the whole array.
+//! - `nembed` is the shape of a larger array that contains the subarray we're transforming. It must
+//!   have the same dimensions as `shape` and each dimension must be of greater or equal value than
+//!   the corresponding dimension in `shape`.Passing the same value as `shape` means we're
+//!   transforming the whole array.
 //!
 //! - `stride` is the index increment to go from one element in a row to the next. For example, if
 //!   you have an image where color is represented by interleaved [R, G, B, R, G, B...] values, you
