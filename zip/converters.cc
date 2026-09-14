@@ -104,4 +104,42 @@ absl::StatusOr<rust::FsZipWriter> FromRustFsZipWriter(
   return std::move(result_fs_zip_writer).value();
 }
 
+absl::StatusOr<rust::BufferedZipStreamReader>
+FromRustBufferedZipStreamReader(
+    rs_std::Result<rust::BufferedZipStreamReader, rust::ZipError>
+        result_buffered_zip_stream_reader) {
+  if (!result_buffered_zip_stream_reader.has_value()) {
+    return ZipErrorToStatus(std::move(result_buffered_zip_stream_reader).err());
+  }
+  return std::move(result_buffered_zip_stream_reader).value();
+}
+
+absl::StatusOr<rust::FsZipStreamReader> FromRustFsZipStreamReader(
+    rs_std::Result<rust::FsZipStreamReader, rust::ZipError>
+        result_fs_zip_stream_reader) {
+  if (!result_fs_zip_stream_reader.has_value()) {
+    return ZipErrorToStatus(std::move(result_fs_zip_stream_reader).err());
+  }
+  return std::move(result_fs_zip_stream_reader).value();
+}
+
+absl::StatusOr<rust::BufferedZipStreamWriter>
+FromRustBufferedZipStreamWriter(
+    rs_std::Result<rust::BufferedZipStreamWriter, rust::ZipError>
+        result_buffered_zip_stream_writer) {
+  if (!result_buffered_zip_stream_writer.has_value()) {
+    return ZipErrorToStatus(std::move(result_buffered_zip_stream_writer).err());
+  }
+  return std::move(result_buffered_zip_stream_writer).value();
+}
+
+absl::StatusOr<rust::FsZipStreamWriter> FromRustFsZipStreamWriter(
+    rs_std::Result<rust::FsZipStreamWriter, rust::ZipError>
+        result_fs_zip_stream_writer) {
+  if (!result_fs_zip_stream_writer.has_value()) {
+    return ZipErrorToStatus(std::move(result_fs_zip_stream_writer).err());
+  }
+  return std::move(result_fs_zip_stream_writer).value();
+}
+
 }  // namespace security::zip
