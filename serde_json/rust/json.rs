@@ -1,11 +1,12 @@
 use crate::make_vec_type;
 use crate::raw_string::RawString;
 use serde::Serialize;
-pub type Status = Result<(), RawString>;
+// NOTE: b/517030085 - Crubit doesn't seem to support () here, so using a u8 for now.
+pub type Status = Result<u8, RawString>;
 
 #[inline(always)]
 fn ok() -> Status {
-    Ok(())
+    Ok(0)
 }
 
 #[inline(always)]

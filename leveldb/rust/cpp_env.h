@@ -16,7 +16,7 @@
 #include "absl/time/clock.h"
 #include "absl/time/time.h"
 #include "absl/types/span.h"
-#include "support/annotations.h"
+#include "third_party/crubit/support/annotations.h"
 
 namespace leveldb_rs {
 

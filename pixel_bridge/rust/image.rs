@@ -133,11 +133,12 @@ impl std::fmt::Debug for ImageDecoder {
     }
 }
 
-pub type Status = Result<(), VecU8>;
+// NOTE: b/517030085 - Crubit doesn't seem to support () here, so using a u8 for now.
+pub type Status = Result<u8, VecU8>;
 
 #[inline(always)]
 fn ok() -> Status {
-    Ok(())
+    Ok(0)
 }
 
 #[inline(always)]

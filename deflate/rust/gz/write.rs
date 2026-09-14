@@ -7,10 +7,11 @@ use std::io::Write;
 use crate::vec_u8::VecU8;
 use crate::Compression;
 
-fn write_all_impl<W: Write>(writer: &mut Option<W>, bytes: &[u8]) -> Result<(), VecU8> {
+// NOTE: b/517030085 - Crubit doesn't seem to support the unit type here, so using a u8 for now.
+fn write_all_impl<W: Write>(writer: &mut Option<W>, bytes: &[u8]) -> Result<u8, VecU8> {
     if let Some(writer) = writer {
         match writer.write_all(bytes) {
-            Ok(()) => Ok(()),
+            Ok(()) => Ok(0),
             Err(e) => Err(VecU8::from(e.to_string())),
         }
     } else {
@@ -50,7 +51,7 @@ impl GzDecoder {
     }
 
     /// Attempts to write an entire buffer into this writer.
-    pub fn write_all(&mut self, buf: &[u8]) -> Result<(), VecU8> {
+    pub fn write_all(&mut self, buf: &[u8]) -> Result<u8, VecU8> {
         write_all_impl(&mut self.writer, buf)
     }
 
@@ -72,7 +73,7 @@ impl GzEncoder {
     }
 
     /// Attempts to write an entire buffer into this writer.
-    pub fn write_all(&mut self, buf: &[u8]) -> Result<(), VecU8> {
+    pub fn write_all(&mut self, buf: &[u8]) -> Result<u8, VecU8> {
         write_all_impl(&mut self.writer, buf)
     }
 
@@ -98,7 +99,7 @@ impl MultiGzDecoder {
     }
 
     /// Attempts to write an entire buffer into this writer.
-    pub fn write_all(&mut self, buf: &[u8]) -> Result<(), VecU8> {
+    pub fn write_all(&mut self, buf: &[u8]) -> Result<u8, VecU8> {
         write_all_impl(&mut self.writer, buf)
     }
 

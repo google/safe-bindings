@@ -228,7 +228,7 @@ impl BufferedZipWriter {
         &mut self,
         name: &[u8],
         options: ZipWriterFileOptions,
-    ) -> Result<(), ZipError> {
+    ) -> Result<u8, ZipError> {
         start_file_impl(&mut self.writer, name, options)
     }
 
@@ -237,12 +237,12 @@ impl BufferedZipWriter {
         &mut self,
         name: &[u8],
         options: ZipWriterFileOptions,
-    ) -> Result<(), ZipError> {
+    ) -> Result<u8, ZipError> {
         add_directory_impl(&mut self.writer, name, options)
     }
 
     /// Writes data to the current file in the zip archive.
-    pub fn write_data(&mut self, data: VecU8) -> Result<(), ZipError> {
+    pub fn write_data(&mut self, data: VecU8) -> Result<u8, ZipError> {
         write_data_impl(&mut self.writer, data)
     }
 
@@ -253,17 +253,17 @@ impl BufferedZipWriter {
     pub fn write_buffered_zip_file_content(
         &mut self,
         file: &mut BufferedZipFile,
-    ) -> Result<(), ZipError> {
+    ) -> Result<u8, ZipError> {
         do_copy_impl(&mut self.writer, file)
     }
 
     /// Writes file content from a `FsZipFile` to the current file in the zip archive.
-    pub fn write_fs_zip_file_content(&mut self, file: &mut FsZipFile) -> Result<(), ZipError> {
+    pub fn write_fs_zip_file_content(&mut self, file: &mut FsZipFile) -> Result<u8, ZipError> {
         do_copy_impl(&mut self.writer, file)
     }
 
     /// Writes file content from a path to the current file in the zip archive.
-    pub fn write_file_content(&mut self, path: &[u8]) -> Result<(), ZipError> {
+    pub fn write_file_content(&mut self, path: &[u8]) -> Result<u8, ZipError> {
         write_file_content_impl(&mut self.writer, path)
     }
 }
@@ -336,10 +336,11 @@ impl FsZipWriter {
     }
 
     /// Finishes writing the zip archive to file.
-    pub fn finish(&mut self) -> Result<(), ZipError> {
+    // NOTE: b/517030085 - Crubit doesn't seem to support the unit type here, so using a u8 for now.
+    pub fn finish(&mut self) -> Result<u8, ZipError> {
         if let Some(writer) = self.writer.take() {
             match writer.finish() {
-                Ok(_) => Ok(()),
+                Ok(_) => Ok(0),
                 Err(e) => Err(ZipError::internal(e.to_string())),
             }
         } else {
@@ -352,7 +353,7 @@ impl FsZipWriter {
         &mut self,
         name: &[u8],
         options: ZipWriterFileOptions,
-    ) -> Result<(), ZipError> {
+    ) -> Result<u8, ZipError> {
         start_file_impl(&mut self.writer, name, options)
     }
 
@@ -361,12 +362,12 @@ impl FsZipWriter {
         &mut self,
         name: &[u8],
         options: ZipWriterFileOptions,
-    ) -> Result<(), ZipError> {
+    ) -> Result<u8, ZipError> {
         add_directory_impl(&mut self.writer, name, options)
     }
 
     /// Writes data to the current file in the zip archive.
-    pub fn write_data(&mut self, data: VecU8) -> Result<(), ZipError> {
+    pub fn write_data(&mut self, data: VecU8) -> Result<u8, ZipError> {
         write_data_impl(&mut self.writer, data)
     }
 
@@ -377,32 +378,33 @@ impl FsZipWriter {
     pub fn write_buffered_zip_file_content(
         &mut self,
         file: &mut BufferedZipFile,
-    ) -> Result<(), ZipError> {
+    ) -> Result<u8, ZipError> {
         do_copy_impl(&mut self.writer, file)
     }
 
     /// Writes file content from a `FsZipFile` to the current file in the zip archive.
-    pub fn write_fs_zip_file_content(&mut self, file: &mut FsZipFile) -> Result<(), ZipError> {
+    pub fn write_fs_zip_file_content(&mut self, file: &mut FsZipFile) -> Result<u8, ZipError> {
         do_copy_impl(&mut self.writer, file)
     }
 
     /// Writes file content from a path to the current file in the zip archive.
-    pub fn write_file_content(&mut self, path: &[u8]) -> Result<(), ZipError> {
+    pub fn write_file_content(&mut self, path: &[u8]) -> Result<u8, ZipError> {
         write_file_content_impl(&mut self.writer, path)
     }
 }
 
+// NOTE: b/517030085 - Crubit doesn't seem to support the unit type here, so using a u8 for now.
 fn start_file_impl<W: Write + Seek>(
     writer: &mut Option<WrappedZipWriter<W>>,
     name: &[u8],
     options: ZipWriterFileOptions,
-) -> Result<(), ZipError> {
+) -> Result<u8, ZipError> {
     if let Some(writer) = writer.as_mut() {
         let name_lossy = String::from_utf8_lossy(name);
         let name_str = name_lossy.as_ref();
         match FileOptions::try_from(&options) {
             Ok(file_options) => match writer.start_file(name_str, file_options) {
-                Ok(_) => Ok(()),
+                Ok(_) => Ok(0),
                 Err(e) => Err(ZipError::internal(e.to_string())),
             },
             Err(e) => Err(ZipError::invalid_argument(e.to_string())),
@@ -412,17 +414,18 @@ fn start_file_impl<W: Write + Seek>(
     }
 }
 
+// NOTE: b/517030085 - Crubit doesn't seem to support the unit type here, so using a u8 for now.
 fn add_directory_impl<W: Write + Seek>(
     writer: &mut Option<WrappedZipWriter<W>>,
     name: &[u8],
     options: ZipWriterFileOptions,
-) -> Result<(), ZipError> {
+) -> Result<u8, ZipError> {
     if let Some(writer) = writer.as_mut() {
         let name_lossy = String::from_utf8_lossy(name);
         let name_str = name_lossy.as_ref();
         match FileOptions::try_from(&options) {
             Ok(file_options) => match writer.add_directory(name_str, file_options) {
-                Ok(_) => Ok(()),
+                Ok(_) => Ok(0),
                 Err(e) => Err(ZipError::internal(e.to_string())),
             },
             Err(e) => Err(ZipError::invalid_argument(e.to_string())),
@@ -432,13 +435,14 @@ fn add_directory_impl<W: Write + Seek>(
     }
 }
 
+// NOTE: b/517030085 - Crubit doesn't seem to support the unit type here, so using a u8 for now.
 fn write_data_impl<W: Write + Seek>(
     writer: &mut Option<WrappedZipWriter<W>>,
     data: VecU8,
-) -> Result<(), ZipError> {
+) -> Result<u8, ZipError> {
     if let Some(writer) = writer.as_mut() {
         match writer.write_all(data.as_slice()) {
-            Ok(_) => Ok(()),
+            Ok(_) => Ok(0),
             Err(e) => Err(ZipError::internal(e.to_string())),
         }
     } else {
@@ -446,13 +450,14 @@ fn write_data_impl<W: Write + Seek>(
     }
 }
 
+// NOTE: b/517030085 - Crubit doesn't seem to support the unit type here, so using a u8 for now.
 fn do_copy_impl<W: Write + Seek, R: Read>(
     writer: &mut Option<WrappedZipWriter<W>>,
     reader: &mut R,
-) -> Result<(), ZipError> {
+) -> Result<u8, ZipError> {
     if let Some(writer) = writer.as_mut() {
         match copy(reader, writer) {
-            Ok(_) => Ok(()),
+            Ok(_) => Ok(0),
             Err(e) => Err(ZipError::internal(e.to_string())),
         }
     } else {
@@ -460,16 +465,17 @@ fn do_copy_impl<W: Write + Seek, R: Read>(
     }
 }
 
+// NOTE: b/517030085 - Crubit doesn't seem to support the unit type here, so using a u8 for now.
 fn write_file_content_impl<W: Write + Seek>(
     writer: &mut Option<WrappedZipWriter<W>>,
     path: &[u8],
-) -> Result<(), ZipError> {
+) -> Result<u8, ZipError> {
     if let Some(writer) = writer.as_mut() {
         let path_lossy = String::from_utf8_lossy(path);
         let path_str = path_lossy.as_ref();
         match File::open(path_str) {
             Ok(mut file) => match copy(&mut file, writer) {
-                Ok(_) => Ok(()),
+                Ok(_) => Ok(0),
                 Err(e) => Err(ZipError::internal(e.to_string())),
             },
             Err(e) => Err(ZipError::internal(e.to_string())),
