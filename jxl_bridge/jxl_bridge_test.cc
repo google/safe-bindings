@@ -15,6 +15,7 @@
 namespace safe_bindings::jxl_bridge {
 namespace {
 
+using ::testing::HasSubstr;
 using ::testing::status::StatusIs;
 
 TEST(JxlBridgeTest, HasJxlSignatureReturnsFalseForEmptyInput) {
