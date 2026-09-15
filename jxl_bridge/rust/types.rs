@@ -21,17 +21,18 @@ impl Default for JxlBridgeDataType {
     }
 }
 
-/// Color type for output pixels, i.e. how the decoded channels are
-/// interleaved into the output buffer.
+/// Channel layout of the output pixels, i.e. which channels are written to
+/// the output buffer and in what order they are interleaved.
 ///
 /// IMPORTANT: this selects an interleaving layout, *not* a color space. The
 /// decoder never converts between color spaces, so the color channels are
-/// always emitted in the image's own color space.
+/// always emitted in the image's own color space. Use
+/// `JxlBridgeDecoder::icc_profile` to find out what that color space is.
 #[open_enum(allow_alias)]
 #[cpp_enum(kind = "enum class")]
 #[repr(i32)]
 #[derive(Debug, Clone, Copy)]
-pub enum JxlBridgeColorType {
+pub enum JxlBridgeChannelLayout {
     Grayscale,
     GrayscaleAlpha,
     Rgb,
@@ -39,13 +40,13 @@ pub enum JxlBridgeColorType {
     Cmyk,
 }
 
-impl Default for JxlBridgeColorType {
+impl Default for JxlBridgeChannelLayout {
     fn default() -> Self {
         Self::Rgb
     }
 }
 
-impl JxlBridgeColorType {
+impl JxlBridgeChannelLayout {
     fn to_jxl_color_type(self) -> jxl::api::JxlColorType {
         match self {
             Self::Grayscale => jxl::api::JxlColorType::Grayscale,
@@ -283,7 +284,7 @@ pub enum JxlBridgeFeedResult {
     NeedsMoreInput,
     /// The image header has been parsed. Call
     /// `JxlBridgeDecoder::basic_info()` to retrieve it, then
-    /// `JxlBridgeDecoder::set_output_format()` before feeding more data.
+    /// `JxlBridgeDecoder::set_pixel_layout()` before feeding more data.
     HeaderReady,
     /// The frame header has been parsed. Call
     /// `JxlBridgeDecoder::frame_header()` to retrieve it, then
@@ -313,16 +314,17 @@ pub struct JxlBridgeProcessResult {
 
 /// Build the JxlPixelFormat from bridge types.
 pub(crate) fn build_pixel_format(
-    color_type: &JxlBridgeColorType,
+    channel_layout: &JxlBridgeChannelLayout,
     data_type: &JxlBridgeDataType,
     num_extra_channels: usize,
 ) -> jxl::api::JxlPixelFormat {
-    let jxl_color_type = color_type.to_jxl_color_type();
+    let jxl_color_type = channel_layout.to_jxl_color_type();
     let jxl_data_format = data_type.to_jxl_data_format();
     jxl::api::JxlPixelFormat {
         color_type: jxl_color_type,
         color_data_format: Some(jxl_data_format),
-        // Ignore extra channels by default (alpha is interleaved via color_type).
+        // Ignore extra channels by default (alpha is interleaved into the
+        // color channels by the channel layout).
         extra_channel_format: vec![None; num_extra_channels],
     }
 }

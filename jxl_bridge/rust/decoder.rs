@@ -9,9 +9,10 @@
 use std::fmt::{self, Debug, Formatter};
 
 use crate::types::{
-    self, JxlBridgeBasicInfo, JxlBridgeColorType, JxlBridgeDataType, JxlBridgeDecoderOptions,
+    self, JxlBridgeBasicInfo, JxlBridgeChannelLayout, JxlBridgeDataType, JxlBridgeDecoderOptions,
     JxlBridgeFeedResult, JxlBridgeFrameHeader, JxlBridgeProcessResult,
 };
+use cpp_std::vector;
 use jxl::api::{JxlBasicInfo, JxlDecoderInner, JxlOutputBuffer, JxlPixelFormat, ProcessingResult};
 use jxl::error::Error as JxlError;
 
@@ -110,7 +111,7 @@ enum DecoderState {
 /// 1. `JxlBridgeDecoder::new_()` -> decoder
 /// 2. `decoder.decode_header(data)` until `HeaderReady` -> returns bytes consumed
 /// 3. `decoder.basic_info()` -> image info
-/// 4. `decoder.set_output_format(color_type, data_type)`
+/// 4. `decoder.set_pixel_layout(channel_layout, data_type)`
 /// 5. Optionally `decoder.decode_frame_header(data)` -> returns bytes consumed
 /// 6. `decoder.decode_frame(data, output)` -> returns bytes consumed
 /// 7. For animation: repeat steps 5-6 for each frame
@@ -119,16 +120,20 @@ pub struct JxlBridgeDecoder {
     state: DecoderState,
     /// Cached basic info after header decode.
     basic_info: Option<JxlBridgeBasicInfo>,
-    /// Pixel format set by `set_output_format`, used for frame decoding.
+    /// Pixel format set by `set_pixel_layout`, used for frame decoding.
     pixel_format: Option<JxlPixelFormat>,
-    /// Output color type set by `set_output_format`.
-    output_color_type: JxlBridgeColorType,
-    /// Output data type set by `set_output_format`.
+    /// Output channel layout set by `set_pixel_layout`.
+    output_channel_layout: JxlBridgeChannelLayout,
+    /// Output data type set by `set_pixel_layout`.
     output_data_type: JxlBridgeDataType,
     /// Cached jxl basic info (internal) for pixel buffer sizing.
     jxl_info: Option<JxlBasicInfo>,
     /// Cached frame header from `frame_header`, cleared after each frame.
     frame_header: Option<JxlBridgeFrameHeader>,
+    /// Cached ICC profile of the output color profile, filled lazily by
+    /// `icc_profile` and cleared whenever the pixel layout changes. Empty
+    /// means "not computed yet".
+    icc_profile: Vec<u8>,
     /// Whether to coalesce animation frames (use image-level dimensions).
     /// When false, per-frame dimensions from the frame header are used.
     coalescing: bool,
@@ -163,10 +168,11 @@ impl JxlBridgeDecoder {
             state: DecoderState::Initializing,
             basic_info: None,
             pixel_format: None,
-            output_color_type: JxlBridgeColorType::default(),
+            output_channel_layout: JxlBridgeChannelLayout::default(),
             output_data_type: JxlBridgeDataType::default(),
             jxl_info: None,
             frame_header: None,
+            icc_profile: Vec::new(),
             coalescing,
         }
     }
@@ -176,7 +182,7 @@ impl JxlBridgeDecoder {
     /// Returns the feed state result and the number of bytes consumed. The caller should advance
     /// its input span by `bytes_consumed`.
     ///
-    /// - `HeaderReady`: header parsed, call `basic_info()` and `set_output_format()`.
+    /// - `HeaderReady`: header parsed, call `basic_info()` and `set_pixel_layout()`.
     /// - `NeedsMoreInput`: provide more data and call again.
     pub fn decode_header(&mut self, data: &[u8]) -> StatusOr<JxlBridgeProcessResult> {
         if self.state == DecoderState::HeaderDecoded {
@@ -225,14 +231,14 @@ impl JxlBridgeDecoder {
     /// Returns the feed state result and the number of bytes consumed. The caller should advance
     /// its input span by `bytes_consumed`.
     ///
-    /// Requires `set_output_format()` to have been called.
+    /// Requires `set_pixel_layout()` to have been called.
     /// After success, call `frame_header()` to retrieve the header.
     ///
     /// - `NeedsMoreInput`: provide more data and call again.
     /// - `FrameHeaderReady`: frame header parsed, call `frame_header()`.
     pub fn decode_frame_header(&mut self, data: &[u8]) -> StatusOr<JxlBridgeProcessResult> {
         if self.pixel_format.is_none() {
-            return precondition_err("set_output_format must be called before decode_frame_header");
+            return precondition_err("set_pixel_layout must be called before decode_frame_header");
         }
 
         if self.state == DecoderState::FrameHeaderDecoded {
@@ -274,11 +280,10 @@ impl JxlBridgeDecoder {
         }
     }
 
-    /// Decodes the next frame from the provided input data into the output
-    /// buffer.
+    /// Decodes the next frame from the provided input data into the output buffer.
     ///
-    /// Returns the feed state result and the number of bytes consumed. The caller should advance its
-    /// input span by `bytes_consumed`.
+    /// Returns the feed state result and the number of bytes consumed. The caller should advance
+    /// its input span by `bytes_consumed`.
     ///
     /// - `NeedsMoreInput`: provide more data and call again.
     /// - `FrameReady`: frame decoded, more frames remain.
@@ -289,7 +294,7 @@ impl JxlBridgeDecoder {
         output: &mut [u8],
     ) -> StatusOr<JxlBridgeProcessResult> {
         let Some(pixel_format) = self.pixel_format.as_ref() else {
-            return precondition_err("set_output_format must be called before decode_frame");
+            return precondition_err("set_pixel_layout must be called before decode_frame");
         };
         let Some(jxl_info) = self.jxl_info.as_ref() else {
             return precondition_err("Header has not been decoded yet");
@@ -395,12 +400,38 @@ impl JxlBridgeDecoder {
         }
     }
 
-    /// Sets the desired output pixel format (color type and data type) for decoded frames.
+    /// Returns the ICC profile describing the color space of the decoded pixels.
+    ///
+    /// Must be called after `decode_header` has successfully parsed the image header
+    /// (`HeaderReady`). Since `set_pixel_layout` can change the output color profile, call this
+    /// after the pixel layout has been set to obtain the profile the decoded pixels will actually
+    /// be in.
+    ///
+    /// Returns an empty profile if the output color encoding has no ICC representation. The result
+    /// is cached until the pixel layout changes.
+    pub fn icc_profile(&mut self) -> StatusOr<vector<u8>> {
+        if self.icc_profile.is_empty() {
+            let profile = self.decoder.output_color_profile().ok_or_else(|| {
+                status::failed_precondition(
+                    "Header has not been decoded yet; call decode_header first",
+                )
+            })?;
+            self.icc_profile = profile.try_as_icc().map(|icc| icc.into_owned()).unwrap_or_default();
+        }
+        status::ok(vector::from(self.icc_profile.as_slice()))
+    }
+
+    /// Sets how decoded pixels are written into the output buffer: which channels are interleaved
+    /// (`channel_layout`) and how each sample is stored (`data_type`).
+    ///
+    /// This only describes the caller's buffer. In particular the channel layout does not convert
+    /// between color spaces. The color channels are always emitted in the image's own color space,
+    /// which `icc_profile` reports.
     ///
     /// Must be called after the header is parsed (`HeaderReady`) and before decoding frames.
-    pub fn set_output_format(
+    pub fn set_pixel_layout(
         &mut self,
-        color_type: JxlBridgeColorType,
+        channel_layout: JxlBridgeChannelLayout,
         data_type: JxlBridgeDataType,
     ) -> Status {
         let Some(jxl_info) = self.jxl_info.as_ref() else {
@@ -410,30 +441,32 @@ impl JxlBridgeDecoder {
         };
 
         if self.state != DecoderState::HeaderDecoded {
-            return precondition_status("set_output_format can only be called after HeaderReady");
+            return precondition_status("set_pixel_layout can only be called after HeaderReady");
         }
 
         let num_extra = jxl_info.extra_channels.len();
-        let pixel_format = types::build_pixel_format(&color_type, &data_type, num_extra);
+        let pixel_format = types::build_pixel_format(&channel_layout, &data_type, num_extra);
 
         self.decoder.set_pixel_format(pixel_format).map_err(to_status)?;
         // Re-read from the decoder to capture any adjustments.
         self.pixel_format = self.decoder.current_pixel_format().cloned();
-        self.output_color_type = color_type;
+        self.output_channel_layout = channel_layout;
         self.output_data_type = data_type;
+        // The pixel format can change the output color profile.
+        self.icc_profile.clear();
         status::ok(())
     }
 
-    /// Returns true if `set_output_format` has been called successfully.
+    /// Returns true if `set_pixel_layout` has been called successfully.
     #[must_use]
-    pub fn has_output_format(&self) -> bool {
+    pub fn has_pixel_layout(&self) -> bool {
         self.pixel_format.is_some()
     }
 
-    /// Returns the output color type, or the default if not yet set.
+    /// Returns the output channel layout, or the default if not yet set.
     #[must_use]
-    pub fn output_color_type(&self) -> JxlBridgeColorType {
-        self.output_color_type
+    pub fn output_channel_layout(&self) -> JxlBridgeChannelLayout {
+        self.output_channel_layout
     }
 
     /// Returns the output data type, or the default if not yet set.

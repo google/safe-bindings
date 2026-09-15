@@ -2,6 +2,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -50,17 +51,17 @@ TEST(JxlBridgeTest, DecodeFrameFailsWithoutHeader) {
   JxlDecoder decoder;
   std::vector<uint8_t> output(100);
   absl::Span<const uint8_t> empty_span;
-  EXPECT_THAT(decoder.DecodeFrame(empty_span, ColorType::Rgb, DataType::U8,
+  EXPECT_THAT(decoder.DecodeFrame(empty_span, ChannelLayout::Rgb, DataType::U8,
                                   absl::MakeSpan(output)),
               StatusIs(absl::StatusCode::kFailedPrecondition));
 }
 
 TEST(JxlBridgeTest, NumChannelsReturnsCorrectValues) {
-  EXPECT_EQ(NumChannels(ColorType::Grayscale), 1);
-  EXPECT_EQ(NumChannels(ColorType::GrayscaleAlpha), 2);
-  EXPECT_EQ(NumChannels(ColorType::Rgb), 3);
-  EXPECT_EQ(NumChannels(ColorType::Rgba), 4);
-  EXPECT_EQ(NumChannels(ColorType::Cmyk), 4);
+  EXPECT_EQ(NumChannels(ChannelLayout::Grayscale), 1);
+  EXPECT_EQ(NumChannels(ChannelLayout::GrayscaleAlpha), 2);
+  EXPECT_EQ(NumChannels(ChannelLayout::Rgb), 3);
+  EXPECT_EQ(NumChannels(ChannelLayout::Rgba), 4);
+  EXPECT_EQ(NumChannels(ChannelLayout::Cmyk), 4);
 }
 
 TEST(JxlBridgeTest, BytesPerSampleReturnsCorrectValues) {
