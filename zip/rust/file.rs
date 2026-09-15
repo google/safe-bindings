@@ -64,6 +64,69 @@ impl<'a> BufferedZipFile<'a> {
         get_compression_method_impl(&self.file)
     }
 
+    /// Returns the comment of the file.
+    /// The result only is valid if `is_none()` returns false.
+    pub fn get_comment(&self) -> VecU8 {
+        match self.file.as_ref() {
+            Some(file) => VecU8::from(file.comment()),
+            None => VecU8::default(),
+        }
+    }
+
+    /// Returns the uncompressed size of the file.
+    /// The result only is valid if `is_none()` returns false.
+    pub fn get_uncompressed_size(&self) -> u64 {
+        match self.file.as_ref() {
+            Some(file) => file.size(),
+            None => 0,
+        }
+    }
+
+    /// Returns the compressed size of the file.
+    /// The result only is valid if `is_none()` returns false.
+    pub fn get_compressed_size(&self) -> u64 {
+        match self.file.as_ref() {
+            Some(file) => file.compressed_size(),
+            None => 0,
+        }
+    }
+
+    /// Returns the CRC32 of the file.
+    /// The result only is valid if `is_none()` returns false.
+    pub fn get_crc32(&self) -> u32 {
+        match self.file.as_ref() {
+            Some(file) => file.crc32(),
+            None => 0,
+        }
+    }
+
+    /// Returns the last modified date of the file in DOS format.
+    /// The result only is valid if `is_none()` returns false.
+    pub fn get_last_modified_date(&self) -> u16 {
+        match self.file.as_ref() {
+            Some(file) => file.last_modified().map(|dt| dt.datepart()).unwrap_or(0),
+            None => 0,
+        }
+    }
+
+    /// Returns the last modified time of the file in DOS format.
+    /// The result only is valid if `is_none()` returns false.
+    pub fn get_last_modified_time(&self) -> u16 {
+        match self.file.as_ref() {
+            Some(file) => file.last_modified().map(|dt| dt.timepart()).unwrap_or(0),
+            None => 0,
+        }
+    }
+
+    /// Returns the Unix mode of the file.
+    /// The result only is valid if `is_none()` returns false.
+    pub fn get_unix_mode(&self) -> u32 {
+        match self.file.as_ref() {
+            Some(file) => file.unix_mode().unwrap_or(0),
+            None => 0,
+        }
+    }
+
     /// Returns the data of the file.
     /// The result only is valid if `is_none()` returns false.
     pub fn get_file_data(&mut self) -> Result<VecU8, ZipError> {
@@ -135,6 +198,69 @@ impl<'a> FsZipFile<'a> {
         get_compression_method_impl(&self.file)
     }
 
+    /// Returns the comment of the file.
+    /// The result only is valid if `is_none()` returns false.
+    pub fn get_comment(&self) -> VecU8 {
+        match self.file.as_ref() {
+            Some(file) => VecU8::from(file.comment()),
+            None => VecU8::default(),
+        }
+    }
+
+    /// Returns the uncompressed size of the file.
+    /// The result only is valid if `is_none()` returns false.
+    pub fn get_uncompressed_size(&self) -> u64 {
+        match self.file.as_ref() {
+            Some(file) => file.size(),
+            None => 0,
+        }
+    }
+
+    /// Returns the compressed size of the file.
+    /// The result only is valid if `is_none()` returns false.
+    pub fn get_compressed_size(&self) -> u64 {
+        match self.file.as_ref() {
+            Some(file) => file.compressed_size(),
+            None => 0,
+        }
+    }
+
+    /// Returns the CRC32 of the file.
+    /// The result only is valid if `is_none()` returns false.
+    pub fn get_crc32(&self) -> u32 {
+        match self.file.as_ref() {
+            Some(file) => file.crc32(),
+            None => 0,
+        }
+    }
+
+    /// Returns the last modified date of the file in DOS format.
+    /// The result only is valid if `is_none()` returns false.
+    pub fn get_last_modified_date(&self) -> u16 {
+        match self.file.as_ref() {
+            Some(file) => file.last_modified().map(|dt| dt.datepart()).unwrap_or(0),
+            None => 0,
+        }
+    }
+
+    /// Returns the last modified time of the file in DOS format.
+    /// The result only is valid if `is_none()` returns false.
+    pub fn get_last_modified_time(&self) -> u16 {
+        match self.file.as_ref() {
+            Some(file) => file.last_modified().map(|dt| dt.timepart()).unwrap_or(0),
+            None => 0,
+        }
+    }
+
+    /// Returns the Unix mode of the file.
+    /// The result only is valid if `is_none()` returns false.
+    pub fn get_unix_mode(&self) -> u32 {
+        match self.file.as_ref() {
+            Some(file) => file.unix_mode().unwrap_or(0),
+            None => 0,
+        }
+    }
+
     /// Returns the data of the file.
     /// The result only is valid if `is_none()` returns false.
     pub fn get_file_data(&mut self) -> Result<VecU8, ZipError> {
@@ -179,10 +305,10 @@ fn get_compression_method_impl<'a, R: Read>(
         Some(file) => match file.compression() {
             ZipCrateCompressionMethod::Stored => CompressionMethod::Stored,
             ZipCrateCompressionMethod::Deflated => CompressionMethod::Deflated,
-            ZipCrateCompressionMethod::Bzip2 => CompressionMethod::Bzip2,
-            ZipCrateCompressionMethod::Zstd => CompressionMethod::Zstd,
-            ZipCrateCompressionMethod::Lzma => CompressionMethod::Lzma,
-            ZipCrateCompressionMethod::Xz => CompressionMethod::Xz,
+            ZipCrateCompressionMethod::BZIP2 => CompressionMethod::Bzip2,
+            ZipCrateCompressionMethod::ZSTD => CompressionMethod::Zstd,
+            ZipCrateCompressionMethod::LZMA => CompressionMethod::Lzma,
+            ZipCrateCompressionMethod::XZ => CompressionMethod::Xz,
             _ => CompressionMethod::Unsupported,
         },
         None => CompressionMethod::Unsupported,

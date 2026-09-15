@@ -56,10 +56,10 @@ impl From<CompressionMethod> for ZipCrateCompressionMethod {
         match val {
             CompressionMethod::Deflated => ZipCrateCompressionMethod::Deflated,
             CompressionMethod::Stored => ZipCrateCompressionMethod::Stored,
-            CompressionMethod::Bzip2 => ZipCrateCompressionMethod::Bzip2,
-            CompressionMethod::Zstd => ZipCrateCompressionMethod::Zstd,
-            CompressionMethod::Lzma => ZipCrateCompressionMethod::Lzma,
-            CompressionMethod::Xz => ZipCrateCompressionMethod::Xz,
+            CompressionMethod::Bzip2 => ZipCrateCompressionMethod::BZIP2,
+            CompressionMethod::Zstd => ZipCrateCompressionMethod::ZSTD,
+            CompressionMethod::Lzma => ZipCrateCompressionMethod::LZMA,
+            CompressionMethod::Xz => ZipCrateCompressionMethod::XZ,
             CompressionMethod::Unsupported => {
                 panic!("cannot convert CompressionMethod::Unsupported to ZipCrateCompressionMethod")
             }
@@ -83,7 +83,7 @@ impl TryFrom<&ZipWriterFileOptions> for FileOptions<'static, ()> {
         if let Some(method) = val.compression_method {
             options = options.compression_method(method.into());
         }
-        // third_party/rust/zip/v6/src/write.rs
+        // third_party/rust/zip/v8/src/write.rs
         //
         // `None` value specifies default compression level.
         //
