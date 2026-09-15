@@ -4,8 +4,7 @@
 // Free-function operators for RoaringBitmap32 and RoaringBitmap64.
 //
 // These enable natural syntax like `a & b` in C++ without requiring
-// std::move on either operand. The lhs is taken by value (copied),
-// modified in-place, and returned.
+// std::move on either operand.
 //
 // Usage:
 //   #include "roaring_operators.h"
@@ -19,54 +18,46 @@ namespace roaring_bridge {
 
 // RoaringBitmap32 operators
 
-inline RoaringBitmap32 operator&(RoaringBitmap32 lhs,
+inline RoaringBitmap32 operator&(const RoaringBitmap32& lhs,
                                  const RoaringBitmap32& rhs) {
-  lhs &= rhs;
-  return lhs;
+  return lhs.CrubitInternalIntersect(rhs);
 }
 
-inline RoaringBitmap32 operator|(RoaringBitmap32 lhs,
+inline RoaringBitmap32 operator|(const RoaringBitmap32& lhs,
                                  const RoaringBitmap32& rhs) {
-  lhs |= rhs;
-  return lhs;
+  return lhs.CrubitInternalUnion(rhs);
 }
 
-inline RoaringBitmap32 operator^(RoaringBitmap32 lhs,
+inline RoaringBitmap32 operator^(const RoaringBitmap32& lhs,
                                  const RoaringBitmap32& rhs) {
-  lhs ^= rhs;
-  return lhs;
+  return lhs.CrubitInternalSymDiff(rhs);
 }
 
-inline RoaringBitmap32 operator-(RoaringBitmap32 lhs,
+inline RoaringBitmap32 operator-(const RoaringBitmap32& lhs,
                                  const RoaringBitmap32& rhs) {
-  lhs -= rhs;
-  return lhs;
+  return lhs.CrubitInternalDiff(rhs);
 }
 
-// RoaringBitmap64
+// RoaringBitmap64 operators
 
-inline RoaringBitmap64 operator&(RoaringBitmap64 lhs,
+inline RoaringBitmap64 operator&(const RoaringBitmap64& lhs,
                                  const RoaringBitmap64& rhs) {
-  lhs &= rhs;
-  return lhs;
+  return lhs.CrubitInternalIntersect(rhs);
 }
 
-inline RoaringBitmap64 operator|(RoaringBitmap64 lhs,
+inline RoaringBitmap64 operator|(const RoaringBitmap64& lhs,
                                  const RoaringBitmap64& rhs) {
-  lhs |= rhs;
-  return lhs;
+  return lhs.CrubitInternalUnion(rhs);
 }
 
-inline RoaringBitmap64 operator^(RoaringBitmap64 lhs,
+inline RoaringBitmap64 operator^(const RoaringBitmap64& lhs,
                                  const RoaringBitmap64& rhs) {
-  lhs ^= rhs;
-  return lhs;
+  return lhs.CrubitInternalSymDiff(rhs);
 }
 
-inline RoaringBitmap64 operator-(RoaringBitmap64 lhs,
+inline RoaringBitmap64 operator-(const RoaringBitmap64& lhs,
                                  const RoaringBitmap64& rhs) {
-  lhs -= rhs;
-  return lhs;
+  return lhs.CrubitInternalDiff(rhs);
 }
 
 }  // namespace roaring_bridge

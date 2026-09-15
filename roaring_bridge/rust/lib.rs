@@ -147,6 +147,26 @@ impl RoaringBitmap32 {
         self.inner.remove_run_compression()
     }
 
+    /// Implementation detail of `operator&` in roaring_operators.h.
+    pub fn CrubitInternalIntersect(&self, other: &RoaringBitmap32) -> RoaringBitmap32 {
+        RoaringBitmap32 { inner: &self.inner & &other.inner }
+    }
+
+    /// Implementation detail of `operator|` in roaring_operators.h.
+    pub fn CrubitInternalUnion(&self, other: &RoaringBitmap32) -> RoaringBitmap32 {
+        RoaringBitmap32 { inner: &self.inner | &other.inner }
+    }
+
+    /// Implementation detail of `operator^` in roaring_operators.h.
+    pub fn CrubitInternalSymDiff(&self, other: &RoaringBitmap32) -> RoaringBitmap32 {
+        RoaringBitmap32 { inner: &self.inner ^ &other.inner }
+    }
+
+    /// Implementation detail of `operator-` in roaring_operators.h.
+    pub fn CrubitInternalDiff(&self, other: &RoaringBitmap32) -> RoaringBitmap32 {
+        RoaringBitmap32 { inner: &self.inner - &other.inner }
+    }
+
     /// Size of intersection without creating a new bitmap.
     pub fn IntersectionLen(&self, other: &RoaringBitmap32) -> u64 {
         self.inner.intersection_len(&other.inner)
@@ -376,6 +396,26 @@ impl RoaringBitmap64 {
     /// Returns true if the storage was modified.
     pub fn Optimize(&mut self) -> bool {
         self.inner.optimize()
+    }
+
+    /// Implementation detail of `operator&` in roaring_operators.h.
+    pub fn CrubitInternalIntersect(&self, other: &RoaringBitmap64) -> RoaringBitmap64 {
+        RoaringBitmap64 { inner: &self.inner & &other.inner }
+    }
+
+    /// Implementation detail of `operator|` in roaring_operators.h.
+    pub fn CrubitInternalUnion(&self, other: &RoaringBitmap64) -> RoaringBitmap64 {
+        RoaringBitmap64 { inner: &self.inner | &other.inner }
+    }
+
+    /// Implementation detail of `operator^` in roaring_operators.h.
+    pub fn CrubitInternalSymDiff(&self, other: &RoaringBitmap64) -> RoaringBitmap64 {
+        RoaringBitmap64 { inner: &self.inner ^ &other.inner }
+    }
+
+    /// Implementation detail of `operator-` in roaring_operators.h.
+    pub fn CrubitInternalDiff(&self, other: &RoaringBitmap64) -> RoaringBitmap64 {
+        RoaringBitmap64 { inner: &self.inner - &other.inner }
     }
 
     /// Size of intersection without creating a new bitmap.
