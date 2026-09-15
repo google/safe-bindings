@@ -60,6 +60,7 @@ TEST(JxlBridgeTest, NumChannelsReturnsCorrectValues) {
   EXPECT_EQ(NumChannels(ColorType::GrayscaleAlpha), 2);
   EXPECT_EQ(NumChannels(ColorType::Rgb), 3);
   EXPECT_EQ(NumChannels(ColorType::Rgba), 4);
+  EXPECT_EQ(NumChannels(ColorType::Cmyk), 4);
 }
 
 TEST(JxlBridgeTest, BytesPerSampleReturnsCorrectValues) {

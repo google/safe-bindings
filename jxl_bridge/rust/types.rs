@@ -1,5 +1,6 @@
 //! Crubit-compatible data types for the JXL bridge.
 
+use cpp_std::vector;
 use crubit_annotate::cpp_enum;
 use open_enum::open_enum;
 
@@ -20,7 +21,12 @@ impl Default for JxlBridgeDataType {
     }
 }
 
-/// Color type for output pixels.
+/// Color type for output pixels, i.e. how the decoded channels are
+/// interleaved into the output buffer.
+///
+/// IMPORTANT: this selects an interleaving layout, *not* a color space. The
+/// decoder never converts between color spaces, so the color channels are
+/// always emitted in the image's own color space.
 #[open_enum(allow_alias)]
 #[cpp_enum(kind = "enum class")]
 #[repr(i32)]
@@ -30,6 +36,7 @@ pub enum JxlBridgeColorType {
     GrayscaleAlpha,
     Rgb,
     Rgba,
+    Cmyk,
 }
 
 impl Default for JxlBridgeColorType {
@@ -45,6 +52,7 @@ impl JxlBridgeColorType {
             Self::GrayscaleAlpha => jxl::api::JxlColorType::GrayscaleAlpha,
             Self::Rgb => jxl::api::JxlColorType::Rgb,
             Self::Rgba => jxl::api::JxlColorType::Rgba,
+            Self::Cmyk => jxl::api::JxlColorType::Cmyk,
             _ => Self::default().to_jxl_color_type(),
         }
     }
@@ -64,17 +72,82 @@ impl JxlBridgeDataType {
     }
 }
 
+/// Type of an extra (non-color) channel, mirroring the JPEG XL extra channel
+/// types.
+#[open_enum(allow_alias)]
+#[cpp_enum(kind = "enum class")]
+#[repr(i32)]
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum JxlBridgeExtraChannelType {
+    Alpha,
+    Depth,
+    SpotColor,
+    SelectionMask,
+    Black,
+    Cfa,
+    Thermal,
+    Reserved0,
+    Reserved1,
+    Reserved2,
+    Reserved3,
+    Reserved4,
+    Reserved5,
+    Reserved6,
+    Reserved7,
+    Unknown,
+    Optional,
+}
+
+impl Default for JxlBridgeExtraChannelType {
+    fn default() -> Self {
+        Self::Unknown
+    }
+}
+
+impl JxlBridgeExtraChannelType {
+    fn from_jxl(ec_type: jxl::headers::extra_channels::ExtraChannel) -> Self {
+        use jxl::headers::extra_channels::ExtraChannel;
+        match ec_type {
+            ExtraChannel::Alpha => Self::Alpha,
+            ExtraChannel::Depth => Self::Depth,
+            ExtraChannel::SpotColor => Self::SpotColor,
+            ExtraChannel::SelectionMask => Self::SelectionMask,
+            ExtraChannel::Black => Self::Black,
+            ExtraChannel::CFA => Self::Cfa,
+            ExtraChannel::Thermal => Self::Thermal,
+            ExtraChannel::Reserved0 => Self::Reserved0,
+            ExtraChannel::Reserved1 => Self::Reserved1,
+            ExtraChannel::Reserved2 => Self::Reserved2,
+            ExtraChannel::Reserved3 => Self::Reserved3,
+            ExtraChannel::Reserved4 => Self::Reserved4,
+            ExtraChannel::Reserved5 => Self::Reserved5,
+            ExtraChannel::Reserved6 => Self::Reserved6,
+            ExtraChannel::Reserved7 => Self::Reserved7,
+            ExtraChannel::Unknown => Self::Unknown,
+            ExtraChannel::Optional => Self::Optional,
+        }
+    }
+}
+
+/// Describes a single extra (non-color) channel of the image.
+#[derive(Debug, Clone, Default)]
+pub struct JxlBridgeExtraChannel {
+    pub channel_type: JxlBridgeExtraChannelType,
+    /// For an `Alpha` channel, true if the color channels are already
+    /// premultiplied by this alpha channel.
+    pub alpha_associated: bool,
+}
+
 /// Basic image information returned after decoding the header.
 #[derive(Debug, Clone, Default)]
 pub struct JxlBridgeBasicInfo {
     pub width: u32,
     pub height: u32,
     pub num_color_channels: u32,
-    pub has_alpha: bool,
+    pub extra_channels: vector<JxlBridgeExtraChannel>,
     pub bits_per_sample: u32,
     pub is_float: bool,
     pub has_animation: bool,
-    pub num_extra_channels: u32,
     /// True if the image uses the original (embedded) color profile.
     pub uses_original_profile: bool,
 }
@@ -92,14 +165,17 @@ impl JxlBridgeBasicInfo {
             width: info.size.0 as u32,
             height: info.size.1 as u32,
             num_color_channels: output_color_profile.channels() as u32,
-            has_alpha: info
+            extra_channels: info
                 .extra_channels
                 .iter()
-                .any(|ec| ec.ec_type == jxl::headers::extra_channels::ExtraChannel::Alpha),
+                .map(|ec| JxlBridgeExtraChannel {
+                    channel_type: JxlBridgeExtraChannelType::from_jxl(ec.ec_type),
+                    alpha_associated: ec.alpha_associated,
+                })
+                .collect(),
             bits_per_sample: info.bit_depth.bits_per_sample(),
             is_float,
             has_animation: info.animation.is_some(),
-            num_extra_channels: info.extra_channels.len() as u32,
             uses_original_profile: info.uses_original_profile,
         }
     }

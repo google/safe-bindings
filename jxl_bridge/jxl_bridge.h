@@ -14,6 +14,7 @@ namespace safe_bindings::jxl_bridge {
 
 // Type aliases for the Crubit-generated types.
 // These are the primary types used in the public API.
+// Selects how decoded channels are interleaved into the output buffer.
 using ColorType = jxl_bridge_rs::types::JxlBridgeColorType;
 using DataType = jxl_bridge_rs::types::JxlBridgeDataType;
 using DecoderOptions = jxl_bridge_rs::types::JxlBridgeDecoderOptions;
@@ -21,6 +22,20 @@ using BasicInfo = jxl_bridge_rs::types::JxlBridgeBasicInfo;
 using FrameHeader = jxl_bridge_rs::types::JxlBridgeFrameHeader;
 using FeedResult = jxl_bridge_rs::types::JxlBridgeFeedResult;
 using ProcessResult = jxl_bridge_rs::types::JxlBridgeProcessResult;
+using ExtraChannel = jxl_bridge_rs::types::JxlBridgeExtraChannel;
+using ExtraChannelType = jxl_bridge_rs::types::JxlBridgeExtraChannelType;
+
+// Returns true if the image has an extra channel of the given type.
+// Use this to test for transparency (ExtraChannelType::Alpha) or for whether
+// the image can be decoded as ColorType::Cmyk (ExtraChannelType::Black).
+inline bool HasExtraChannel(const BasicInfo& info, ExtraChannelType type) {
+  for (const ExtraChannel& channel : info.extra_channels) {
+    if (channel.channel_type == type) {
+      return true;
+    }
+  }
+  return false;
+}
 
 // Returns the number of channels for a given color type.
 inline uint32_t NumChannels(ColorType color_type) {
@@ -32,6 +47,8 @@ inline uint32_t NumChannels(ColorType color_type) {
     case ColorType::Rgb:
       return 3;
     case ColorType::Rgba:
+      return 4;
+    case ColorType::Cmyk:
       return 4;
     default:
       return 3;  // Default to RGB.

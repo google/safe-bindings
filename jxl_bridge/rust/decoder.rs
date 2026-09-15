@@ -50,6 +50,10 @@ fn to_status(e: JxlError) -> StatusError {
         | JxlError::InvalidQuantEncoding { .. }
         | JxlError::InvalidPermutationSize { .. }
         | JxlError::InvalidPermutationLehmerCode { .. }
+        | JxlError::UnexpectedCodestreamBoxEnd
+        | JxlError::BlendingPreColorTransform(..)
+        | JxlError::PaletteTooLarge(..)
+        | JxlError::TooManyModularChannels(..)
         | JxlError::SectionTooShort => status::invalid_argument(msg),
 
         // Resource exhaustion.
@@ -66,7 +70,11 @@ fn to_status(e: JxlError) -> StatusError {
         // Caller-provided output buffer issues.
         JxlError::WrongBufferCount(..)
         | JxlError::NotGrayscale
+        | JxlError::NotCmyk
         | JxlError::InvalidOutputBufferSize(..) => status::invalid_argument(msg),
+
+        // Caller used the decoder API in the wrong order.
+        JxlError::PixelFormatChangedAfterFirstFrame => status::failed_precondition(msg),
 
         // Everything else is an internal decoder error.
         _ => status::internal(msg),
@@ -408,7 +416,7 @@ impl JxlBridgeDecoder {
         let num_extra = jxl_info.extra_channels.len();
         let pixel_format = types::build_pixel_format(&color_type, &data_type, num_extra);
 
-        self.decoder.set_pixel_format(pixel_format);
+        self.decoder.set_pixel_format(pixel_format).map_err(to_status)?;
         // Re-read from the decoder to capture any adjustments.
         self.pixel_format = self.decoder.current_pixel_format().cloned();
         self.output_color_type = color_type;
