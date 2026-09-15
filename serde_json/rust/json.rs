@@ -394,6 +394,12 @@ impl SerdeJson {
         self.serialize_with_formatter(sort_keys, SpacedFormatter)
     }
 
+    /// Converts a [SerdeJson] to a pretty-printed, multi-line string with
+    /// two-space indentation.
+    pub fn to_string_pretty(&self, sort_keys: bool) -> RawString {
+        self.serialize_with_formatter(sort_keys, serde_json::ser::PrettyFormatter::new())
+    }
+
     pub fn get_keys(&self) -> Result<VecRawString, RawString> {
         let object = match self.value.as_object() {
             Some(o) => o,

@@ -74,11 +74,14 @@ class SerdeJson final {
   // is not an object.
   absl::StatusOr<std::vector<std::string>> GetKeys() const;
 
-  // Convert this object to string.
+  // Converts this object to string.
   std::string ToString(bool sort_keys = true) const;
-  // Convert this object to string with spaces after colons and commas.
+  // Converts this object to string with spaces after colons and commas.
   // Example: {"key": "value", "num": 42}
   std::string ToStringSpaced(bool sort_keys = true) const;
+  // Converts this object to a pretty-printed, multi-line string with two-space
+  // indentation.
+  std::string ToStringPretty(bool sort_keys = true) const;
   absl::StatusOr<::google::protobuf::Struct> ToProtoStruct() const;
   absl::StatusOr<::google::protobuf::Value> ToProtoValue() const;
 
