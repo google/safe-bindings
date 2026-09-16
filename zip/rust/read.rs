@@ -9,7 +9,7 @@ use zip::ZipArchive as WrappedZipArchive;
 
 #[derive(Default)]
 pub struct BufferedZipArchive {
-    reader: Option<WrappedZipArchive<Cursor<Vec<u8>>>>,
+    reader: Option<Box<WrappedZipArchive<Cursor<Vec<u8>>>>>,
 }
 
 impl Debug for BufferedZipArchive {
@@ -50,7 +50,7 @@ impl BufferedZipArchive {
         let cursor = Cursor::new(data.into_vec());
         match WrappedZipArchive::new(cursor) {
             Ok(reader) => {
-                self.reader = Some(reader);
+                self.reader = Some(Box::new(reader));
                 Ok(())
             }
             Err(e) => Err(e.to_string()),
@@ -66,6 +66,14 @@ impl BufferedZipArchive {
     /// Returns the number of files in the archive.
     pub fn get_length(&self) -> usize {
         get_length_impl(&self.reader)
+    }
+
+    /// Returns the comment of the zip archive.
+    pub fn get_comment(&self) -> VecU8 {
+        match self.reader.as_ref() {
+            Some(reader) => VecU8::copy_from_slice(reader.comment()),
+            None => VecU8::default(),
+        }
     }
 
     /// Returns a zip file by its index.
@@ -102,7 +110,7 @@ impl BufferedZipArchive {
 
 #[derive(Default)]
 pub struct FsZipArchive {
-    reader: Option<WrappedZipArchive<File>>,
+    reader: Option<Box<WrappedZipArchive<File>>>,
 }
 
 impl Debug for FsZipArchive {
@@ -148,7 +156,7 @@ impl FsZipArchive {
         match File::open(path_str) {
             Ok(file) => match WrappedZipArchive::new(file) {
                 Ok(reader) => {
-                    self.reader = Some(reader);
+                    self.reader = Some(Box::new(reader));
                     Ok(())
                 }
                 Err(e) => Err(e.to_string()),
@@ -166,6 +174,14 @@ impl FsZipArchive {
     /// Returns the number of files in the archive.
     pub fn get_length(&self) -> usize {
         get_length_impl(&self.reader)
+    }
+
+    /// Returns the comment of the zip archive.
+    pub fn get_comment(&self) -> VecU8 {
+        match self.reader.as_ref() {
+            Some(reader) => VecU8::copy_from_slice(reader.comment()),
+            None => VecU8::default(),
+        }
     }
 
     /// Returns a zip file by its index.
@@ -200,7 +216,7 @@ impl FsZipArchive {
     }
 }
 
-fn get_length_impl<R: Read + Seek>(reader: &Option<WrappedZipArchive<R>>) -> usize {
+fn get_length_impl<R: Read + Seek>(reader: &Option<Box<WrappedZipArchive<R>>>) -> usize {
     match reader.as_ref() {
         Some(r) => r.len(),
         None => 0,
