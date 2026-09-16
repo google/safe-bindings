@@ -4,7 +4,7 @@
 #include <optional>
 #include <utility>
 
-#include "crubit/rust.h"
+#include "crubit/deflate_cpp_bindings.h"
 #include "crubit_helpers/string_conversions.h"
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
@@ -16,7 +16,7 @@ namespace security::deflate {
 
 using ::security::crubit_helpers::StringViewFromVecU8;
 
-VecU8Wrapper::VecU8Wrapper(rust::vec_u8::VecU8 vec_u8)
+VecU8Wrapper::VecU8Wrapper(deflate_cpp_bindings::vec_u8::VecU8 vec_u8)
     : vec_u8_(std::move(vec_u8)) {}
 
 absl::string_view VecU8Wrapper::as_string_view() const {
@@ -36,21 +36,21 @@ absl::Cord VecU8Wrapper::as_cord() && {
   return absl::MakeCordFromExternal(view, [b = std::move(vec_u8_)] {});
 }
 
-Compression::Compression(rust::Compression compression)
+Compression::Compression(deflate_cpp_bindings::Compression compression)
     : compression_(compression) {}
 Compression::Compression(int level)
-    : compression_(rust::Compression::new_(level)) {}
+    : compression_(deflate_cpp_bindings::Compression::new_(level)) {}
 
-rust::Compression Compression::get() const { return compression_; }
+deflate_cpp_bindings::Compression Compression::get() const { return compression_; }
 
 Compression Compression::best() {
-  return Compression(rust::Compression::best());
+  return Compression(deflate_cpp_bindings::Compression::best());
 }
 Compression Compression::none() {
-  return Compression(rust::Compression::none());
+  return Compression(deflate_cpp_bindings::Compression::none());
 }
 
-GzHeader::GzHeader(rust::GzHeader gz_header) : gz_header_(gz_header) {}
+GzHeader::GzHeader(deflate_cpp_bindings::GzHeader gz_header) : gz_header_(gz_header) {}
 
 uint8_t GzHeader::operating_system() const {
   return gz_header_.operating_system();
@@ -58,7 +58,7 @@ uint8_t GzHeader::operating_system() const {
 uint32_t GzHeader::mtime() const { return gz_header_.mtime(); }
 
 std::optional<GzHeader> GzHeader::FromRustOptionGzHeader(
-    std::optional<rust::GzHeader> header) {
+    std::optional<deflate_cpp_bindings::GzHeader> header) {
   if (!header.has_value()) {
     return std::nullopt;
   }
@@ -85,7 +85,7 @@ std::optional<GzHeader> GzDecoderImpl<RustDecoder>::header() const {
 
 template <typename RustDecoder>
 absl::StatusOr<VecU8Wrapper> GzDecoderImpl<RustDecoder>::read_to_end() {
-  rs_std::Result<rust::vec_u8::VecU8, rust::vec_u8::VecU8>
+  rs_std::Result<deflate_cpp_bindings::vec_u8::VecU8, deflate_cpp_bindings::vec_u8::VecU8>
       result_vec_u8 = decoder_.read_to_end();
   if (!result_vec_u8.has_value()) {
     // Potential errors from flate2 crate
@@ -100,18 +100,18 @@ absl::StatusOr<VecU8Wrapper> GzDecoderImpl<RustDecoder>::read_to_end() {
   return VecU8Wrapper(std::move(result_vec_u8).value());
 }
 
-GzEncoder::GzEncoder(rust::read::GzEncoder encoder)
+GzEncoder::GzEncoder(deflate_cpp_bindings::read::GzEncoder encoder)
     : encoder_(std::move(encoder)) {}
 
 GzEncoder GzEncoder::create(absl::string_view data, Compression level) {
-  return GzEncoder(rust::read::GzEncoder::create(
+  return GzEncoder(deflate_cpp_bindings::read::GzEncoder::create(
       absl::Span<const uint8_t>(reinterpret_cast<const uint8_t*>(data.data()),
                                 data.size()),
       level.get()));
 }
 
 absl::StatusOr<VecU8Wrapper> GzEncoder::read_to_end() {
-  rs_std::Result<rust::vec_u8::VecU8, rust::vec_u8::VecU8>
+  rs_std::Result<deflate_cpp_bindings::vec_u8::VecU8, deflate_cpp_bindings::vec_u8::VecU8>
       result_vec_u8 = encoder_.read_to_end();
   if (!result_vec_u8.has_value()) {
     // Potential errors only include system errors when reading from the
@@ -123,8 +123,8 @@ absl::StatusOr<VecU8Wrapper> GzEncoder::read_to_end() {
   return VecU8Wrapper(std::move(result_vec_u8).value());
 }
 
-template class GzDecoderImpl<rust::read::GzDecoder>;
-template class GzDecoderImpl<rust::read::MultiGzDecoder>;
+template class GzDecoderImpl<deflate_cpp_bindings::read::GzDecoder>;
+template class GzDecoderImpl<deflate_cpp_bindings::read::MultiGzDecoder>;
 
 }  // namespace read
 
@@ -146,7 +146,7 @@ std::optional<GzHeader> GzDecoderImpl<RustDecoder>::header() const {
 
 template <typename RustDecoder>
 absl::Status GzDecoderImpl<RustDecoder>::write_all(absl::string_view data) {
-  rs_std::Result<uint8_t, rust::vec_u8::VecU8> result_unit =
+  rs_std::Result<uint8_t, deflate_cpp_bindings::vec_u8::VecU8> result_unit =
       decoder_.write_all(absl::Span<const uint8_t>(
           reinterpret_cast<const uint8_t*>(data.data()), data.size()));
   if (!result_unit.has_value()) {
@@ -164,7 +164,7 @@ absl::Status GzDecoderImpl<RustDecoder>::write_all(absl::string_view data) {
 
 template <typename RustDecoder>
 absl::StatusOr<VecU8Wrapper> GzDecoderImpl<RustDecoder>::finish() && {
-  rs_std::Result<rust::vec_u8::VecU8, rust::vec_u8::VecU8>
+  rs_std::Result<deflate_cpp_bindings::vec_u8::VecU8, deflate_cpp_bindings::vec_u8::VecU8>
       result_vec_u8 = std::move(decoder_).finish();
   if (!result_vec_u8.has_value()) {
     // Potential errors from flate2 crate
@@ -176,15 +176,15 @@ absl::StatusOr<VecU8Wrapper> GzDecoderImpl<RustDecoder>::finish() && {
   return VecU8Wrapper(std::move(result_vec_u8).value());
 }
 
-GzEncoder::GzEncoder(rust::write::GzEncoder encoder)
+GzEncoder::GzEncoder(deflate_cpp_bindings::write::GzEncoder encoder)
     : encoder_(std::move(encoder)) {}
 
 GzEncoder GzEncoder::create(Compression level) {
-  return GzEncoder(rust::write::GzEncoder::create(level.get()));
+  return GzEncoder(deflate_cpp_bindings::write::GzEncoder::create(level.get()));
 }
 
 absl::Status GzEncoder::write_all(absl::string_view data) {
-  rs_std::Result<uint8_t, rust::vec_u8::VecU8> result_unit =
+  rs_std::Result<uint8_t, deflate_cpp_bindings::vec_u8::VecU8> result_unit =
       encoder_.write_all(absl::Span<const uint8_t>(
           reinterpret_cast<const uint8_t*>(data.data()), data.size()));
   if (!result_unit.has_value()) {
@@ -199,7 +199,7 @@ absl::Status GzEncoder::write_all(absl::string_view data) {
 }
 
 absl::StatusOr<VecU8Wrapper> GzEncoder::finish() && {
-  rs_std::Result<rust::vec_u8::VecU8, rust::vec_u8::VecU8>
+  rs_std::Result<deflate_cpp_bindings::vec_u8::VecU8, deflate_cpp_bindings::vec_u8::VecU8>
       result_vec_u8 = std::move(encoder_).finish();
   if (!result_vec_u8.has_value()) {
     // Potential errors only include system errors when using the
@@ -211,8 +211,8 @@ absl::StatusOr<VecU8Wrapper> GzEncoder::finish() && {
   return VecU8Wrapper(std::move(result_vec_u8).value());
 }
 
-template class GzDecoderImpl<rust::write::GzDecoder>;
-template class GzDecoderImpl<rust::write::MultiGzDecoder>;
+template class GzDecoderImpl<deflate_cpp_bindings::write::GzDecoder>;
+template class GzDecoderImpl<deflate_cpp_bindings::write::MultiGzDecoder>;
 
 }  // namespace write
 

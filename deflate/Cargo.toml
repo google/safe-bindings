@@ -1,0 +1,33 @@
+# Copyright 2026 Google LLC
+#
+# Licensed under the Apache License, Version 2.0 <LICENSE or
+# https://www.apache.org/licenses/LICENSE-2.0>.
+# This file may not be copied, modified, or distributed
+# except according to those terms.
+
+[package]
+name = "deflate-cpp-bindings"
+description = "C++ bindings for the flate2 crate using crubit"
+version = "0.1.0-prerelease"
+license-file = "LICENSE"
+license = "Apache-2.0"
+edition = "2024"
+repository = "https://github.com/google/safe-bindings"
+
+include = [
+    "Cargo.toml",
+    "README.md",
+    "LICENSE",
+    "rust/*.rs",
+    "*.h",
+    "*.cc",
+    "CMakeLists.txt",
+]
+
+[lib]
+path = "rust/lib.rs"
+doctest = false
+
+[dependencies]
+bytes = "1"
+flate2 = { version = "1", features = ["rust_backend", "zlib-rs"] }
