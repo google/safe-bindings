@@ -59,6 +59,10 @@ absl::StatusOr<SerdeJson> SerdeJson::CreateInt(int64_t value) {
   return SerdeJson(rust::json::SerdeJson::create_int(value));
 }
 
+absl::StatusOr<SerdeJson> SerdeJson::CreateUInt(uint64_t value) {
+  return SerdeJson(rust::json::SerdeJson::create_uint(value));
+}
+
 absl::StatusOr<SerdeJson> SerdeJson::CreateDouble(double value) {
   rs_std::Result<rust::json::SerdeJson,
                  rust::raw_string::RawString>
@@ -173,6 +177,18 @@ absl::StatusOr<int64_t> SerdeJson::GetInt() const {
   return std::move(rs_result).value();
 }
 
+absl::StatusOr<uint64_t> SerdeJson::GetUInt() const {
+  rs_std::Result<uint64_t, rust::raw_string::RawString>
+      rs_result = json_obj_.get_uint();
+
+  if (!rs_result.has_value()) {
+    return absl::FailedPreconditionError(
+        FromRustRawString(std::move(rs_result).err()));
+  }
+
+  return std::move(rs_result).value();
+}
+
 absl::StatusOr<double> SerdeJson::GetDouble() const {
   rs_std::Result<double, rust::raw_string::RawString>
       rs_result = json_obj_.get_double();
@@ -257,6 +273,19 @@ absl::StatusOr<int64_t> SerdeJson::GetFieldInt(absl::string_view key) const {
   return std::move(rs_result).value();
 }
 
+absl::StatusOr<uint64_t> SerdeJson::GetFieldUInt(absl::string_view key) const {
+  rs_std::Result<uint64_t, rust::raw_string::RawString>
+      rs_result = json_obj_.get_field_uint(absl::Span<const uint8_t>(
+          reinterpret_cast<const uint8_t*>(key.data()), key.size()));
+
+  if (!rs_result.has_value()) {
+    return absl::FailedPreconditionError(
+        FromRustRawString(std::move(rs_result).err()));
+  }
+
+  return std::move(rs_result).value();
+}
+
 absl::StatusOr<double> SerdeJson::GetFieldDouble(absl::string_view key) const {
   rs_std::Result<double, rust::raw_string::RawString>
       rs_result = json_obj_.get_field_double(absl::Span<const uint8_t>(
@@ -320,6 +349,8 @@ bool SerdeJson::IsString() const { return json_obj_.is_string(); }
 bool SerdeJson::IsNumber() const { return json_obj_.is_number(); }
 
 bool SerdeJson::IsInt() const { return json_obj_.is_i64(); }
+
+bool SerdeJson::IsUInt() const { return json_obj_.is_u64(); }
 
 bool SerdeJson::IsDouble() const { return json_obj_.is_f64(); }
 
@@ -400,6 +431,10 @@ absl::StatusOr<::google::protobuf::Value> SerdeJson::ToProtoValue() const {
     absl::StatusOr<int64_t> int_or = GetInt();
     if (!int_or.ok()) return int_or.status();
     result.set_number_value(*int_or);
+  } else if (IsUInt()) {
+    absl::StatusOr<uint64_t> uint_or = GetUInt();
+    if (!uint_or.ok()) return uint_or.status();
+    result.set_number_value(*uint_or);
   } else if (IsDouble()) {
     absl::StatusOr<double> double_or = GetDouble();
     if (!double_or.ok()) return double_or.status();
@@ -429,6 +464,13 @@ absl::StatusOr<::google::protobuf::Value> SerdeJson::ToProtoValue() const {
 
 absl::Status SerdeJson::AddFieldInt(absl::string_view key, int64_t value) {
   return ToStatus(json_obj_.add_field_int(
+      absl::Span<const uint8_t>(reinterpret_cast<const uint8_t*>(key.data()),
+                                key.size()),
+      value));
+}
+
+absl::Status SerdeJson::AddFieldUInt(absl::string_view key, uint64_t value) {
+  return ToStatus(json_obj_.add_field_uint(
       absl::Span<const uint8_t>(reinterpret_cast<const uint8_t*>(key.data()),
                                 key.size()),
       value));
