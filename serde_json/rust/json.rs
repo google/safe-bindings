@@ -117,6 +117,11 @@ impl SerdeJson {
         SerdeJson { value: serde_json::json!(v) }
     }
 
+    /// Creates a new [SerdeJson] of type u64
+    pub fn create_uint(v: u64) -> Self {
+        SerdeJson { value: serde_json::json!(v) }
+    }
+
     /// Creates a new [SerdeJson] of type double
     /// Returns error if value is NaN or infinity.
     pub fn create_double(v: f64) -> Result<SerdeJson, RawString> {
@@ -193,6 +198,18 @@ impl SerdeJson {
         match self.value[field_name].as_i64() {
             Some(i) => Ok(i),
             None => Err(format!("Field '{}' is not integer", field_name).into()),
+        }
+    }
+
+    /// Returns a uint for a given field name in the JSON.
+    pub fn get_field_uint(&self, raw_field_name: &[u8]) -> Result<u64, RawString> {
+        let field_name = match std::str::from_utf8(raw_field_name) {
+            Ok(field_name) => field_name,
+            Err(err) => return Err(err.to_string().into()),
+        };
+        match self.value[field_name].as_u64() {
+            Some(u) => Ok(u),
+            None => Err(format!("Field '{}' is not unsigned integer", field_name).into()),
         }
     }
 
@@ -276,6 +293,14 @@ impl SerdeJson {
         }
     }
 
+    /// Returns the uint value of this [SerdeJson] if it is a uint.
+    pub fn get_uint(&self) -> Result<u64, RawString> {
+        match self.value.as_u64() {
+            Some(u) => Ok(u),
+            None => Err("This object is not unsigned integer".into()),
+        }
+    }
+
     /// Returns the double value of this [SerdeJson] if it is a double.
     pub fn get_double(&self) -> Result<f64, RawString> {
         match self.value.as_f64() {
@@ -343,6 +368,11 @@ impl SerdeJson {
     /// Returns true if this [SerdeJson] is i64.
     pub fn is_i64(&self) -> bool {
         self.value.is_i64()
+    }
+
+    /// Returns true if this [SerdeJson] is u64.
+    pub fn is_u64(&self) -> bool {
+        self.value.is_u64()
     }
 
     /// Returns true if this [SerdeJson] is f64.
@@ -438,6 +468,11 @@ impl SerdeJson {
 
     /// Adds an integer field to the JSON object.
     pub fn add_field_int(&mut self, raw_field_name: &[u8], value: i64) -> Status {
+        self.add_field(raw_field_name, value)
+    }
+
+    /// Adds an unsigned integer field to the JSON object.
+    pub fn add_field_uint(&mut self, raw_field_name: &[u8], value: u64) -> Status {
         self.add_field(raw_field_name, value)
     }
 
