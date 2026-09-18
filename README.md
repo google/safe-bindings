@@ -16,7 +16,8 @@ C++ wrappers (using Crubit) for Rust libraries.
 | saphyr       | [saphyr](https://crates.io/crates/saphyr)         | Compiles |
 | serde_json   | [serde_json](https://crates.io/crates/serde_json) | Compiles |
 | zip          | [zip](https://crates.io/crates/zip)               | Compiles |
-<!-- keep-sorted end -->
+| leveldb      | [rusty_leveldb](https://crates.io/crates/rusty_leveldb)       | Doesn't compile - NOTE: Retry after `cc_std::virtual_unique_ptr` is supported |
+| stemming     | [snowball](https://crates.io/crates/snowball)     | Compiles |
 
 ## Contributing
 
