@@ -48,9 +48,9 @@ pub enum Format {
     Ico,
 }
 
-impl From<Format> for ImageFormat {
-    fn from(value: Format) -> ImageFormat {
-        match value {
+impl Format {
+    fn to_image_format(self) -> ImageFormat {
+        match self {
             Format::Png => ImageFormat::Png,
             Format::Jpeg => ImageFormat::Jpeg,
             Format::Gif => ImageFormat::Gif,
@@ -96,7 +96,7 @@ impl ImageReader {
         let Some(ref mut inner) = self.inner else {
             return;
         };
-        inner.set_format(format.into())
+        inner.set_format(format.to_image_format())
     }
 
     /// Read the image.
