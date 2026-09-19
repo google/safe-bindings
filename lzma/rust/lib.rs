@@ -44,8 +44,8 @@ pub use filter::{
     lzma_lzma_preset, lzma_properties_decode, lzma_properties_encode, lzma_properties_size,
 };
 pub use types::{
-    lzma_action, lzma_bool, lzma_check, lzma_filter, lzma_internal, lzma_internal_s, lzma_mt,
-    lzma_options_bcj, lzma_options_delta, lzma_options_lzma, lzma_reserved_enum, lzma_ret,
-    lzma_stream,
+    lzma_action, lzma_allocator, lzma_bool, lzma_check, lzma_filter, lzma_internal,
+    lzma_internal_s, lzma_mt, lzma_options_bcj, lzma_options_delta, lzma_options_lzma,
+    lzma_reserved_enum, lzma_ret, lzma_stream,
 };
-pub use util::{lzma_cputhreads, lzma_version_string};
+pub use util::{lzma_cputhreads, lzma_memusage, lzma_version_string};

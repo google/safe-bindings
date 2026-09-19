@@ -165,6 +165,32 @@ impl InternalState {
             tell_flags: 0,
         }
     }
+
+    pub fn memusage(&self) -> u64 {
+        match &self.coder {
+            CoderInner::RawLzma2Decoder(_) => {
+                if let Some(opts) = &self.lzma_options {
+                    let dict_size = opts.dict_size.max(lzma_rust2::DICT_SIZE_MIN);
+                    return (lzma_rust2::lzma2_get_memory_usage(dict_size) as u64) * 1024;
+                }
+                0
+            }
+            CoderInner::LzmaDecoder(_) => {
+                if let Some(opts) = &self.lzma_options {
+                    let dict_size = opts.dict_size.max(lzma_rust2::DICT_SIZE_MIN);
+                    if let Ok(mem_kb) =
+                        lzma_rust2::lzma_get_memory_usage(dict_size, opts.lc, opts.lp)
+                    {
+                        return (mem_kb as u64) * 1024;
+                    }
+                }
+                0
+            }
+            // NOTE (b/562586054): Add support for lzma_stream_decoder,
+            // lzma_auto_decoder, lzma_lzip_decoder, and lzma_alone_decoder.
+            _ => 0,
+        }
+    }
 }
 
 /// Convert a C `lzma_options_lzma` to a Rust `LzmaOptions`.

@@ -7,9 +7,32 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#define LZMA_VERSION_MAJOR 5
+#define LZMA_VERSION_MINOR 8
+#define LZMA_VERSION_PATCH 3
+#define LZMA_VERSION_STABILITY_ALPHA 0
+#define LZMA_VERSION_STABILITY_BETA 1
+#define LZMA_VERSION_STABILITY_STABLE 2
+#define LZMA_VERSION_STABILITY LZMA_VERSION_STABILITY_STABLE
+#ifndef LZMA_VERSION_COMMIT
+#define LZMA_VERSION_COMMIT ""
+#endif
+#define LZMA_VERSION                                                          \
+  (LZMA_VERSION_MAJOR * UINT32_C(10000000) +                                  \
+   LZMA_VERSION_MINOR * UINT32_C(10000) + LZMA_VERSION_PATCH * UINT32_C(10) + \
+   LZMA_VERSION_STABILITY)
+
 #ifdef __cplusplus
 extern "C" {
 #endif
+
+/* ---- Allocator ---- */
+
+typedef struct {
+  void* (*alloc)(void* opaque, size_t nmemb, size_t size);
+  void (*free)(void* opaque, void* ptr);
+  void* opaque;
+} lzma_allocator;
 
 /* ---- Return values ---- */
 
@@ -48,6 +71,8 @@ typedef enum {
   LZMA_CHECK_SHA256 = 10
 } lzma_check;
 
+#define LZMA_CHECK_ID_MAX 15
+
 /* ---- Reserved enum for padding ---- */
 
 typedef enum { LZMA_RESERVED_ENUM = 0 } lzma_reserved_enum;
@@ -62,7 +87,13 @@ typedef enum { LZMA_MODE_FAST = 1, LZMA_MODE_NORMAL = 2 } lzma_mode;
 
 /* ---- Match finders ---- */
 
-typedef enum { LZMA_MF_HC4 = 0x04, LZMA_MF_BT4 = 0x14 } lzma_match_finder;
+typedef enum {
+  LZMA_MF_HC3 = 0x03,
+  LZMA_MF_HC4 = 0x04,
+  LZMA_MF_BT2 = 0x12,
+  LZMA_MF_BT3 = 0x13,
+  LZMA_MF_BT4 = 0x14
+} lzma_match_finder;
 
 /* ---- Variable-length integer ---- */
 
@@ -119,6 +150,8 @@ typedef struct {
 
 /* ---- Filter chain ---- */
 
+#define LZMA_FILTERS_MAX 4
+
 typedef struct {
   lzma_vli id;
   void* options;
@@ -130,6 +163,7 @@ typedef struct {
 
 /* ---- Preset flags ---- */
 
+#define LZMA_PRESET_DEFAULT 6U
 #define LZMA_PRESET_EXTREME 0x80000000U
 #define LZMA_PRESET_LEVEL_MASK 0x1FU
 
@@ -510,6 +544,17 @@ uint64_t lzma_crc64(const uint8_t* buf, size_t size, uint64_t crc);
 // called before the stream header has been parsed, if `strm` is nullptr, or if
 // the stream lacks an internal state.
 lzma_check lzma_get_check(const lzma_stream* strm);
+
+// Gets the combined memory usage limit of all the state components.
+//
+// For encoders and raw decoders where options are explicitly configured at
+// initialization, returns the calculated memory usage in bytes.
+//
+// Note: For streaming decoders where dictionary size is determined dynamically
+// from the stream header (e.g., `lzma_stream_decoder`, `lzma_alone_decoder`,
+// `lzma_auto_decoder`, `lzma_lzip_decoder`), this implementation returns 0
+// as the underlying Rust decoders do not expose runtime memory usage.
+uint64_t lzma_memusage(const lzma_stream* strm);
 
 #ifdef __cplusplus
 }
