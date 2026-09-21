@@ -234,7 +234,7 @@ void ImageDecoder::SetBackgroundColor(std::array<uint8_t, 4> color_8bit,
 }
 
 void ImageDecoder::SetLimits(uint64_t max_alloc) {
-  decoder_.set_limits(max_alloc);
+  static_cast<void>(decoder_.set_limits(max_alloc));
 }
 
 bool ImageDecoder::IsAnimated() const { return decoder_.is_animated(); }
