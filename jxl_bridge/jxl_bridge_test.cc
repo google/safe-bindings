@@ -16,6 +16,7 @@
 namespace safe_bindings::jxl_bridge {
 namespace {
 
+using ::testing::ElementsAre;
 using ::testing::HasSubstr;
 using ::testing::status::StatusIs;
 
