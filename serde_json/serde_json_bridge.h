@@ -28,6 +28,7 @@ class SerdeJson final {
   static absl::StatusOr<SerdeJson> CreateObject();
   static absl::StatusOr<SerdeJson> CreateArray();
   static absl::StatusOr<SerdeJson> CreateInt(int64_t value);
+  static absl::StatusOr<SerdeJson> CreateUInt(uint64_t value);
   static absl::StatusOr<SerdeJson> CreateBool(bool value);
   static absl::StatusOr<SerdeJson> CreateDouble(double value);
   static absl::StatusOr<SerdeJson> CreateNull();
@@ -35,6 +36,7 @@ class SerdeJson final {
 
   // Returns the value of the current json node.
   absl::StatusOr<int64_t> GetInt() const;
+  absl::StatusOr<uint64_t> GetUInt() const;
   absl::StatusOr<bool> GetBool() const;
   absl::StatusOr<std::string> GetString() const;
   absl::StatusOr<double> GetDouble() const;
@@ -49,6 +51,7 @@ class SerdeJson final {
   absl::StatusOr<std::string> GetFieldString(absl::string_view key) const;
   absl::StatusOr<bool> GetFieldBool(absl::string_view key) const;
   absl::StatusOr<int64_t> GetFieldInt(absl::string_view key) const;
+  absl::StatusOr<uint64_t> GetFieldUInt(absl::string_view key) const;
   absl::StatusOr<double> GetFieldDouble(absl::string_view key) const;
   absl::StatusOr<SerdeJson> GetFieldObject(absl::string_view key) const;
   absl::StatusOr<std::vector<SerdeJson>> GetFieldArray(
@@ -66,6 +69,7 @@ class SerdeJson final {
   bool IsDouble() const;
   bool IsBool() const;
   bool IsInt() const;
+  bool IsUInt() const;
 
   // If the current node is an object, returns whether the field exists.
   absl::StatusOr<bool> HasField(absl::string_view key) const;
@@ -89,6 +93,7 @@ class SerdeJson final {
   absl::Status AddFieldBool(absl::string_view key, bool value);
   absl::Status AddFieldDouble(absl::string_view key, double value);
   absl::Status AddFieldInt(absl::string_view key, int64_t value);
+  absl::Status AddFieldUInt(absl::string_view key, uint64_t value);
   absl::Status AddFieldNull(absl::string_view key);
   absl::Status AddFieldObject(absl::string_view key, const SerdeJson& value);
   absl::Status AddFieldString(absl::string_view key, absl::string_view value);
