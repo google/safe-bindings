@@ -40,10 +40,6 @@ jobs:
           # "-D warnings" causing the build to fail.
           rustflags: ""
 
-      - name: Install Protobuf
-        if: matrix.binding == 'serde_json'
-        run: sudo apt-get update && sudo apt-get install -y libprotobuf-dev protobuf-compiler
-
       - name: Configure CMake
         run: cmake -B build -S ${{ matrix.binding }}
 

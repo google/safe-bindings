@@ -31,25 +31,19 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(absl)
 
-find_package(Protobuf REQUIRED)
-
-add_library(serde_json_bridge serde_json_bridge.cc serde_json_bridge.h)
-target_link_libraries(serde_json_bridge PUBLIC
-  absl::status
-  absl::statusor
-  absl::strings
-  absl::span
-  protobuf::libprotobuf
+add_library(serde_json INTERFACE)
+target_include_directories(serde_json INTERFACE
+  "${CMAKE_CURRENT_BINARY_DIR}"
+  "${CMAKE_CURRENT_SOURCE_DIR}"
+  "${CMAKE_CURRENT_SOURCE_DIR}/.."
 )
-target_link_libraries(serde_json_bridge PRIVATE
+target_link_libraries(serde_json INTERFACE
   rust
+  crubit_support
 )
-
-# Include the root directory for crubit_helpers/string_conversions.h
-target_include_directories(serde_json_bridge PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/..)
+add_dependencies(serde_json crubit_support)
 
 add_executable(serde_json_example main.cc)
 target_link_libraries(serde_json_example PRIVATE
-  serde_json_bridge
-  rust
+  serde_json
 )
