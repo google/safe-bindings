@@ -37,3 +37,19 @@ impl ZipError {
         Self::new(message, ZipErrorCode::Internal)
     }
 }
+
+impl ZipError {
+    /// Converts a `zip` crate error. Deliberately not a `From` impl: a public
+    /// `From<zip::result::ZipError>` would make Crubit generate C++ bindings for
+    /// the `zip` crate itself (and include them from zip_wrapper.h), which
+    /// clients neither need nor want.
+    pub(crate) fn from_zip_error(err: zip::result::ZipError) -> Self {
+        match err {
+            zip::result::ZipError::Io(e) => ZipError::internal(e.to_string()),
+            zip::result::ZipError::InvalidArchive(e) => ZipError::invalid_argument(e.as_ref()),
+            zip::result::ZipError::UnsupportedArchive(e) => ZipError::failed_precondition(e),
+            zip::result::ZipError::FileNotFound => ZipError::out_of_range("File not found"),
+            _ => ZipError::internal(err.to_string()),
+        }
+    }
+}

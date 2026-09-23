@@ -10,3 +10,6 @@ doctest = false
 
 [dependencies]
 zip = { version = "9.0", features = ["deflate", "bzip2", "time", "zstd", "lzma", "xz"] }
+
+[features]
+deflate-zopfli = ["zip/deflate-zopfli"]

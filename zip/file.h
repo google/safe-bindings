@@ -1,6 +1,7 @@
 #ifndef SECURITY_ZIP_FILE_H_
 #define SECURITY_ZIP_FILE_H_
 
+#include <cstddef>
 #include <cstdint>
 #include <string>
 #include <utility>
@@ -15,6 +16,9 @@ namespace security::zip {
 
 class BufferedZipWriter;
 class FsZipWriter;
+class BufferedZipStreamWriter;
+class FsZipStreamWriter;
+class ZipStreamWriter;
 
 enum class CompressionMethod : int32_t {
   kStored,
@@ -31,16 +35,34 @@ class BufferedZipFile final {
       : zip_(std::move(zip)) {}
   absl::StatusOr<bool> IsFile() const;
   absl::StatusOr<bool> IsDir() const;
-  bool IsNone() const;
+  [[nodiscard]] bool IsNone() const;
   absl::StatusOr<std::string> GetFileName() const;
   absl::StatusOr<CompressionMethod> GetCompressionMethod() const;
+  absl::StatusOr<std::string> GetComment() const;
+  absl::StatusOr<uint64_t> GetUncompressedSize() const;
+  absl::StatusOr<uint64_t> GetCompressedSize() const;
+  absl::StatusOr<uint32_t> GetCrc32() const;
+  // Returns the last-modified date encoded as an MS-DOS FAT date bitfield
+  // (bits 15-9: year offset from 1980, bits 8-5: month [1-12], bits 4-0: day
+  // [1-31]).
+  absl::StatusOr<uint16_t> GetLastModifiedDate() const;
+  // Returns the last-modified time encoded as an MS-DOS FAT time bitfield
+  // (bits 15-11: hour [0-23], bits 10-5: minute [0-59], bits 4-0: second / 2
+  // [0-29]).
+  absl::StatusOr<uint16_t> GetLastModifiedTime() const;
+  absl::StatusOr<uint32_t> GetUnixMode() const;
+  absl::StatusOr<RustVecU8Wrapper> GetExtraData() const;
   absl::StatusOr<RustVecU8Wrapper> GetFileData();
+  absl::StatusOr<RustVecU8Wrapper> ReadBytes(size_t max_bytes);
 
  private:
   absl::Status CheckNone() const;
   rust::BufferedZipFile zip_;
   friend class BufferedZipWriter;
   friend class FsZipWriter;
+  friend class BufferedZipStreamWriter;
+  friend class FsZipStreamWriter;
+  friend class ZipStreamWriter;
 };
 
 class FsZipFile final {
@@ -48,16 +70,34 @@ class FsZipFile final {
   explicit FsZipFile(rust::FsZipFile zip) : zip_(std::move(zip)) {}
   absl::StatusOr<bool> IsFile() const;
   absl::StatusOr<bool> IsDir() const;
-  bool IsNone() const;
+  [[nodiscard]] bool IsNone() const;
   absl::StatusOr<std::string> GetFileName() const;
   absl::StatusOr<CompressionMethod> GetCompressionMethod() const;
+  absl::StatusOr<std::string> GetComment() const;
+  absl::StatusOr<uint64_t> GetUncompressedSize() const;
+  absl::StatusOr<uint64_t> GetCompressedSize() const;
+  absl::StatusOr<uint32_t> GetCrc32() const;
+  // Returns the last-modified date encoded as an MS-DOS FAT date bitfield
+  // (bits 15-9: year offset from 1980, bits 8-5: month [1-12], bits 4-0: day
+  // [1-31]).
+  absl::StatusOr<uint16_t> GetLastModifiedDate() const;
+  // Returns the last-modified time encoded as an MS-DOS FAT time bitfield
+  // (bits 15-11: hour [0-23], bits 10-5: minute [0-59], bits 4-0: second / 2
+  // [0-29]).
+  absl::StatusOr<uint16_t> GetLastModifiedTime() const;
+  absl::StatusOr<uint32_t> GetUnixMode() const;
+  absl::StatusOr<RustVecU8Wrapper> GetExtraData() const;
   absl::StatusOr<RustVecU8Wrapper> GetFileData();
+  absl::StatusOr<RustVecU8Wrapper> ReadBytes(size_t max_bytes);
 
  private:
   absl::Status CheckNone() const;
   rust::FsZipFile zip_;
   friend class BufferedZipWriter;
   friend class FsZipWriter;
+  friend class BufferedZipStreamWriter;
+  friend class FsZipStreamWriter;
+  friend class ZipStreamWriter;
 };
 
 class ZipFile final {
@@ -72,10 +112,25 @@ class ZipFile final {
 
   absl::StatusOr<bool> IsFile() const;
   absl::StatusOr<bool> IsDir() const;
-  bool IsNone() const;
+  [[nodiscard]] bool IsNone() const;
   absl::StatusOr<std::string> GetFileName() const;
   absl::StatusOr<CompressionMethod> GetCompressionMethod() const;
+  absl::StatusOr<std::string> GetComment() const;
+  absl::StatusOr<uint64_t> GetUncompressedSize() const;
+  absl::StatusOr<uint64_t> GetCompressedSize() const;
+  absl::StatusOr<uint32_t> GetCrc32() const;
+  // Returns the last-modified date encoded as an MS-DOS FAT date bitfield
+  // (bits 15-9: year offset from 1980, bits 8-5: month [1-12], bits 4-0: day
+  // [1-31]).
+  absl::StatusOr<uint16_t> GetLastModifiedDate() const;
+  // Returns the last-modified time encoded as an MS-DOS FAT time bitfield
+  // (bits 15-11: hour [0-23], bits 10-5: minute [0-59], bits 4-0: second / 2
+  // [0-29]).
+  absl::StatusOr<uint16_t> GetLastModifiedTime() const;
+  absl::StatusOr<uint32_t> GetUnixMode() const;
+  absl::StatusOr<RustVecU8Wrapper> GetExtraData() const;
   absl::StatusOr<RustVecU8Wrapper> GetFileData();
+  absl::StatusOr<RustVecU8Wrapper> ReadBytes(size_t max_bytes);
 
  private:
   using BackendType = std::variant<BufferedZipFile, FsZipFile>;
@@ -83,6 +138,9 @@ class ZipFile final {
   explicit ZipFile(BackendType b) : zip_(std::move(b)) {}
   friend class BufferedZipWriter;
   friend class FsZipWriter;
+  friend class BufferedZipStreamWriter;
+  friend class FsZipStreamWriter;
+  friend class ZipStreamWriter;
 };
 
 }  // namespace security::zip
