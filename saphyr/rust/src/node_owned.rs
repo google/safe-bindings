@@ -1,33 +1,27 @@
 use crate::node_view::NodeView;
 use saphyr::YamlOwned;
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct NodeOwned {
-    yaml: YamlOwned,
-}
-
-impl Default for NodeOwned {
-    fn default() -> Self {
-        NodeOwned { yaml: YamlOwned::BadValue }
-    }
+    yaml: Option<Box<YamlOwned>>,
 }
 
 impl NodeOwned {
     pub fn new(yaml: YamlOwned) -> Self {
-        Self { yaml }
+        match yaml {
+            YamlOwned::BadValue => Self { yaml: None },
+            _ => Self { yaml: Some(Box::new(yaml)) },
+        }
     }
 
     pub fn inner(&self) -> Option<&YamlOwned> {
-        match &self.yaml {
-            YamlOwned::BadValue => None,
-            _ => Some(&self.yaml),
-        }
+        self.yaml.as_deref().filter(|y| !matches!(y, YamlOwned::BadValue))
     }
 
     yaml_node_common_impl!(NodeOwned);
 
     pub fn as_view(&self) -> NodeView {
-        NodeView::new(&self.yaml)
+        self.inner().map_or_else(NodeView::default, NodeView::new)
     }
 
     pub fn get_at_index<'a>(&'a self, index: usize) -> Option<NodeView<'a>> {
@@ -39,7 +33,7 @@ impl NodeOwned {
     }
 
     pub fn set_at_index(&mut self, index: usize, value: YamlOwned) {
-        if let YamlOwned::Sequence(seq) = &mut self.yaml {
+        if let Some(YamlOwned::Sequence(seq)) = self.yaml.as_deref_mut() {
             if index < seq.len() {
                 seq[index] = value;
             } else if index == seq.len() {
@@ -58,7 +52,7 @@ impl NodeOwned {
     }
 
     pub fn set_at_key(&mut self, key: &str, value: YamlOwned) {
-        if let YamlOwned::Mapping(map) = &mut self.yaml {
+        if let Some(YamlOwned::Mapping(map)) = self.yaml.as_deref_mut() {
             let key_node = YamlOwned::Value(saphyr::ScalarOwned::String(key.into()));
             map.insert(key_node, value);
         }
