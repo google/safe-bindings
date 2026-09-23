@@ -3,13 +3,18 @@
 
 #include <complex>
 #include <cstddef>
+#include <cstdint>
 #include <functional>
 #include <numeric>
 
+#include "support/rs_std/result.h"
 #include "support/rs_std/slice_ref.h"
+#include "support/rs_std/unit.h"
+#include "support/rs_std/vec.h"
 #include "array_layout.h"
 #include "crubit/rust.h"
 #include "absl/status/status.h"
+#include "absl/strings/string_view.h"
 #include "absl/types/span.h"
 
 namespace security::fft::internal {
@@ -138,12 +143,15 @@ struct FftTraits<double> {
   using Complex = rust::ComplexF64;
 };
 
-// Converts a ResultUnit from Rust into an absl::Status.
-inline absl::Status ToStatus(const rust::ResultUnit& result) {
-  if (result.is_ok()) {
+// Converts a Result from Rust into an absl::Status.
+inline absl::Status ToStatus(
+    const rs_std::Result<rs_std::unit_t, rs_std::Vec<uint8_t>>& result) {
+  if (result.has_value()) {
     return absl::OkStatus();
   }
-  return absl::InternalError(result.unwrap_err_ref());
+  const rs_std::Vec<uint8_t>& err = result.err();
+  return absl::InternalError(
+      absl::string_view(reinterpret_cast<const char*>(err.data()), err.size()));
 }
 
 // Converts a span of real values to a slice of the appropriate Rust wrapper

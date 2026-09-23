@@ -48,11 +48,8 @@
 //!
 //! The wrapper internally constructs `ArrayView` objects of the specified dimensions, which can
 //! fail if the dimensions are incompatible with the slice size. So these wrapper functions return
-//! a ResultUnit instead of nothing, to account for the possibility of failure.
+//! a Result<(), Vec<u8>> instead of nothing, to account for the possibility of failure.
 
-mod crubit_util;
-
-use anyhow::ensure;
 use bytemuck::TransparentWrapper;
 use ndarray::{ArrayViewD, ArrayViewMutD, IxDyn, ShapeBuilder};
 use ndrustfft::{
@@ -62,8 +59,6 @@ use ndrustfft::{
 };
 
 pub use ndarray::Slice;
-
-make_result_type!((), ResultUnit);
 
 // Monomorphized Complex types for crubit.
 #[repr(transparent)]
@@ -194,10 +189,12 @@ macro_rules! define_fftw_view {
             shape: &[usize],
             nembed: &[usize],
             stride: usize,
-        ) -> Result<$view_type<'a, T>, anyhow::Error> {
-            ensure!(shape.len() == nembed.len(),
-                "shape and nembed must have the same number of dimensions (rank)"
-            );
+        ) -> Result<$view_type<'a, T>, Vec<u8>> {
+            if shape.len() != nembed.len() {
+                return Err(
+                    b"shape and nembed must have the same number of dimensions (rank)".to_vec(),
+                );
+            }
 
             let ndim = shape.len();
             let mut strides = vec![0; ndim];
@@ -212,7 +209,8 @@ macro_rules! define_fftw_view {
 
             let dim = IxDyn(shape);
             let custom_strides = IxDyn(&strides);
-            Ok($view_type::from_shape(dim.strides(custom_strides), data)?)
+            $view_type::from_shape(dim.strides(custom_strides), data)
+                .map_err(|e| e.to_string().into_bytes())
         }
     }
 }
@@ -232,6 +230,7 @@ macro_rules! expand_transform_variants {
                 handler: $handler_type:ident,
                 axis: usize) => $ndfunc:ident,)*) => {
         $($(#[doc = $doc])*
+        #[allow(clippy::too_many_arguments)]
         pub fn $func(
             shape: &[usize],
             input: &[$in_type],
@@ -242,17 +241,15 @@ macro_rules! expand_transform_variants {
             ostride: usize,
             handler: &$handler_type,
             axis: usize,
-        ) -> ResultUnit {
-            try_crubit!({
-                let input_array = create_fftw_view(
-                    $in_type::peel_slice(input), shape, inembed, istride,
-                )?;
-                let mut output_array = create_fftw_view_mut(
-                    $out_type::peel_slice_mut(output), shape, onembed, ostride,
-                )?;
-                $ndfunc(&input_array, &mut output_array, &handler.0, axis);
-                Ok(())
-            })
+        ) -> Result<(), Vec<u8>> {
+            let input_array = create_fftw_view(
+                $in_type::peel_slice(input), shape, inembed, istride,
+            )?;
+            let mut output_array = create_fftw_view_mut(
+                $out_type::peel_slice_mut(output), shape, onembed, ostride,
+            )?;
+            $ndfunc(&input_array, &mut output_array, &handler.0, axis);
+            Ok(())
         })*
     };
 }
@@ -273,14 +270,12 @@ macro_rules! expand_transform_inplace_variants {
             stride: usize,
             handler: &$handler_type,
             axis: usize,
-        ) -> ResultUnit {
-            try_crubit!({
-                let mut data_array = create_fftw_view_mut(
-                    $type::peel_slice_mut(data), shape, nembed, stride,
-                )?;
-                $ndfunc(&mut data_array, &handler.0, axis);
-                Ok(())
-            })
+        ) -> Result<(), Vec<u8>> {
+            let mut data_array = create_fftw_view_mut(
+                $type::peel_slice_mut(data), shape, nembed, stride,
+            )?;
+            $ndfunc(&mut data_array, &handler.0, axis);
+            Ok(())
         })*
     };
 }
@@ -299,6 +294,7 @@ macro_rules! expand_r2c_transform_variants {
                 handler: $handler_type:ident,
                 axis: usize) => $ndfunc:ident,)*) => {
         $($(#[doc = $doc])*
+        #[allow(clippy::too_many_arguments)]
         pub fn $func(
             shape: &[usize],
             input: &[$in_type],
@@ -309,30 +305,33 @@ macro_rules! expand_r2c_transform_variants {
             ostride: usize,
             handler: &$handler_type,
             axis: usize,
-        ) -> ResultUnit {
-            try_crubit!({
-                ensure!(axis < shape.len(),
+        ) -> Result<(), Vec<u8>> {
+            if axis >= shape.len() {
+                return Err(format!(
                     "axis ({}) must be less than the number of dimensions ({})",
-                    axis, shape.len());
-                let input_array = create_fftw_view(
-                    $in_type::peel_slice(input), shape, inembed, istride)?;
-                // The output of a real-to-complex transform contains symmetries that make half of
-                // the outputs redundant. Therefore, ndrustfft (like FFTW) will return n/2+1 complex
-                // numbers for a r2c transform of n reals. See the explanation in
-                // https://www.fftw.org/fftw3_doc/Real_002ddata-DFT-Array-Format.html
-                //
-                // In the multi-dimensional case, FFTW always applies this "halving" to the last
-                // dimension. However, ndrustfft only applies the transform along one axis, so
-                // this change in size happens along the chosen axis.
-                let mut output_shape = shape.to_vec();
-                output_shape[axis] = output_shape[axis] / 2 + 1;
-                let mut output_array = create_fftw_view_mut(
-                    $out_type::peel_slice_mut(output),
-                    output_shape.as_slice(), onembed, ostride,
-                )?;
-                $ndfunc(&input_array, &mut output_array, &handler.0, axis);
-                Ok(())
-            })
+                    axis,
+                    shape.len()
+                )
+                .into_bytes());
+            }
+            let input_array = create_fftw_view(
+                $in_type::peel_slice(input), shape, inembed, istride)?;
+            // The output of a real-to-complex transform contains symmetries that make half of
+            // the outputs redundant. Therefore, ndrustfft (like FFTW) will return n/2+1 complex
+            // numbers for a r2c transform of n reals. See the explanation in
+            // https://www.fftw.org/fftw3_doc/Real_002ddata-DFT-Array-Format.html
+            //
+            // In the multi-dimensional case, FFTW always applies this "halving" to the last
+            // dimension. However, ndrustfft only applies the transform along one axis, so
+            // this change in size happens along the chosen axis.
+            let mut output_shape = shape.to_vec();
+            output_shape[axis] = output_shape[axis] / 2 + 1;
+            let mut output_array = create_fftw_view_mut(
+                $out_type::peel_slice_mut(output),
+                output_shape.as_slice(), onembed, ostride,
+            )?;
+            $ndfunc(&input_array, &mut output_array, &handler.0, axis);
+            Ok(())
         })*
     };
 }
@@ -353,6 +352,7 @@ macro_rules! expand_c2r_transform_variants {
                 handler: $handler_type:ident,
                 axis: usize) => $ndfunc:ident,)*) => {
         $($(#[doc = $doc])*
+        #[allow(clippy::too_many_arguments)]
         pub fn $func(
             shape: &[usize],
             input: &[$in_type],
@@ -363,23 +363,26 @@ macro_rules! expand_c2r_transform_variants {
             ostride: usize,
             handler: &$handler_type,
             axis: usize,
-        ) -> ResultUnit {
-            try_crubit!({
-                ensure!(axis < shape.len(),
+        ) -> Result<(), Vec<u8>> {
+            if axis >= shape.len() {
+                return Err(format!(
                     "axis ({}) must be less than the number of dimensions ({})",
-                    axis, shape.len());
+                    axis,
+                    shape.len()
+                )
+                .into_bytes());
+            }
 
-                let mut input_shape = shape.to_vec();
-                input_shape[axis] = input_shape[axis] / 2 + 1;
-                let input_array = create_fftw_view(
-                    $in_type::peel_slice(input), input_shape.as_slice(), inembed, istride,
-                )?;
-                let mut output_array = create_fftw_view_mut(
-                    $out_type::peel_slice_mut(output), shape, onembed, ostride,
-                )?;
-                $ndfunc(&input_array, &mut output_array, &handler.0, axis);
-                Ok(())
-            })
+            let mut input_shape = shape.to_vec();
+            input_shape[axis] = input_shape[axis] / 2 + 1;
+            let input_array = create_fftw_view(
+                $in_type::peel_slice(input), input_shape.as_slice(), inembed, istride,
+            )?;
+            let mut output_array = create_fftw_view_mut(
+                $out_type::peel_slice_mut(output), shape, onembed, ostride,
+            )?;
+            $ndfunc(&input_array, &mut output_array, &handler.0, axis);
+            Ok(())
         })*
     };
 }
