@@ -53,8 +53,8 @@
 #include "fft_internal.h"
 #include "crubit/rust.h"
 #include "absl/status/status.h"
+#include "absl/status/status_macros.h"
 #include "absl/types/span.h"
-#include "third_party/gloop/util/status/status_macros.h"
 
 namespace security::fft {
 
