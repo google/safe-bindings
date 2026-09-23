@@ -242,6 +242,14 @@ macro_rules! expand_transform_variants {
             handler: &$handler_type,
             axis: usize,
         ) -> Result<(), Vec<u8>> {
+            if axis >= shape.len() {
+                return Err(format!(
+                    "axis ({}) must be less than the number of dimensions ({})",
+                    axis,
+                    shape.len()
+                )
+                .into_bytes());
+            }
             let input_array = create_fftw_view(
                 $in_type::peel_slice(input), shape, inembed, istride,
             )?;
@@ -271,6 +279,14 @@ macro_rules! expand_transform_inplace_variants {
             handler: &$handler_type,
             axis: usize,
         ) -> Result<(), Vec<u8>> {
+            if axis >= shape.len() {
+                return Err(format!(
+                    "axis ({}) must be less than the number of dimensions ({})",
+                    axis,
+                    shape.len()
+                )
+                .into_bytes());
+            }
             let mut data_array = create_fftw_view_mut(
                 $type::peel_slice_mut(data), shape, nembed, stride,
             )?;
