@@ -18,6 +18,7 @@ jobs:
         binding:
         # keep-sorted start
           - deflate
+          - fft
           - kamadak_exif
           - pixel_bridge
           - regex
@@ -38,10 +39,6 @@ jobs:
           # NOTE: b/530101873 - Crubit has some compiler warnings. By default rustflags is
           # "-D warnings" causing the build to fail.
           rustflags: ""
-
-      - name: Install Protobuf
-        if: matrix.binding == 'serde_json'
-        run: sudo apt-get update && sudo apt-get install -y libprotobuf-dev protobuf-compiler
 
       - name: Configure CMake
         run: cmake -B build -S ${{ matrix.binding }}

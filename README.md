@@ -8,6 +8,7 @@ C++ wrappers (using Crubit) for Rust libraries.
 | Wrapper      | Wrapped crate                                     | Status   |
 | ------------ | ------------------------------------------------- | -------- |
 | deflate      | [flate2](https://crates.io/crates/flate2)         | Compiles |
+| fft          | [ndrustfft](https://crates.io/crates/ndrustfft)   | Compiles |
 | kamadak_exif | [kamadak-exif](https://crates.io/crates/kamadak-exif) | Compiles      |
 | leveldb      | [rusty_leveldb](https://crates.io/crates/rusty_leveldb)       | Doesn't compile - NOTE: Retry after `cc_std::virtual_unique_ptr` is supported |
 | pixel_bridge | [image](https://crates.io/crates/image)           | Compiles |
