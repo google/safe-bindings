@@ -25,6 +25,7 @@ jobs:
           - roaring_bridge
           - saphyr
           - serde_json
+          - stemming
           - zip
         # keep-sorted end
     steps:
