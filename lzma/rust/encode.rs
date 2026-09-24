@@ -4,9 +4,10 @@
 use std::num::NonZeroU64;
 
 use lzma_rust2::{
-    EncodeMode, LzipOptions, LzipWriter, Lzma2Options, Lzma2Writer, LzmaOptions, LzmaWriter,
-    MfType, XzOptions, XzWriter,
+    EncodeMode, Lzma2Options, Lzma2Writer, LzmaOptions, LzmaWriter, MfType, XzOptions, XzWriter,
 };
+#[cfg(feature = "lzip")]
+use lzma_rust2::{LzipOptions, LzipWriter};
 
 use crate::helpers;
 use crate::state::{
@@ -381,6 +382,7 @@ pub unsafe extern "C" fn lzma_raw_encoder(
 /// exclusive ownership of the struct (no concurrent aliasing) during this call.
 /// If `strm.internal` is non-null, it must point to a valid `InternalState` allocated by
 /// this crate.
+#[cfg(feature = "lzip")]
 #[unsafe(export_name = crate::prefix!(lzma_lzip_encoder))]
 pub unsafe extern "C" fn lzma_lzip_encoder(
     strm: Option<&mut lzma_stream>,

@@ -33,12 +33,14 @@ pub(crate) use prefix;
 
 pub use check::{lzma_check_is_supported, lzma_crc32, lzma_crc64, lzma_get_check};
 pub use code::{lzma_code, lzma_end};
-pub use decode::{
-    lzma_alone_decoder, lzma_auto_decoder, lzma_lzip_decoder, lzma_raw_decoder, lzma_stream_decoder,
-};
+#[cfg(feature = "lzip")]
+pub use decode::lzma_lzip_decoder;
+pub use decode::{lzma_alone_decoder, lzma_auto_decoder, lzma_raw_decoder, lzma_stream_decoder};
+#[cfg(feature = "lzip")]
+pub use encode::lzma_lzip_encoder;
 pub use encode::{
-    lzma_alone_encoder, lzma_easy_encoder, lzma_lzip_encoder, lzma_raw_encoder,
-    lzma_stream_encoder, lzma_stream_encoder_mt,
+    lzma_alone_encoder, lzma_easy_encoder, lzma_raw_encoder, lzma_stream_encoder,
+    lzma_stream_encoder_mt,
 };
 pub use filter::{
     lzma_lzma_preset, lzma_properties_decode, lzma_properties_encode, lzma_properties_size,

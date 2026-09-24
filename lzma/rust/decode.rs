@@ -1,8 +1,10 @@
 //! Decoder initialization functions: lzma_stream_decoder,
 //! lzma_alone_decoder.
 
+#[cfg(feature = "lzip")]
+use lzma_rust2::LzipStream;
 use lzma_rust2::{
-    EncodeMode, LzipStream, Lzma2Stream, LzmaOptions, LzmaStream, MfType, XzStream, DICT_SIZE_MIN,
+    EncodeMode, Lzma2Stream, LzmaOptions, LzmaStream, MfType, XzStream, DICT_SIZE_MIN,
 };
 
 use crate::helpers;
@@ -231,6 +233,7 @@ pub unsafe extern "C" fn lzma_raw_decoder(
 /// this crate.
 /// `memlimit` is converted to KiB internally, a limit lower than 1024 bytes will cause the
 /// decoder to fail. This is similar to liblzma.
+#[cfg(feature = "lzip")]
 #[unsafe(export_name = crate::prefix!(lzma_lzip_decoder))]
 pub unsafe extern "C" fn lzma_lzip_decoder(
     strm: Option<&mut lzma_stream>,

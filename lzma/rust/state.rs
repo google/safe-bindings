@@ -682,12 +682,12 @@ impl AutoDecoder {
             // liblzma only probes for .lz when built with HAVE_LZIP_DECODER, which
             // google3's liblzma does not define, so .lz falls through to the alone
             // decoder there. We keep the behavior the same by introducing the
-            // lzip_auto_decoder feature, but keep it disabled by default.
+            // lzip feature, but keep it disabled by default.
             if input[0] == 0xFD {
                 let allow_multiple = (self.flags & LZMA_CONCATENATED) != 0;
                 let decoder = XzStream::new_mem_limit(allow_multiple, memlimit_kb);
                 self.coder = Some(Box::new(CoderInner::XzDecoder(Box::new(decoder))));
-            } else if cfg!(feature = "lzip_auto_decoder") && input[0] == 0x4C {
+            } else if cfg!(feature = "lzip") && input[0] == 0x4C {
                 self.coder = Some(Box::new(CoderInner::LzipDecoder(Box::new(
                     LzipStream::new_mem_limit(memlimit_kb),
                 ))));
