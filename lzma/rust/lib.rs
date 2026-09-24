@@ -20,7 +20,6 @@ mod encode;
 mod filter;
 mod helpers;
 mod state;
-#[path = "lzma_types_gen.rs"]
 mod types;
 mod util;
 

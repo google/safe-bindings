@@ -20,6 +20,7 @@ jobs:
           - deflate
           - fft
           - kamadak_exif
+          - lzma
           - pixel_bridge
           - regex
           - roaring_bridge
