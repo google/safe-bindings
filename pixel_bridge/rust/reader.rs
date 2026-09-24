@@ -2,11 +2,21 @@ use crate::{
     image::{GenericImageDecoder, ImageDecoder},
     vec_u8::VecU8,
 };
+#[cfg(not(png_only))]
+use image::codecs::bmp::BmpDecoder as RustBmpDecoder;
+#[cfg(not(png_only))]
+use image::codecs::gif::GifDecoder as RustGifDecoder;
+#[cfg(not(png_only))]
+use image::codecs::ico::IcoDecoder as RustIcoDecoder;
+#[cfg(not(png_only))]
+use image::codecs::jpeg::JpegDecoder as RustJpegDecoder;
+#[cfg(not(png_only))]
+use image::codecs::tiff::TiffDecoder as RustTiffDecoder;
+#[cfg(not(png_only))]
+use image::codecs::webp::WebPDecoder as RustWebPDecoder;
+
 use image::{
-    codecs::bmp::BmpDecoder as RustBmpDecoder, codecs::gif::GifDecoder as RustGifDecoder,
-    codecs::ico::IcoDecoder as RustIcoDecoder, codecs::jpeg::JpegDecoder as RustJpegDecoder,
-    codecs::png::PngDecoder as RustPngDecoder, codecs::tiff::TiffDecoder as RustTiffDecoder,
-    codecs::webp::WebPDecoder as RustWebPDecoder, ImageFormat, ImageReader as RustImageReader,
+    codecs::png::PngDecoder as RustPngDecoder, ImageFormat, ImageReader as RustImageReader,
 };
 use std::fs::File;
 use std::io::{BufRead, BufReader, Cursor, Read, Seek};
@@ -120,10 +130,15 @@ impl ImageReader {
         match inner.format() {
             Some(ImageFormat::Png) => png(inner),
             Some(ImageFormat::Jpeg) => jpeg(inner),
+            #[cfg(not(png_only))]
             Some(ImageFormat::WebP) => webp(inner),
+            #[cfg(not(png_only))]
             Some(ImageFormat::Gif) => gif(inner),
+            #[cfg(not(png_only))]
             Some(ImageFormat::Tiff) => tiff(inner),
+            #[cfg(not(png_only))]
             Some(ImageFormat::Bmp) => bmp(inner),
+            #[cfg(not(png_only))]
             Some(ImageFormat::Ico) => ico(inner),
             _ => Err("unsupported image format".to_string()),
         }
@@ -139,6 +154,7 @@ fn png(
     Ok(ImageDecoder::new(GenericImageDecoder::Png(Box::new(decoder))))
 }
 
+#[cfg(not(png_only))]
 #[inline(never)]
 fn jpeg(
     d: RustImageReader<Box<dyn ReadSeek>>,
@@ -147,6 +163,7 @@ fn jpeg(
     Ok(ImageDecoder::new(GenericImageDecoder::Jpeg(Box::new(decoder))))
 }
 
+#[cfg(not(png_only))]
 #[inline(never)]
 fn webp(d: RustImageReader<Box<dyn ReadSeek>>) -> Result<ImageDecoder, String> {
     Ok(ImageDecoder::new(GenericImageDecoder::WebP(Box::new(
@@ -154,6 +171,7 @@ fn webp(d: RustImageReader<Box<dyn ReadSeek>>) -> Result<ImageDecoder, String> {
     ))))
 }
 
+#[cfg(not(png_only))]
 #[inline(never)]
 fn gif(d: RustImageReader<Box<dyn ReadSeek>>) -> Result<ImageDecoder, String> {
     Ok(ImageDecoder::new(GenericImageDecoder::Gif(Box::new(
@@ -161,6 +179,7 @@ fn gif(d: RustImageReader<Box<dyn ReadSeek>>) -> Result<ImageDecoder, String> {
     ))))
 }
 
+#[cfg(not(png_only))]
 #[inline(never)]
 fn tiff(d: RustImageReader<Box<dyn ReadSeek>>) -> Result<ImageDecoder, String> {
     let mut reader = d.into_inner();
@@ -189,6 +208,7 @@ fn tiff(d: RustImageReader<Box<dyn ReadSeek>>) -> Result<ImageDecoder, String> {
     Ok(image_decoder)
 }
 
+#[cfg(not(png_only))]
 #[inline(never)]
 fn bmp(d: RustImageReader<Box<dyn ReadSeek>>) -> Result<ImageDecoder, String> {
     Ok(ImageDecoder::new(GenericImageDecoder::Bmp(Box::new(
@@ -196,12 +216,14 @@ fn bmp(d: RustImageReader<Box<dyn ReadSeek>>) -> Result<ImageDecoder, String> {
     ))))
 }
 
+#[cfg(not(png_only))]
 /// Maximum number of directory entries we accept in an ICO file.
 ///
 /// The ICO format allows up to `u16::MAX` (65535) entries. We enforce a much smaller cap here to bound the
 /// work the decoder performs on untrusted input.
 const MAX_ICO_ENTRIES: u16 = 16;
 
+#[cfg(not(png_only))]
 #[inline(never)]
 fn ico(d: RustImageReader<Box<dyn ReadSeek>>) -> Result<ImageDecoder, String> {
     let mut reader = d.into_inner();
