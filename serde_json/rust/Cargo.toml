@@ -5,10 +5,12 @@ edition = "2024"
 license-file = "../../LICENSE"
 
 [lib]
-path = "lib.rs"
+path = "serde_json_wrapper.rs"
 doctest = false
 
 [dependencies]
+crubit_annotate = "0.1.0"
+ffi_11 = "0.0.3"
+ref-cast = "1.0"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = { version = "1.0", features = ["preserve_order"] }
-paste = "1.0"

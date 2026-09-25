@@ -21,6 +21,34 @@ impl Default for JxlBridgeDataType {
     }
 }
 
+/// Byte order of multi-byte samples in the output buffer.
+#[open_enum(allow_alias)]
+#[cpp_enum(kind = "enum class")]
+#[repr(i32)]
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum JxlBridgeEndianness {
+    /// The byte order of the host.
+    Native,
+    LittleEndian,
+    BigEndian,
+}
+
+impl Default for JxlBridgeEndianness {
+    fn default() -> Self {
+        Self::Native
+    }
+}
+
+impl JxlBridgeEndianness {
+    fn to_jxl_endianness(self) -> jxl::api::Endianness {
+        match self {
+            Self::LittleEndian => jxl::api::Endianness::LittleEndian,
+            Self::BigEndian => jxl::api::Endianness::BigEndian,
+            _ => jxl::api::Endianness::native(),
+        }
+    }
+}
+
 /// Channel layout of the output pixels, i.e. which channels are written to
 /// the output buffer and in what order they are interleaved.
 ///
@@ -60,15 +88,77 @@ impl JxlBridgeChannelLayout {
 }
 
 impl JxlBridgeDataType {
-    fn to_jxl_data_format(self) -> jxl::api::JxlDataFormat {
+    /// Returns the width of a single sample of this type, in bits.
+    fn bits_per_sample(self) -> u32 {
         match self {
-            Self::U8 => jxl::api::JxlDataFormat::U8 { bit_depth: 8 },
-            Self::U16 => jxl::api::JxlDataFormat::U16 {
-                endianness: jxl::api::Endianness::native(),
-                bit_depth: 16,
-            },
-            Self::F32 => jxl::api::JxlDataFormat::f32(),
-            _ => Self::default().to_jxl_data_format(),
+            Self::U8 => 8,
+            Self::U16 => 16,
+            Self::F32 => 32,
+            _ => Self::default().bits_per_sample(),
+        }
+    }
+}
+
+/// Describes how a single sample is stored in the caller's output buffer.
+#[derive(Debug, Clone, Default)]
+pub struct JxlBridgeSampleFormat {
+    pub data_type: JxlBridgeDataType,
+    /// Number of bits the decoded samples are scaled to, which must not exceed
+    /// the width of `data_type`. 0 means the full width of `data_type`, i.e. 8
+    /// for `U8` and 16 for `U16`.
+    ///
+    /// Set this to the image's `bits_per_sample` to keep the codestream's own
+    /// range, e.g. a 12-bit image then yields values in `0..=4095` stored in
+    /// `U16` samples rather than being stretched to `0..=65535`.
+    ///
+    /// Ignored for `F32`.
+    pub bit_depth: u32,
+    /// Byte order of multi-byte samples. Ignored for `U8`.
+    pub endianness: JxlBridgeEndianness,
+}
+
+impl JxlBridgeSampleFormat {
+    /// Creates a sample format using the full range of `data_type` and the
+    /// host byte order.
+    #[must_use]
+    pub fn new(data_type: JxlBridgeDataType) -> Self {
+        Self { data_type, ..Self::default() }
+    }
+
+    /// Returns `bit_depth` if it was set, and the full width of `data_type`
+    /// otherwise.
+    #[must_use]
+    pub fn effective_bit_depth(&self) -> u32 {
+        if self.bit_depth == 0 {
+            self.data_type.bits_per_sample()
+        } else {
+            self.bit_depth
+        }
+    }
+
+    /// Returns an error message if the requested bit depth does not fit in the
+    /// output data type.
+    pub(crate) fn validate(&self) -> Result<(), String> {
+        let max_bit_depth = self.data_type.bits_per_sample();
+        let bit_depth = self.effective_bit_depth();
+        if bit_depth > max_bit_depth {
+            return Err(format!(
+                "bit_depth ({bit_depth}) exceeds the {max_bit_depth} bits of the output data type"
+            ));
+        }
+        Ok(())
+    }
+
+    fn to_jxl_data_format(&self) -> jxl::api::JxlDataFormat {
+        // `validate` rejects anything wider than the data type, so the cast
+        // cannot truncate.
+        let bit_depth = self.effective_bit_depth() as u8;
+        let endianness = self.endianness.to_jxl_endianness();
+        match self.data_type {
+            JxlBridgeDataType::U8 => jxl::api::JxlDataFormat::U8 { bit_depth },
+            JxlBridgeDataType::U16 => jxl::api::JxlDataFormat::U16 { endianness, bit_depth },
+            JxlBridgeDataType::F32 => jxl::api::JxlDataFormat::F32 { endianness },
+            _ => Self::new(JxlBridgeDataType::default()).to_jxl_data_format(),
         }
     }
 }
@@ -315,11 +405,11 @@ pub struct JxlBridgeProcessResult {
 /// Build the JxlPixelFormat from bridge types.
 pub(crate) fn build_pixel_format(
     channel_layout: &JxlBridgeChannelLayout,
-    data_type: &JxlBridgeDataType,
+    sample_format: &JxlBridgeSampleFormat,
     num_extra_channels: usize,
 ) -> jxl::api::JxlPixelFormat {
     let jxl_color_type = channel_layout.to_jxl_color_type();
-    let jxl_data_format = data_type.to_jxl_data_format();
+    let jxl_data_format = sample_format.to_jxl_data_format();
     jxl::api::JxlPixelFormat {
         color_type: jxl_color_type,
         color_data_format: Some(jxl_data_format),

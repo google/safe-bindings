@@ -18,6 +18,8 @@ namespace safe_bindings::jxl_bridge {
 // Selects how decoded channels are interleaved into the output buffer.
 using ChannelLayout = jxl_bridge_rs::types::JxlBridgeChannelLayout;
 using DataType = jxl_bridge_rs::types::JxlBridgeDataType;
+using Endianness = jxl_bridge_rs::types::JxlBridgeEndianness;
+using SampleFormat = jxl_bridge_rs::types::JxlBridgeSampleFormat;
 using DecoderOptions = jxl_bridge_rs::types::JxlBridgeDecoderOptions;
 using BasicInfo = jxl_bridge_rs::types::JxlBridgeBasicInfo;
 using FrameHeader = jxl_bridge_rs::types::JxlBridgeFrameHeader;
@@ -192,10 +194,21 @@ class JxlDecoder final {
   // are interleaved (`channel_layout`) and how each sample is stored
   // (`data_type`). Call after GetBasicInfo().
   //
+  // Samples use the full range of `data_type` and the host byte order; use the
+  // SampleFormat overload below to control either.
+  //
   // This only describes the caller's buffer. In particular the channel layout
   // does not convert between color spaces: the color channels are always
   // emitted in the image's own color space, which GetIccProfile() reports.
   absl::Status SetPixelLayout(ChannelLayout channel_layout, DataType data_type);
+
+  // Overload: `sample_format` additionally carries the bit depth the decoded
+  // samples are scaled to and the byte order multi-byte samples are written
+  // in. Setting `sample_format.bit_depth` to the image's `bits_per_sample`
+  // keeps the codestream's own range, e.g. a 12-bit image then yields values in
+  // [0, 4095] stored in U16 samples rather than being stretched to [0, 65535].
+  absl::Status SetPixelLayout(ChannelLayout channel_layout,
+                              const SampleFormat& sample_format);
 
   // Decodes the next frame from the input data into the output buffer.
   // Consumes bytes from `data` by advancing the span.
