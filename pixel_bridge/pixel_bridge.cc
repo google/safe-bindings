@@ -133,9 +133,9 @@ Frame::Frame(rust::image::Frame frame) : frame_(std::move(frame)) {}
 
 uint64_t Frame::GetDelayMs() const { return frame_.curr_delay_ms(); }
 
-std::string Frame::GetImage() { return std::string(GetImageRef()); }
+std::string Frame::GetImage() const { return std::string(GetImageRef()); }
 
-absl::string_view Frame::GetImageRef() {
+absl::string_view Frame::GetImageRef() const& {
   absl::Span<const uint8_t> image_data = frame_.image_ref();
   return StringViewFromSpanU8(image_data);
 }
