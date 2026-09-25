@@ -1,6 +1,6 @@
 #include <string>
 
-#include <google/protobuf/struct.pb.h>
+#include "google/protobuf/struct.proto.h"
 #include "proto_parser.h"
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>

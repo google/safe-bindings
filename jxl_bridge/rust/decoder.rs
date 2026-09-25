@@ -10,7 +10,7 @@ use std::fmt::{self, Debug, Formatter};
 
 use crate::types::{
     self, JxlBridgeBasicInfo, JxlBridgeChannelLayout, JxlBridgeDataType, JxlBridgeDecoderOptions,
-    JxlBridgeFeedResult, JxlBridgeFrameHeader, JxlBridgeProcessResult,
+    JxlBridgeFeedResult, JxlBridgeFrameHeader, JxlBridgeProcessResult, JxlBridgeSampleFormat,
 };
 use cpp_std::vector;
 use jxl::api::{JxlBasicInfo, JxlDecoderInner, JxlOutputBuffer, JxlPixelFormat, ProcessingResult};
@@ -124,8 +124,8 @@ pub struct JxlBridgeDecoder {
     pixel_format: Option<JxlPixelFormat>,
     /// Output channel layout set by `set_pixel_layout`.
     output_channel_layout: JxlBridgeChannelLayout,
-    /// Output data type set by `set_pixel_layout`.
-    output_data_type: JxlBridgeDataType,
+    /// Output sample format set by `set_pixel_layout`.
+    output_sample_format: JxlBridgeSampleFormat,
     /// Cached jxl basic info (internal) for pixel buffer sizing.
     jxl_info: Option<JxlBasicInfo>,
     /// Cached frame header from `frame_header`, cleared after each frame.
@@ -169,7 +169,7 @@ impl JxlBridgeDecoder {
             basic_info: None,
             pixel_format: None,
             output_channel_layout: JxlBridgeChannelLayout::default(),
-            output_data_type: JxlBridgeDataType::default(),
+            output_sample_format: JxlBridgeSampleFormat::default(),
             jxl_info: None,
             frame_header: None,
             icc_profile: Vec::new(),
@@ -424,6 +424,9 @@ impl JxlBridgeDecoder {
     /// Sets how decoded pixels are written into the output buffer: which channels are interleaved
     /// (`channel_layout`) and how each sample is stored (`data_type`).
     ///
+    /// Samples use the full range of `data_type` and the host byte order. Use
+    /// `set_pixel_layout_with_format` to control either.
+    ///
     /// This only describes the caller's buffer. In particular the channel layout does not convert
     /// between color spaces. The color channels are always emitted in the image's own color space,
     /// which `icc_profile` reports.
@@ -434,6 +437,20 @@ impl JxlBridgeDecoder {
         channel_layout: JxlBridgeChannelLayout,
         data_type: JxlBridgeDataType,
     ) -> Status {
+        self.set_pixel_layout_with_format(channel_layout, JxlBridgeSampleFormat::new(data_type))
+    }
+
+    /// Like `set_pixel_layout`, but `sample_format` also carries the bit depth the decoded samples
+    /// are scaled to and the byte order multi-byte samples are written in.
+    pub fn set_pixel_layout_with_format(
+        &mut self,
+        channel_layout: JxlBridgeChannelLayout,
+        sample_format: JxlBridgeSampleFormat,
+    ) -> Status {
+        if let Err(msg) = sample_format.validate() {
+            return status::err(status::invalid_argument(msg));
+        }
+
         let Some(jxl_info) = self.jxl_info.as_ref() else {
             return precondition_status(
                 "Header has not been decoded yet; call decode_header until HeaderReady",
@@ -445,13 +462,13 @@ impl JxlBridgeDecoder {
         }
 
         let num_extra = jxl_info.extra_channels.len();
-        let pixel_format = types::build_pixel_format(&channel_layout, &data_type, num_extra);
+        let pixel_format = types::build_pixel_format(&channel_layout, &sample_format, num_extra);
 
         self.decoder.set_pixel_format(pixel_format).map_err(to_status)?;
         // Re-read from the decoder to capture any adjustments.
         self.pixel_format = self.decoder.current_pixel_format().cloned();
         self.output_channel_layout = channel_layout;
-        self.output_data_type = data_type;
+        self.output_sample_format = sample_format;
         // The pixel format can change the output color profile.
         self.icc_profile.clear();
         status::ok(())
@@ -472,7 +489,13 @@ impl JxlBridgeDecoder {
     /// Returns the output data type, or the default if not yet set.
     #[must_use]
     pub fn output_data_type(&self) -> JxlBridgeDataType {
-        self.output_data_type
+        self.output_sample_format.data_type
+    }
+
+    /// Returns the output sample format, or the default if not yet set.
+    #[must_use]
+    pub fn output_sample_format(&self) -> JxlBridgeSampleFormat {
+        self.output_sample_format.clone()
     }
 
     /// Returns `true` if there are more frames left to decode in the image.

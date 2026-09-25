@@ -59,6 +59,11 @@ absl::Status JxlDecoder::SetPixelLayout(ChannelLayout channel_layout,
   return decoder_.set_pixel_layout(channel_layout, data_type);
 }
 
+absl::Status JxlDecoder::SetPixelLayout(ChannelLayout channel_layout,
+                                        const SampleFormat& sample_format) {
+  return decoder_.set_pixel_layout_with_format(channel_layout, sample_format);
+}
+
 absl::StatusOr<FeedResult> JxlDecoder::DecodeFrame(
     absl::Span<const uint8_t>& data, ChannelLayout channel_layout,
     DataType data_type, absl::Span<uint8_t> output) {
