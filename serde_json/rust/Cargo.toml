@@ -10,7 +10,7 @@ doctest = false
 
 [dependencies]
 crubit_annotate = "0.1.0"
-ffi_11 = "0.0.3"
+ffi_11 = "0.0.2"
 ref-cast = "1.0"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = { version = "1.0", features = ["preserve_order"] }
