@@ -2,7 +2,7 @@
 
 #include <string>
 
-#include <google/protobuf/struct.pb.h>
+#include "google/protobuf/struct.proto.h"
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 #include "absl/status/status.h"
