@@ -289,7 +289,6 @@ impl Frames {
 }
 
 fn format_panic(err: Box<dyn std::any::Any + Send>) -> String {
-    let backtrace = std::backtrace::Backtrace::capture();
     let msg = if let Some(msg) = err.downcast_ref::<&str>() {
         *msg
     } else if let Some(msg) = err.downcast_ref::<String>() {
@@ -299,7 +298,15 @@ fn format_panic(err: Box<dyn std::any::Any + Send>) -> String {
     };
     // This error message needs to start with "Rust panic caught", as
     // that is how we identify it on the C++ side.
-    format!("Rust panic caught: {}\nBacktrace:\n{}", msg, backtrace)
+    //
+    // Deliberately does not capture a `std::backtrace::Backtrace` here:
+    // capturing unwinds via `_Unwind_Backtrace` -> `dl_iterate_phdr` while
+    // holding a process-global, non-reentrant lock, and allocates while doing
+    // so. That deadlocks against a sampling allocator (rust-lang/rust#130187)
+    // and lock-order-inverts against TSAN's loader interceptors. Since this
+    // path runs on every malformed image, re-adding it turns a decode of
+    // attacker-controlled input into a denial of service.
+    format!("Rust panic caught: {}", msg)
 }
 
 fn run_catching_panics<F, T>(f: F) -> Result<T, String>

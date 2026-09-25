@@ -1,0 +1,21 @@
+[package]
+name = "rust"
+version = "0.1.0"
+edition = "2024"
+license-file = "../../LICENSE"
+
+[lib]
+path = "lib.rs"
+doctest = false
+crate-type = ["staticlib"]
+
+[dependencies]
+crc = "3"
+libc = "0.2"
+lzma-rust2 = "0.21"
+
+[build-dependencies]
+bindgen = "0.69"
+
+[features]
+lzip_auto_decoder = []
