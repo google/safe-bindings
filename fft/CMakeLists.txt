@@ -5,7 +5,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_C_COMPILER clang)
 set(CMAKE_CXX_COMPILER clang++)
 
-project(serde_json
+project(fft
   VERSION 0.1.0
   LANGUAGES CXX)
 
@@ -31,19 +31,15 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(absl)
 
-add_library(serde_json INTERFACE)
-target_include_directories(serde_json INTERFACE
-  "${CMAKE_CURRENT_BINARY_DIR}"
-  "${CMAKE_CURRENT_SOURCE_DIR}"
-  "${CMAKE_CURRENT_SOURCE_DIR}/.."
-)
-target_link_libraries(serde_json INTERFACE
+add_library(fft INTERFACE)
+target_include_directories(fft INTERFACE "${CMAKE_CURRENT_SOURCE_DIR}/..")
+target_link_libraries(fft INTERFACE
   rust
-  crubit_support
+  absl::status
+  absl::status_macros
+  absl::span
+  absl::strings
 )
-add_dependencies(serde_json crubit_support)
 
-add_executable(serde_json_example main.cc)
-target_link_libraries(serde_json_example PRIVATE
-  serde_json
-)
+add_executable(fft_example main.cc)
+target_link_libraries(fft_example PRIVATE rust fft absl::status)
