@@ -125,20 +125,20 @@ size_t Node::size() const { return node_.len(); }
 bool Node::IsEmpty() const { return node_.is_empty(); }
 Node::operator bool() const { return IsDefined(); }
 
-NodeView Node::operator[](rs_std::StrRef key) const {
+NodeView Node::operator[](rs_std::StrRef key) const& {
   return NodeView(node_.get_at_key(key).value_or(rust::NodeView()));
 }
-NodeView Node::operator[](size_t index) const {
+NodeView Node::operator[](size_t index) const& {
   return NodeView(node_.get_at_index(index).value_or(rust::NodeView()));
 }
-std::optional<NodeView> Node::Get(size_t index) const {
+std::optional<NodeView> Node::Get(size_t index) const& {
   if (auto val = node_.get_at_index(index)) {
     return std::make_optional(NodeView(*val));
   }
   return std::nullopt;
 }
 
-std::optional<NodeView> Node::Get(rs_std::StrRef key) const {
+std::optional<NodeView> Node::Get(rs_std::StrRef key) const& {
   if (auto val = node_.get_at_key(key)) {
     return std::make_optional(NodeView(*val));
   }
@@ -150,7 +150,7 @@ void Node::SetAtIndex(size_t index, rust::YamlOwned value) {
 }
 
 template <>
-std::optional<int> Node::as_optional<int>() const {
+std::optional<int> Node::as_optional<int>() const& {
   auto v = node_.as_i64();
   if (!v) return std::nullopt;
   if (*v < std::numeric_limits<int>::min() ||
@@ -161,28 +161,28 @@ std::optional<int> Node::as_optional<int>() const {
 }
 
 template <>
-std::optional<size_t> Node::as_optional<size_t>() const {
+std::optional<size_t> Node::as_optional<size_t>() const& {
   auto v = node_.as_i64();
   if (!v || *v < 0) return std::nullopt;
   return static_cast<size_t>(*v);
 }
 
 template <>
-std::optional<bool> Node::as_optional<bool>() const {
+std::optional<bool> Node::as_optional<bool>() const& {
   return node_.as_bool();
 }
 
 template <>
-std::optional<absl::string_view> Node::as_optional<absl::string_view>() const {
+std::optional<absl::string_view> Node::as_optional<absl::string_view>() const& {
   return node_.as_str();
 }
 
 template <>
-std::optional<double> Node::as_optional<double>() const {
+std::optional<double> Node::as_optional<double>() const& {
   return node_.as_f64();
 }
 
-NodeView Node::as_view() const { return NodeView(node_.as_view()); }
+NodeView Node::as_view() const& { return NodeView(node_.as_view()); }
 
 absl::StatusOr<std::string> Dump(const Node& node) {
   return node.as_view().Dump();
