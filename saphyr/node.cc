@@ -88,8 +88,11 @@ std::optional<absl::string_view> NodeView::as_optional<absl::string_view>()
 
 template <>
 std::optional<std::string> NodeView::as_optional<std::string>() const {
-  if (auto sv = view_.as_str()) {
-    return std::make_optional(std::string(*sv));
+  if (std::optional<rs_std::StrRef> sv = view_.as_str(); sv.has_value()) {
+    // `*sv` is safe to dereference because `sv.has_value()` is true, and the
+    // `rs_std::StrRef` borrows from the node referenced by `view_`, which stays
+    // alive while `std::string` copies the referenced characters.
+    return std::string(*sv);
   }
   return std::nullopt;
 }
@@ -150,6 +153,11 @@ void Node::SetAtIndex(size_t index, rust::YamlOwned value) {
 }
 
 template <>
+std::optional<int64_t> Node::as_optional<int64_t>() const {
+  return node_.as_i64();
+}
+
+template <>
 std::optional<int> Node::as_optional<int>() const {
   auto v = node_.as_i64();
   if (!v) return std::nullopt;
@@ -175,6 +183,17 @@ std::optional<bool> Node::as_optional<bool>() const {
 template <>
 std::optional<absl::string_view> Node::as_optional<absl::string_view>() const {
   return node_.as_str();
+}
+
+template <>
+std::optional<std::string> Node::as_optional<std::string>() const {
+  if (std::optional<rs_std::StrRef> sv = node_.as_str(); sv.has_value()) {
+    // `*sv` is safe to dereference because `sv.has_value()` is true, and the
+    // `rs_std::StrRef` borrows from `this->node_`, which stays alive while
+    // `std::string` copies the referenced characters.
+    return std::string(*sv);
+  }
+  return std::nullopt;
 }
 
 template <>

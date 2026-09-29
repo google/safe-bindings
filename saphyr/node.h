@@ -3,9 +3,10 @@
 
 #include <cstddef>
 #include <cstdint>
-#include <memory>
 #include <optional>
+#include <ostream>
 #include <string>
+#include <utility>
 
 #include "support/rs_std/str_ref.h"
 #include "crubit/rust.h"
@@ -250,6 +251,10 @@ class Node {
  private:
   rust::NodeOwned node_;
 };
+
+template <>
+std::optional<absl::string_view> Node::as_optional<absl::string_view>() const
+    ABSL_ATTRIBUTE_LIFETIME_BOUND;
 
 // Converts the node to a YAML string.
 absl::StatusOr<std::string> Dump(const Node& node);
