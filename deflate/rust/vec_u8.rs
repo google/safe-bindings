@@ -15,6 +15,11 @@ impl VecU8 {
     pub fn is_empty(&self) -> bool {
         self.0.is_empty()
     }
+
+    #[cfg(test)]
+    pub(crate) fn as_vec(&self) -> &Vec<u8> {
+        &self.0
+    }
 }
 
 impl From<Vec<u8>> for VecU8 {
