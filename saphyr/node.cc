@@ -153,52 +153,8 @@ void Node::SetAtIndex(size_t index, rust::YamlOwned value) {
 }
 
 template <>
-std::optional<int64_t> Node::as_optional<int64_t>() const {
-  return node_.as_i64();
-}
-
-template <>
-std::optional<int> Node::as_optional<int>() const {
-  auto v = node_.as_i64();
-  if (!v) return std::nullopt;
-  if (*v < std::numeric_limits<int>::min() ||
-      *v > std::numeric_limits<int>::max()) {
-    return std::nullopt;
-  }
-  return static_cast<int>(*v);
-}
-
-template <>
-std::optional<size_t> Node::as_optional<size_t>() const {
-  auto v = node_.as_i64();
-  if (!v || *v < 0) return std::nullopt;
-  return static_cast<size_t>(*v);
-}
-
-template <>
-std::optional<bool> Node::as_optional<bool>() const {
-  return node_.as_bool();
-}
-
-template <>
 std::optional<absl::string_view> Node::as_optional<absl::string_view>() const {
-  return node_.as_str();
-}
-
-template <>
-std::optional<std::string> Node::as_optional<std::string>() const {
-  if (std::optional<rs_std::StrRef> sv = node_.as_str(); sv.has_value()) {
-    // `*sv` is safe to dereference because `sv.has_value()` is true, and the
-    // `rs_std::StrRef` borrows from `this->node_`, which stays alive while
-    // `std::string` copies the referenced characters.
-    return std::string(*sv);
-  }
-  return std::nullopt;
-}
-
-template <>
-std::optional<double> Node::as_optional<double>() const {
-  return node_.as_f64();
+  return as_view().as_optional<absl::string_view>();
 }
 
 NodeView Node::as_view() const { return NodeView(node_.as_view()); }

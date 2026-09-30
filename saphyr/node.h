@@ -243,7 +243,9 @@ class Node {
   // Tries to convert the node to the specified type `T`.
   // Returns `std::nullopt` if the conversion fails or the node is undefined.
   template <typename T>
-  std::optional<T> as_optional() const;
+  std::optional<T> as_optional() const {
+    return as_view().as_optional<T>();
+  }
 
   // Returns a view into the node.
   NodeView as_view() const ABSL_ATTRIBUTE_LIFETIME_BOUND;

@@ -15,7 +15,7 @@ impl NodeOwned {
     }
 
     pub fn inner(&self) -> Option<&YamlOwned> {
-        self.yaml.as_deref().filter(|y| !matches!(y, YamlOwned::BadValue))
+        self.yaml.as_deref()
     }
 
     yaml_node_common_impl!(NodeOwned);
@@ -43,7 +43,7 @@ impl NodeOwned {
     }
 
     pub fn get_at_key<'a>(&'a self, key: &str) -> Option<NodeView<'a>> {
-        if let Some(YamlOwned::Mapping(map)) = &self.inner() {
+        if let Some(YamlOwned::Mapping(map)) = self.inner() {
             let key_node = YamlOwned::Value(saphyr::ScalarOwned::String(key.into()));
             map.get(&key_node).map(NodeView::new)
         } else {
