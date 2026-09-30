@@ -52,10 +52,9 @@ type ToStringResult = String;
 #[crubit_annotate::cpp_name("ToString")]
 pub fn to_string(value: &Value) -> ToStringResult {
     // Serialization can fail if:
-    // - the value is not valid JSON, e.g. contains non-string keys or infinite numbers
-    //   --> impossible for serde_json::Value, which represents any _valid_ JSON value
-    // - the underlying buffer errors on write
-    //   --> impossible for `String`
+    // - the value is not valid JSON, e.g. contains non-string keys or infinite numbers -->
+    //   impossible for serde_json::Value, which represents any _valid_ JSON value
+    // - the underlying buffer errors on write --> impossible for `String`
     serde_json::to_string(&value.value)
         .expect("Value is guaranteed to be serializable to JSON")
 }
@@ -64,10 +63,9 @@ pub fn to_string(value: &Value) -> ToStringResult {
 #[crubit_annotate::cpp_name("ToStringPretty")]
 pub fn to_string_pretty(value: &Value) -> ToStringResult {
     // Serialization can fail if:
-    // - the value is not valid JSON, e.g. contains non-string keys or infinite numbers
-    //   --> impossible for serde_json::Value, which represents any _valid_ JSON value
-    // - the underlying buffer errors on write
-    //   --> impossible for `String`
+    // - the value is not valid JSON, e.g. contains non-string keys or infinite numbers -->
+    //   impossible for serde_json::Value, which represents any _valid_ JSON value
+    // - the underlying buffer errors on write --> impossible for `String`
     serde_json::to_string_pretty(&value.value)
         .expect("Value is guaranteed to be serializable to JSON")
 }
@@ -452,8 +450,8 @@ impl From<*const ffi_11::c_char> for Value {
         }
 
         // SAFETY:
-        // - Precondition: The C++ caller MUST pass a valid, null-terminated C-string.
-        //   This is guaranteed for C++ string literals like "foo".
+        // - Precondition: The C++ caller MUST pass a valid, null-terminated C-string. This is
+        //   guaranteed for C++ string literals like "foo".
         // - The `is_null()` check above guarantees we don't pass a null pointer.
         // - The memory is only read synchronously during this function call.
         // We don't really know what's behind this pointer. Normally we need to make this function
