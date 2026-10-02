@@ -163,6 +163,42 @@ TYPED_TEST(RoaringBitmapTest, InPlaceOperators) {
   EXPECT_EQ(sym_diff.len(), 10);
 }
 
+TYPED_TEST(RoaringBitmapTest, MultiOps) {
+  using ValueType = typename BitmapTraits<TypeParam>::ValueType;
+
+  std::vector<TypeParam> bitmaps(3);
+  bitmaps[0].InsertRange(0, 10);
+  bitmaps[1].InsertRange(5, 15);
+  bitmaps[2].InsertRange(8, 20);
+
+  TypeParam un = TypeParam::Union(bitmaps);
+  EXPECT_EQ(un.len(), 20);
+  EXPECT_EQ(un, bitmaps[0] | bitmaps[1] | bitmaps[2]);
+
+  TypeParam isect = TypeParam::Intersect(bitmaps);
+  EXPECT_EQ(ToStdVec(isect.ToVec()), (std::vector<ValueType>{8, 9}));
+  EXPECT_EQ(isect, bitmaps[0] & bitmaps[1] & bitmaps[2]);
+
+  // Empty input yields an empty bitmap.
+  std::vector<TypeParam> empty;
+  EXPECT_TRUE(TypeParam::Union(empty).IsEmpty());
+  EXPECT_TRUE(TypeParam::Intersect(empty).IsEmpty());
+}
+
+TYPED_TEST(RoaringBitmapTest, MultiOpsWithAbslSpan) {
+  std::vector<TypeParam> bitmaps(2);
+  bitmaps[0].InsertRange(0, 10);
+  bitmaps[1].InsertRange(5, 15);
+
+  absl::Span<const TypeParam> span = absl::MakeConstSpan(bitmaps);
+  EXPECT_EQ(TypeParam::Union(span).len(), 15);
+  EXPECT_EQ(TypeParam::Intersect(span).len(), 5);
+
+  // Subspans work too.
+  EXPECT_EQ(TypeParam::Union(span.subspan(1)), bitmaps[1]);
+  EXPECT_EQ(TypeParam::Intersect(span.subspan(1)), bitmaps[1]);
+}
+
 TYPED_TEST(RoaringBitmapTest, SerializationRoundtrip) {
   using ValueType = typename BitmapTraits<TypeParam>::ValueType;
   TypeParam bm;
