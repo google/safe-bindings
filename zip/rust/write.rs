@@ -56,10 +56,10 @@ impl From<CompressionMethod> for ZipCrateCompressionMethod {
         match val {
             CompressionMethod::Deflated => ZipCrateCompressionMethod::Deflated,
             CompressionMethod::Stored => ZipCrateCompressionMethod::Stored,
-            CompressionMethod::Bzip2 => ZipCrateCompressionMethod::Bzip2,
-            CompressionMethod::Zstd => ZipCrateCompressionMethod::Zstd,
-            CompressionMethod::Lzma => ZipCrateCompressionMethod::Lzma,
-            CompressionMethod::Xz => ZipCrateCompressionMethod::Xz,
+            CompressionMethod::Bzip2 => ZipCrateCompressionMethod::BZIP2,
+            CompressionMethod::Zstd => ZipCrateCompressionMethod::ZSTD,
+            CompressionMethod::Lzma => ZipCrateCompressionMethod::LZMA,
+            CompressionMethod::Xz => ZipCrateCompressionMethod::XZ,
             CompressionMethod::Unsupported => {
                 panic!("cannot convert CompressionMethod::Unsupported to ZipCrateCompressionMethod")
             }
@@ -83,7 +83,7 @@ impl TryFrom<&ZipWriterFileOptions> for FileOptions<'static, ()> {
         if let Some(method) = val.compression_method {
             options = options.compression_method(method.into());
         }
-        // third_party/rust/zip/v6/src/write.rs
+        // third_party/rust/zip/v8/src/write.rs
         //
         // `None` value specifies default compression level.
         //
@@ -162,7 +162,7 @@ impl ZipWriterFileOptions {
 #[derive(Default)]
 /// A zip writer that writes to an in-memory buffer.
 pub struct BufferedZipWriter {
-    writer: Option<WrappedZipWriter<Cursor<Vec<u8>>>>,
+    writer: Option<Box<WrappedZipWriter<Cursor<Vec<u8>>>>>,
 }
 
 impl Debug for BufferedZipWriter {
@@ -194,13 +194,13 @@ impl BufferedZipWriter {
         if append {
             match WrappedZipWriter::new_append(cursor) {
                 Ok(writer) => {
-                    self.writer = Some(writer);
+                    self.writer = Some(Box::new(writer));
                     Ok(())
                 }
                 Err(e) => Err(e.to_string()),
             }
         } else {
-            self.writer = Some(WrappedZipWriter::new(cursor));
+            self.writer = Some(Box::new(WrappedZipWriter::new(cursor)));
             Ok(())
         }
     }
@@ -271,7 +271,7 @@ impl BufferedZipWriter {
 #[derive(Default)]
 /// A zip writer that writes to a file on the filesystem.
 pub struct FsZipWriter {
-    writer: Option<WrappedZipWriter<File>>,
+    writer: Option<Box<WrappedZipWriter<File>>>,
 }
 
 impl Debug for FsZipWriter {
@@ -311,7 +311,7 @@ impl FsZipWriter {
             {
                 Ok(file) => match WrappedZipWriter::new_append(file) {
                     Ok(writer) => {
-                        self.writer = Some(writer);
+                        self.writer = Some(Box::new(writer));
                         Ok(())
                     }
                     Err(e) => Err(e.to_string()),
@@ -321,7 +321,7 @@ impl FsZipWriter {
         } else {
             match OpenOptions::new().write(true).create(true).truncate(true).open(path_str) {
                 Ok(file) => {
-                    self.writer = Some(WrappedZipWriter::new(file));
+                    self.writer = Some(Box::new(WrappedZipWriter::new(file)));
                     Ok(())
                 }
                 Err(e) => Err(e.to_string()),
@@ -393,11 +393,11 @@ impl FsZipWriter {
 }
 
 fn start_file_impl<W: Write + Seek>(
-    writer: &mut Option<WrappedZipWriter<W>>,
+    writer: &mut Option<Box<WrappedZipWriter<W>>>,
     name: &[u8],
     options: ZipWriterFileOptions,
 ) -> Result<(), ZipError> {
-    if let Some(writer) = writer.as_mut() {
+    if let Some(writer) = writer.as_deref_mut() {
         let name_lossy = String::from_utf8_lossy(name);
         let name_str = name_lossy.as_ref();
         match FileOptions::try_from(&options) {
@@ -413,11 +413,11 @@ fn start_file_impl<W: Write + Seek>(
 }
 
 fn add_directory_impl<W: Write + Seek>(
-    writer: &mut Option<WrappedZipWriter<W>>,
+    writer: &mut Option<Box<WrappedZipWriter<W>>>,
     name: &[u8],
     options: ZipWriterFileOptions,
 ) -> Result<(), ZipError> {
-    if let Some(writer) = writer.as_mut() {
+    if let Some(writer) = writer.as_deref_mut() {
         let name_lossy = String::from_utf8_lossy(name);
         let name_str = name_lossy.as_ref();
         match FileOptions::try_from(&options) {
@@ -433,10 +433,10 @@ fn add_directory_impl<W: Write + Seek>(
 }
 
 fn write_data_impl<W: Write + Seek>(
-    writer: &mut Option<WrappedZipWriter<W>>,
+    writer: &mut Option<Box<WrappedZipWriter<W>>>,
     data: VecU8,
 ) -> Result<(), ZipError> {
-    if let Some(writer) = writer.as_mut() {
+    if let Some(writer) = writer.as_deref_mut() {
         match writer.write_all(data.as_slice()) {
             Ok(_) => Ok(()),
             Err(e) => Err(ZipError::internal(e.to_string())),
@@ -447,10 +447,10 @@ fn write_data_impl<W: Write + Seek>(
 }
 
 fn do_copy_impl<W: Write + Seek, R: Read>(
-    writer: &mut Option<WrappedZipWriter<W>>,
+    writer: &mut Option<Box<WrappedZipWriter<W>>>,
     reader: &mut R,
 ) -> Result<(), ZipError> {
-    if let Some(writer) = writer.as_mut() {
+    if let Some(writer) = writer.as_deref_mut() {
         match copy(reader, writer) {
             Ok(_) => Ok(()),
             Err(e) => Err(ZipError::internal(e.to_string())),
@@ -461,10 +461,10 @@ fn do_copy_impl<W: Write + Seek, R: Read>(
 }
 
 fn write_file_content_impl<W: Write + Seek>(
-    writer: &mut Option<WrappedZipWriter<W>>,
+    writer: &mut Option<Box<WrappedZipWriter<W>>>,
     path: &[u8],
 ) -> Result<(), ZipError> {
-    if let Some(writer) = writer.as_mut() {
+    if let Some(writer) = writer.as_deref_mut() {
         let path_lossy = String::from_utf8_lossy(path);
         let path_str = path_lossy.as_ref();
         match File::open(path_str) {
