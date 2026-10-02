@@ -6,7 +6,7 @@
 //!
 //! The C++ namespace is `roaring_bridge`.
 
-use roaring::{RoaringBitmap, RoaringTreemap};
+use roaring::{MultiOps, RoaringBitmap, RoaringTreemap};
 
 #[allow(non_camel_case_types)]
 type vector<T> = Vec<T>;
@@ -145,6 +145,20 @@ impl RoaringBitmap32 {
     /// Returns true if the storage was modified.
     pub fn RemoveRunCompression(&mut self) -> bool {
         self.inner.remove_run_compression()
+    }
+
+    /// Returns the union of all bitmaps in `bitmaps`.
+    ///
+    /// Returns an empty bitmap if `bitmaps` is empty.
+    pub fn Union(bitmaps: &[RoaringBitmap32]) -> RoaringBitmap32 {
+        RoaringBitmap32 { inner: bitmaps.iter().map(|b| &b.inner).union() }
+    }
+
+    /// Returns the intersection of all bitmaps in `bitmaps`.
+    ///
+    /// Returns an empty bitmap if `bitmaps` is empty.
+    pub fn Intersect(bitmaps: &[RoaringBitmap32]) -> RoaringBitmap32 {
+        RoaringBitmap32 { inner: bitmaps.iter().map(|b| &b.inner).intersection() }
     }
 
     /// Size of intersection without creating a new bitmap.
@@ -407,6 +421,20 @@ impl RoaringBitmap64 {
     /// Returns true if the storage was modified.
     pub fn Optimize(&mut self) -> bool {
         self.inner.optimize()
+    }
+
+    /// Returns the union of all bitmaps in `bitmaps`.
+    ///
+    /// Returns an empty bitmap if `bitmaps` is empty.
+    pub fn Union(bitmaps: &[RoaringBitmap64]) -> RoaringBitmap64 {
+        RoaringBitmap64 { inner: bitmaps.iter().map(|b| &b.inner).union() }
+    }
+
+    /// Returns the intersection of all bitmaps in `bitmaps`.
+    ///
+    /// Returns an empty bitmap if `bitmaps` is empty.
+    pub fn Intersect(bitmaps: &[RoaringBitmap64]) -> RoaringBitmap64 {
+        RoaringBitmap64 { inner: bitmaps.iter().map(|b| &b.inner).intersection() }
     }
 
     /// Size of intersection without creating a new bitmap.
