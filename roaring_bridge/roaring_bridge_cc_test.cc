@@ -6,7 +6,7 @@
 
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
-#include "roaring.h"
+#include "crubit/roaring_bridge.h"
 
 namespace {
 

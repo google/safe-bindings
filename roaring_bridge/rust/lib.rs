@@ -147,25 +147,6 @@ impl RoaringBitmap32 {
         self.inner.remove_run_compression()
     }
 
-    /// Implementation detail of `operator&` in roaring_operators.h.
-    pub fn CrubitInternalIntersect(&self, other: &RoaringBitmap32) -> RoaringBitmap32 {
-        RoaringBitmap32 { inner: &self.inner & &other.inner }
-    }
-
-    /// Implementation detail of `operator|` in roaring_operators.h.
-    pub fn CrubitInternalUnion(&self, other: &RoaringBitmap32) -> RoaringBitmap32 {
-        RoaringBitmap32 { inner: &self.inner | &other.inner }
-    }
-
-    /// Implementation detail of `operator^` in roaring_operators.h.
-    pub fn CrubitInternalSymDiff(&self, other: &RoaringBitmap32) -> RoaringBitmap32 {
-        RoaringBitmap32 { inner: &self.inner ^ &other.inner }
-    }
-
-    /// Implementation detail of `operator-` in roaring_operators.h.
-    pub fn CrubitInternalDiff(&self, other: &RoaringBitmap32) -> RoaringBitmap32 {
-        RoaringBitmap32 { inner: &self.inner - &other.inner }
-    }
 
     /// Size of intersection without creating a new bitmap.
     pub fn IntersectionLen(&self, other: &RoaringBitmap32) -> u64 {
@@ -249,6 +230,34 @@ impl core::ops::BitXorAssign<&RoaringBitmap32> for RoaringBitmap32 {
 impl core::ops::SubAssign<&RoaringBitmap32> for RoaringBitmap32 {
     fn sub_assign(&mut self, rhs: &RoaringBitmap32) {
         self.inner -= &rhs.inner;
+    }
+}
+
+impl core::ops::BitAnd<&RoaringBitmap32> for &RoaringBitmap32 {
+    type Output = RoaringBitmap32;
+    fn bitand(self, rhs: &RoaringBitmap32) -> RoaringBitmap32 {
+        RoaringBitmap32 { inner: &self.inner & &rhs.inner }
+    }
+}
+
+impl core::ops::BitOr<&RoaringBitmap32> for &RoaringBitmap32 {
+    type Output = RoaringBitmap32;
+    fn bitor(self, rhs: &RoaringBitmap32) -> RoaringBitmap32 {
+        RoaringBitmap32 { inner: &self.inner | &rhs.inner }
+    }
+}
+
+impl core::ops::BitXor<&RoaringBitmap32> for &RoaringBitmap32 {
+    type Output = RoaringBitmap32;
+    fn bitxor(self, rhs: &RoaringBitmap32) -> RoaringBitmap32 {
+        RoaringBitmap32 { inner: &self.inner ^ &rhs.inner }
+    }
+}
+
+impl core::ops::Sub<&RoaringBitmap32> for &RoaringBitmap32 {
+    type Output = RoaringBitmap32;
+    fn sub(self, rhs: &RoaringBitmap32) -> RoaringBitmap32 {
+        RoaringBitmap32 { inner: &self.inner - &rhs.inner }
     }
 }
 
@@ -398,25 +407,6 @@ impl RoaringBitmap64 {
         self.inner.optimize()
     }
 
-    /// Implementation detail of `operator&` in roaring_operators.h.
-    pub fn CrubitInternalIntersect(&self, other: &RoaringBitmap64) -> RoaringBitmap64 {
-        RoaringBitmap64 { inner: &self.inner & &other.inner }
-    }
-
-    /// Implementation detail of `operator|` in roaring_operators.h.
-    pub fn CrubitInternalUnion(&self, other: &RoaringBitmap64) -> RoaringBitmap64 {
-        RoaringBitmap64 { inner: &self.inner | &other.inner }
-    }
-
-    /// Implementation detail of `operator^` in roaring_operators.h.
-    pub fn CrubitInternalSymDiff(&self, other: &RoaringBitmap64) -> RoaringBitmap64 {
-        RoaringBitmap64 { inner: &self.inner ^ &other.inner }
-    }
-
-    /// Implementation detail of `operator-` in roaring_operators.h.
-    pub fn CrubitInternalDiff(&self, other: &RoaringBitmap64) -> RoaringBitmap64 {
-        RoaringBitmap64 { inner: &self.inner - &other.inner }
-    }
 
     /// Size of intersection without creating a new bitmap.
     pub fn IntersectionLen(&self, other: &RoaringBitmap64) -> u64 {
@@ -501,6 +491,34 @@ impl core::ops::BitXorAssign<&RoaringBitmap64> for RoaringBitmap64 {
 impl core::ops::SubAssign<&RoaringBitmap64> for RoaringBitmap64 {
     fn sub_assign(&mut self, rhs: &RoaringBitmap64) {
         self.inner -= &rhs.inner;
+    }
+}
+
+impl core::ops::BitAnd<&RoaringBitmap64> for &RoaringBitmap64 {
+    type Output = RoaringBitmap64;
+    fn bitand(self, rhs: &RoaringBitmap64) -> RoaringBitmap64 {
+        RoaringBitmap64 { inner: &self.inner & &rhs.inner }
+    }
+}
+
+impl core::ops::BitOr<&RoaringBitmap64> for &RoaringBitmap64 {
+    type Output = RoaringBitmap64;
+    fn bitor(self, rhs: &RoaringBitmap64) -> RoaringBitmap64 {
+        RoaringBitmap64 { inner: &self.inner | &rhs.inner }
+    }
+}
+
+impl core::ops::BitXor<&RoaringBitmap64> for &RoaringBitmap64 {
+    type Output = RoaringBitmap64;
+    fn bitxor(self, rhs: &RoaringBitmap64) -> RoaringBitmap64 {
+        RoaringBitmap64 { inner: &self.inner ^ &rhs.inner }
+    }
+}
+
+impl core::ops::Sub<&RoaringBitmap64> for &RoaringBitmap64 {
+    type Output = RoaringBitmap64;
+    fn sub(self, rhs: &RoaringBitmap64) -> RoaringBitmap64 {
+        RoaringBitmap64 { inner: &self.inner - &rhs.inner }
     }
 }
 
