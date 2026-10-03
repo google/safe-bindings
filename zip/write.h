@@ -16,6 +16,9 @@ namespace security::zip {
 
 class BufferedZipWriter;
 class FsZipWriter;
+class BufferedZipStreamWriter;
+class FsZipStreamWriter;
+class ZipStreamWriter;
 
 class ZipWriterFileOptions {
  public:
@@ -40,6 +43,9 @@ class ZipWriterFileOptions {
   rust::ZipWriterFileOptions options_;
   friend class BufferedZipWriter;
   friend class FsZipWriter;
+  friend class BufferedZipStreamWriter;
+  friend class FsZipStreamWriter;
+  friend class ZipStreamWriter;
 };
 
 class BufferedZipWriter final {
@@ -54,6 +60,10 @@ class BufferedZipWriter final {
   absl::Status WriteData(absl::string_view data);
   absl::Status WriteZipFileContent(ZipFile& file);
   absl::Status WriteFileContent(absl::string_view path);
+  absl::Status SetComment(absl::string_view comment);
+  absl::Status Flush();
+  [[nodiscard]] bool IsSeekPossible() const;
+  [[nodiscard]] bool IsNone() const;
 
  private:
   explicit BufferedZipWriter(rust::BufferedZipWriter writer)
@@ -73,6 +83,10 @@ class FsZipWriter final {
   absl::Status WriteData(absl::string_view data);
   absl::Status WriteZipFileContent(ZipFile& file);
   absl::Status WriteFileContent(absl::string_view path);
+  absl::Status SetComment(absl::string_view comment);
+  absl::Status Flush();
+  [[nodiscard]] bool IsSeekPossible() const;
+  [[nodiscard]] bool IsNone() const;
 
  private:
   explicit FsZipWriter(rust::FsZipWriter writer)
@@ -94,6 +108,10 @@ class ZipWriter final {
   absl::Status WriteData(absl::string_view data);
   absl::Status WriteZipFileContent(ZipFile& file);
   absl::Status WriteFileContent(absl::string_view path);
+  absl::Status SetComment(absl::string_view comment);
+  absl::Status Flush();
+  [[nodiscard]] bool IsSeekPossible() const;
+  [[nodiscard]] bool IsNone() const;
 
  private:
   using BackendType = std::variant<BufferedZipWriter, FsZipWriter>;
@@ -101,6 +119,81 @@ class ZipWriter final {
   explicit ZipWriter(BackendType writer) : writer_(std::move(writer)) {}
   BackendType writer_;
 };
+
+// Streaming zip writers write zip archives sequentially without seeking.
+class BufferedZipStreamWriter final {
+ public:
+  static absl::StatusOr<BufferedZipStreamWriter> New();
+  static absl::StatusOr<BufferedZipStreamWriter> NewFromData(
+      absl::string_view data);
+  absl::StatusOr<RustVecU8Wrapper> Finish();
+  absl::Status StartFile(absl::string_view file_name,
+                         const ZipWriterFileOptions& options);
+  absl::Status AddDirectory(absl::string_view file_name,
+                            const ZipWriterFileOptions& options);
+  absl::Status WriteData(absl::string_view data);
+  absl::Status WriteZipFileContent(ZipFile& file);
+  absl::Status WriteFileContent(absl::string_view path);
+  absl::Status SetComment(absl::string_view comment);
+  absl::Status Flush();
+  [[nodiscard]] bool IsSeekPossible() const;
+  [[nodiscard]] bool IsNone() const;
+
+ private:
+  explicit BufferedZipStreamWriter(rust::BufferedZipStreamWriter writer)
+      : writer_(std::move(writer)) {}
+  rust::BufferedZipStreamWriter writer_;
+};
+
+class FsZipStreamWriter final {
+ public:
+  static absl::StatusOr<FsZipStreamWriter> NewFromPath(absl::string_view path);
+  absl::Status Finish();
+  absl::Status StartFile(absl::string_view file_name,
+                         const ZipWriterFileOptions& options);
+  absl::Status AddDirectory(absl::string_view file_name,
+                            const ZipWriterFileOptions& options);
+  absl::Status WriteData(absl::string_view data);
+  absl::Status WriteZipFileContent(ZipFile& file);
+  absl::Status WriteFileContent(absl::string_view path);
+  absl::Status SetComment(absl::string_view comment);
+  absl::Status Flush();
+  [[nodiscard]] bool IsSeekPossible() const;
+  [[nodiscard]] bool IsNone() const;
+
+ private:
+  explicit FsZipStreamWriter(rust::FsZipStreamWriter writer)
+      : writer_(std::move(writer)) {}
+  rust::FsZipStreamWriter writer_;
+};
+
+class ZipStreamWriter final {
+ public:
+  static absl::StatusOr<ZipStreamWriter> FromFile(absl::string_view path);
+  static absl::StatusOr<ZipStreamWriter> FromBuffer();
+  static absl::StatusOr<ZipStreamWriter> FromBuffer(absl::string_view data);
+  absl::StatusOr<RustVecU8Wrapper> Finish();
+  absl::Status StartFile(absl::string_view file_name,
+                         const ZipWriterFileOptions& options);
+  absl::Status AddDirectory(absl::string_view file_name,
+                            const ZipWriterFileOptions& options);
+  absl::Status WriteData(absl::string_view data);
+  absl::Status WriteZipFileContent(ZipFile& file);
+  absl::Status WriteFileContent(absl::string_view path);
+  absl::Status SetComment(absl::string_view comment);
+  absl::Status Flush();
+  [[nodiscard]] bool IsSeekPossible() const;
+  [[nodiscard]] bool IsNone() const;
+
+ private:
+  using BackendType = std::variant<BufferedZipStreamWriter, FsZipStreamWriter>;
+
+  explicit ZipStreamWriter(BackendType writer) : writer_(std::move(writer)) {}
+  BackendType writer_;
+};
+
+absl::StatusOr<BufferedZipStreamWriter> NewBufferedZipStreamWriter();
+absl::StatusOr<FsZipStreamWriter> NewFsZipStreamWriter(absl::string_view path);
 
 }  // namespace security::zip
 
