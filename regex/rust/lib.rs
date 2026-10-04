@@ -323,8 +323,8 @@ impl<'h> Captures<'h> {
     }
 }
 
-/// An opaque iterator over the capture groups in a single match. 'c is the lifetime of the `Captures` value, and 'h is
-/// the lifetime of the haystack.
+/// An opaque iterator over the capture groups in a single match. 'c is the lifetime of the
+/// `Captures` value, and 'h is the lifetime of the haystack.
 #[derive(Default, Debug)]
 pub struct SubCaptureMatches<'c, 'h> {
     caps: Option<&'c Captures<'h>>,
