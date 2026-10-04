@@ -5,5 +5,7 @@
 //! WARNING: This crate should never be used from Rust, instead use image directly.
 
 pub mod image;
+#[cfg(not(png_only))]
+mod imports;
 pub mod reader;
 pub mod vec_u8;
