@@ -147,7 +147,6 @@ impl RoaringBitmap32 {
         self.inner.remove_run_compression()
     }
 
-
     /// Size of intersection without creating a new bitmap.
     pub fn IntersectionLen(&self, other: &RoaringBitmap32) -> u64 {
         self.inner.intersection_len(&other.inner)
@@ -184,9 +183,12 @@ impl RoaringBitmap32 {
     }
 
     /// Serializes to bytes (standard Roaring format, compatible with CRoaring).
+    /// Returns an empty vector if serialization fails.
     pub fn Serialize(&self) -> vector<u8> {
         let mut buf = Vec::with_capacity(self.inner.serialized_size());
-        self.inner.serialize_into(&mut buf).expect("serialization to Vec should not fail");
+        if self.inner.serialize_into(&mut buf).is_err() {
+            buf.clear();
+        }
         buf.into()
     }
 
@@ -407,7 +409,6 @@ impl RoaringBitmap64 {
         self.inner.optimize()
     }
 
-
     /// Size of intersection without creating a new bitmap.
     pub fn IntersectionLen(&self, other: &RoaringBitmap64) -> u64 {
         self.inner.intersection_len(&other.inner)
@@ -445,9 +446,12 @@ impl RoaringBitmap64 {
 
     /// Serializes to bytes.
     /// The format is compatible with CRoaring's Roaring64Map serialization.
+    /// Returns an empty vector if serialization fails.
     pub fn Serialize(&self) -> vector<u8> {
         let mut buf = Vec::with_capacity(self.inner.serialized_size());
-        self.inner.serialize_into(&mut buf).expect("serialization to Vec should not fail");
+        if self.inner.serialize_into(&mut buf).is_err() {
+            buf.clear();
+        }
         buf.into()
     }
 
