@@ -1,6 +1,7 @@
 #ifndef SECURITY_ZIP_FILE_H_
 #define SECURITY_ZIP_FILE_H_
 
+#include <cstddef>
 #include <cstdint>
 #include <string>
 #include <utility>
@@ -31,10 +32,18 @@ class BufferedZipFile final {
       : zip_(std::move(zip)) {}
   absl::StatusOr<bool> IsFile() const;
   absl::StatusOr<bool> IsDir() const;
-  bool IsNone() const;
+  [[nodiscard]] bool IsNone() const;
   absl::StatusOr<std::string> GetFileName() const;
   absl::StatusOr<CompressionMethod> GetCompressionMethod() const;
+  absl::StatusOr<std::string> GetComment() const;
+  absl::StatusOr<uint64_t> GetUncompressedSize() const;
+  absl::StatusOr<uint64_t> GetCompressedSize() const;
+  absl::StatusOr<uint32_t> GetCrc32() const;
+  absl::StatusOr<uint16_t> GetLastModifiedDate() const;
+  absl::StatusOr<uint16_t> GetLastModifiedTime() const;
+  absl::StatusOr<uint32_t> GetUnixMode() const;
   absl::StatusOr<RustVecU8Wrapper> GetFileData();
+  absl::StatusOr<RustVecU8Wrapper> ReadBytes(size_t max_bytes);
 
  private:
   absl::Status CheckNone() const;
@@ -48,10 +57,18 @@ class FsZipFile final {
   explicit FsZipFile(rust::FsZipFile zip) : zip_(std::move(zip)) {}
   absl::StatusOr<bool> IsFile() const;
   absl::StatusOr<bool> IsDir() const;
-  bool IsNone() const;
+  [[nodiscard]] bool IsNone() const;
   absl::StatusOr<std::string> GetFileName() const;
   absl::StatusOr<CompressionMethod> GetCompressionMethod() const;
+  absl::StatusOr<std::string> GetComment() const;
+  absl::StatusOr<uint64_t> GetUncompressedSize() const;
+  absl::StatusOr<uint64_t> GetCompressedSize() const;
+  absl::StatusOr<uint32_t> GetCrc32() const;
+  absl::StatusOr<uint16_t> GetLastModifiedDate() const;
+  absl::StatusOr<uint16_t> GetLastModifiedTime() const;
+  absl::StatusOr<uint32_t> GetUnixMode() const;
   absl::StatusOr<RustVecU8Wrapper> GetFileData();
+  absl::StatusOr<RustVecU8Wrapper> ReadBytes(size_t max_bytes);
 
  private:
   absl::Status CheckNone() const;
@@ -72,10 +89,18 @@ class ZipFile final {
 
   absl::StatusOr<bool> IsFile() const;
   absl::StatusOr<bool> IsDir() const;
-  bool IsNone() const;
+  [[nodiscard]] bool IsNone() const;
   absl::StatusOr<std::string> GetFileName() const;
   absl::StatusOr<CompressionMethod> GetCompressionMethod() const;
+  absl::StatusOr<std::string> GetComment() const;
+  absl::StatusOr<uint64_t> GetUncompressedSize() const;
+  absl::StatusOr<uint64_t> GetCompressedSize() const;
+  absl::StatusOr<uint32_t> GetCrc32() const;
+  absl::StatusOr<uint16_t> GetLastModifiedDate() const;
+  absl::StatusOr<uint16_t> GetLastModifiedTime() const;
+  absl::StatusOr<uint32_t> GetUnixMode() const;
   absl::StatusOr<RustVecU8Wrapper> GetFileData();
+  absl::StatusOr<RustVecU8Wrapper> ReadBytes(size_t max_bytes);
 
  private:
   using BackendType = std::variant<BufferedZipFile, FsZipFile>;
