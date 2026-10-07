@@ -197,18 +197,26 @@ fn rewrite_ast_for_re2_compat(ast: &mut Ast, unicode: &mut bool) {
     }
 }
 
-/// In non-unicode (byte / Latin-1) mode, RE2 treats braced hex escapes (`\x{NN}`)
-/// and octal escapes (`\NNN`) with values <= 0xFF as raw bytes. In contrast,
-/// `regex-syntax` only treats fixed 2-digit `\xNN` (`HexFixed(HexLiteralKind::X)`)
-/// as a byte literal (`Literal::byte()`), treating `\x{...}` and `\NNN` as
-/// Unicode scalar values (which UTF-8 encode to 2 bytes for 0x80..=0xFF outside
-/// character classes, or fail with `UnicodeNotAllowed` inside byte character
-/// classes). Rewriting them to `HexFixed(HexLiteralKind::X)` causes `Printer`
-/// to emit `\xNN`, which `regex-syntax` translates as a single raw byte.
+/// Rewrites a literal for RE2 compatibility.
+///
+/// In RE2 Latin-1 (byte) mode, hex escapes like `\x{99}` and octal escapes like `\231` represent
+/// the single byte corresponding to their value (0x00 to 0xFF).
+///
+/// However, in Rust's regex syntax, only fixed 2-digit hex escapes (`\xNN`,
+/// `LiteralKind::HexFixed(X)`) return a byte value via `Literal::byte()`. Bracketed hex escapes
+/// (`\x{...}`) and octal escapes do not, causing the regex engine to treat them as Unicode scalar
+/// values (which in byte mode produces multi-byte UTF-8 encodings or causes `UnicodeNotAllowed`
+/// errors inside character classes).
+///
+/// When in byte mode (`!unicode`), we rewrite any single-byte literal (value <= 0xFF) that was
+/// written as a braced hex, octal, or unicode escape into a 2-digit hex escape `\xNN`
+/// (`HexFixed(X)`).
 fn rewrite_literal(lit: &mut Literal, unicode: bool) {
     if !unicode && u32::from(lit.c) <= 0xFF {
         match lit.kind {
-            LiteralKind::HexBrace(HexLiteralKind::X) | LiteralKind::Octal => {
+            LiteralKind::HexBrace(_)
+            | LiteralKind::Octal
+            | LiteralKind::HexFixed(HexLiteralKind::UnicodeShort | HexLiteralKind::UnicodeLong) => {
                 lit.kind = LiteralKind::HexFixed(HexLiteralKind::X);
             }
             _ => {}
@@ -414,28 +422,29 @@ mod tests {
         );
     }
 
-    fn rewrite_bytes(pattern: &str) -> Vec<u8> {
-        let rewriter = Rewriter::new(
-            pattern.as_bytes(),
-            /* ignore_whitespace= */ false,
-            /* octal= */ true,
-            /* nest_limit= */ 250,
-        );
+    fn rewrite_bytes(pattern: &str, octal: bool) -> Vec<u8> {
+        let rewriter = Rewriter::new(pattern.as_bytes(), false, octal, 250);
         expect_true!(rewriter.is_ok());
         let mut rewriter = rewriter.unwrap();
-        rewriter.rewrite_for_re2_compat(/* unicode= */ false);
+        rewriter.rewrite_for_re2_compat(false);
         rewriter.finish().unwrap()
     }
 
     #[gtest]
     fn test_rewrite_literals_byte_mode() {
-        expect_eq!(rewrite_bytes("\\x{99}"), Vec::<u8>::from("\\x99"));
-        expect_eq!(rewrite_bytes("\\231"), Vec::<u8>::from("\\x99"));
-        expect_eq!(rewrite_bytes("[\\x{80}-\\x{ff}]"), Vec::<u8>::from("[\\x80-\\xFF]"));
-        expect_eq!(rewrite_bytes("[\\x{99}\\231]"), Vec::<u8>::from("[\\x99\\x99]"));
+        expect_eq!(rewrite_bytes("\\x{99}", false), Vec::<u8>::from("\\x99"));
+        expect_eq!(rewrite_bytes("\\x{0}", false), Vec::<u8>::from("\\x00"));
+        expect_eq!(rewrite_bytes("\\x{ff}", false), Vec::<u8>::from("\\xFF"));
+        expect_eq!(rewrite_bytes("[\\x{99}]", false), Vec::<u8>::from("[\\x99]"));
+        expect_eq!(rewrite_bytes("[\\x{80}-\\x{ff}]", false), Vec::<u8>::from("[\\x80-\\xFF]"));
+        expect_eq!(rewrite_bytes("\\231", true), Vec::<u8>::from("\\x99"));
+        expect_eq!(rewrite_bytes("[\\231]", true), Vec::<u8>::from("[\\x99]"));
         // In Unicode mode (or inside `(?u:...)`), `\x{99}` should remain `\x{99}`.
         expect_eq!(rewrite("\\x{99}"), Vec::<u8>::from("\\x{99}"));
-        expect_eq!(rewrite_bytes("(?u:\\x{99})\\x{99}"), Vec::<u8>::from("(?u:\\x{99})\\x99"));
+        expect_eq!(
+            rewrite_bytes("(?u:\\x{99})\\x{99}", false),
+            Vec::<u8>::from("(?u:\\x{99})\\x99")
+        );
         // Inside `(?-u:...)` in a Unicode pattern, `\x{99}` should be rewritten to `\x99`.
         expect_eq!(rewrite("(?-u:\\x{99})\\x{99}"), Vec::<u8>::from("(?-u:\\x99)\\x{99}"));
     }
