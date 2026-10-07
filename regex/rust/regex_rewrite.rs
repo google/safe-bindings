@@ -3,7 +3,7 @@ use regex_syntax::ast::print::Printer;
 use regex_syntax::ast::{
     Assertion, AssertionKind, Ast, ClassAscii, ClassAsciiKind, ClassBracketed, ClassPerlKind,
     ClassSet, ClassSetItem, Concat, Flag, Flags, FlagsItem, FlagsItemKind, Group, GroupKind,
-    Position, Span,
+    HexLiteralKind, Literal, LiteralKind, Position, Span,
 };
 
 /// An error that occurred during regex rewriting.
@@ -85,6 +85,9 @@ fn rewrite_ast_for_re2_compat(ast: &mut Ast, unicode: &mut bool) {
                 *unicode = state;
             }
         }
+        Ast::Literal(lit) => {
+            rewrite_literal(lit, *unicode);
+        }
         // Perl character classes (like `\w`), are unicode-aware in regex but ASCII-only
         // in RE2. We rewrite them to the equivalent ASCII class (like `[[:word:]]`).
         Ast::ClassPerl(perl) => {
@@ -120,7 +123,7 @@ fn rewrite_ast_for_re2_compat(ast: &mut Ast, unicode: &mut bool) {
         // Perl character classes can also appear within a bracketed character class
         // (for example `[a-c\d]` for "digits plus letters a, b, and c").
         Ast::ClassBracketed(bracketed) => {
-            rewrite_class_set(&mut bracketed.kind);
+            rewrite_class_set(&mut bracketed.kind, *unicode);
         }
         // RE2 word boundaries are also not unicode-aware.
         Ast::Assertion(assertion)
@@ -194,20 +197,54 @@ fn rewrite_ast_for_re2_compat(ast: &mut Ast, unicode: &mut bool) {
     }
 }
 
+/// Rewrites a literal for RE2 compatibility.
+///
+/// In RE2 Latin-1 (byte) mode, hex escapes like `\x{99}` and octal escapes like `\231` represent
+/// the single byte corresponding to their value (0x00 to 0xFF).
+///
+/// However, in Rust's regex syntax, only fixed 2-digit hex escapes (`\xNN`,
+/// `LiteralKind::HexFixed(X)`) return a byte value via `Literal::byte()`. Bracketed hex escapes
+/// (`\x{...}`) and octal escapes do not, causing the regex engine to treat them as Unicode scalar
+/// values (which in byte mode produces multi-byte UTF-8 encodings or causes `UnicodeNotAllowed`
+/// errors inside character classes).
+///
+/// When in byte mode (`!unicode`), we rewrite any single-byte literal (value <= 0xFF) that was
+/// written as a braced hex, octal, or unicode escape into a 2-digit hex escape `\xNN`
+/// (`HexFixed(X)`).
+fn rewrite_literal(lit: &mut Literal, unicode: bool) {
+    if !unicode && u32::from(lit.c) <= 0xFF {
+        match lit.kind {
+            LiteralKind::HexBrace(_)
+            | LiteralKind::Octal
+            | LiteralKind::HexFixed(HexLiteralKind::UnicodeShort | HexLiteralKind::UnicodeLong) => {
+                lit.kind = LiteralKind::HexFixed(HexLiteralKind::X);
+            }
+            _ => {}
+        }
+    }
+}
+
 /// Rewrites a character class set.
-fn rewrite_class_set(set: &mut ClassSet) {
+fn rewrite_class_set(set: &mut ClassSet, unicode: bool) {
     match set {
-        ClassSet::Item(item) => rewrite_class_set_item(item),
+        ClassSet::Item(item) => rewrite_class_set_item(item, unicode),
         ClassSet::BinaryOp(op) => {
-            rewrite_class_set(&mut op.lhs);
-            rewrite_class_set(&mut op.rhs);
+            rewrite_class_set(&mut op.lhs, unicode);
+            rewrite_class_set(&mut op.rhs, unicode);
         }
     }
 }
 
 /// Rewrites an item within a character class set.
-fn rewrite_class_set_item(item: &mut ClassSetItem) {
+fn rewrite_class_set_item(item: &mut ClassSetItem, unicode: bool) {
     match item {
+        ClassSetItem::Literal(lit) => {
+            rewrite_literal(lit, unicode);
+        }
+        ClassSetItem::Range(range) => {
+            rewrite_literal(&mut range.start, unicode);
+            rewrite_literal(&mut range.end, unicode);
+        }
         ClassSetItem::Perl(perl) => {
             // `\s` needs special handling of vertical tabs (see handling of Ast::ClassPerl above).
             if perl.kind == ClassPerlKind::Space {
@@ -228,11 +265,11 @@ fn rewrite_class_set_item(item: &mut ClassSetItem) {
             }
         }
         ClassSetItem::Bracketed(bracketed) => {
-            rewrite_class_set(&mut bracketed.kind);
+            rewrite_class_set(&mut bracketed.kind, unicode);
         }
         ClassSetItem::Union(union) => {
             for i in &mut union.items {
-                rewrite_class_set_item(i);
+                rewrite_class_set_item(i, unicode);
             }
         }
         _ => {}
@@ -383,5 +420,26 @@ mod tests {
                 "(?-u:.)(?:.|(?-u:[\\xE0-\\xEF][\\x80-\\xBF]{2}|[\\xF0-\\xF4][\\x80-\\xBF]{3}))"
             )
         );
+    }
+
+    fn rewrite_bytes(pattern: &str, octal: bool) -> Vec<u8> {
+        let rewriter = Rewriter::new(pattern.as_bytes(), false, octal, 250);
+        expect_true!(rewriter.is_ok());
+        let mut rewriter = rewriter.unwrap();
+        rewriter.rewrite_for_re2_compat(false);
+        rewriter.finish().unwrap()
+    }
+
+    #[gtest]
+    fn test_rewrite_literals_byte_mode() {
+        expect_eq!(rewrite_bytes("\\x{99}", false), Vec::<u8>::from("\\x99"));
+        expect_eq!(rewrite_bytes("\\x{0}", false), Vec::<u8>::from("\\x00"));
+        expect_eq!(rewrite_bytes("\\x{ff}", false), Vec::<u8>::from("\\xFF"));
+        expect_eq!(rewrite_bytes("[\\x{99}]", false), Vec::<u8>::from("[\\x99]"));
+        expect_eq!(rewrite_bytes("[\\x{80}-\\x{ff}]", false), Vec::<u8>::from("[\\x80-\\xFF]"));
+        expect_eq!(rewrite_bytes("\\231", true), Vec::<u8>::from("\\x99"));
+        expect_eq!(rewrite_bytes("[\\231]", true), Vec::<u8>::from("[\\x99]"));
+        // In Unicode mode, \x{99} is not rewritten to \x99.
+        expect_eq!(rewrite("\\x{99}"), Vec::<u8>::from("\\x{99}"));
     }
 }
