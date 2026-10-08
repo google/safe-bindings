@@ -591,14 +591,6 @@ impl ImageDecoder {
     /// image does not have one.
     /// For formats that don’t support embedded profiles this function should
     /// always return Ok(None).
-    pub fn exif_metadata(&mut self) -> Result<Option<VecU8>, VecU8> {
-        self.get_metadata(|inner| inner.exif_metadata())
-    }
-
-    /// Returns the XMP metadata embedded in the image, or Ok(None) if the
-    /// image does not have one.
-    /// For formats that don’t support embedded profiles this function should
-    /// always return Ok(None).
     pub fn xmp_metadata(&mut self) -> Result<Option<VecU8>, VecU8> {
         self.get_metadata(|inner| inner.xmp_metadata())
     }
