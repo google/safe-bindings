@@ -66,6 +66,7 @@ target_include_directories(roaring_bridge_cc_test PRIVATE
 )
 target_link_libraries(roaring_bridge_cc_test PRIVATE
   roaring_bridge_lib
+  absl::span
   GTest::gtest_main
   GTest::gmock
 )
