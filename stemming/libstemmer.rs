@@ -30,9 +30,14 @@ pub extern "C" fn sb_stemmer_new(
     algorithm: *const c_char,
     _charenc: *const c_char,
 ) -> *mut sb_stemmer {
-    assert!(!algorithm.is_null());
+    if algorithm.is_null() {
+        return std::ptr::null_mut();
+    }
+    // SAFETY: `algorithm` is non-null and expected to point to a NUL-terminated C string.
     let language_c_str: &CStr = unsafe { CStr::from_ptr(algorithm) };
-    let language_slice: &str = language_c_str.to_str().unwrap();
+    let Ok(language_slice) = language_c_str.to_str() else {
+        return std::ptr::null_mut();
+    };
     let language_name: Option<&str> = ALGORITHM_NAMES
         .iter()
         .position(|&name| name == language_slice)
@@ -80,12 +85,18 @@ pub unsafe extern "C" fn sb_stemmer_stem(
     size: c_int,
 ) -> *const sb_symbol {
     assert!(!stemmer.is_null());
-    assert!(!word.is_null());
     assert!(size >= 0);
+    assert!(!word.is_null() || size == 0);
 
+    // SAFETY: `stemmer` is non-null and points to an initialized `sb_stemmer`.
     let stemmer = unsafe { &mut *stemmer };
 
-    let word_slice: &[u8] = unsafe { std::slice::from_raw_parts(word as *const u8, size as usize) };
+    let word_slice: &[u8] = if size == 0 {
+        &[]
+    } else {
+        // SAFETY: `word` is non-null and the caller guarantees `size` bytes are valid.
+        unsafe { std::slice::from_raw_parts(word as *const u8, size as usize) }
+    };
     let word_slice: &str = match std::str::from_utf8(word_slice) {
         Ok(word) => word,
         Err(_) => {
