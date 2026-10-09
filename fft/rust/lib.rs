@@ -203,7 +203,9 @@ macro_rules! define_fftw_view {
             for i in (0..ndim).rev() {
                 strides[i] = current_stride;
                 if i > 0 {
-                    current_stride *= nembed[i];
+                    current_stride = current_stride
+                        .checked_mul(nembed[i])
+                        .ok_or_else(|| b"stride multiplication overflow".to_vec())?;
                 }
             }
 
