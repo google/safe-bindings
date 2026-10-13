@@ -11,6 +11,8 @@ use image::{
     Frame as RustFrame, ImageBuffer as RustImageBuffer, ImageDecoder as RustImageDecoder,
     Rgba as RustRgba,
 };
+#[cfg(feature = "jxl")]
+use jxl_image_rs_integration::JxlDecoder as RustJxlDecoder;
 use std::collections::VecDeque;
 
 pub(crate) enum GenericImageDecoder {
@@ -21,6 +23,8 @@ pub(crate) enum GenericImageDecoder {
     Tiff(Box<RustTiffDecoder<Box<dyn ReadSeek>>>),
     Bmp(Box<RustBmpDecoder<Box<dyn ReadSeek>>>),
     Ico(Box<RustIcoDecoder<Box<dyn ReadSeek>>>),
+    #[cfg(feature = "jxl")]
+    Jxl(Box<RustJxlDecoder<Box<dyn ReadSeek>>>),
 }
 
 macro_rules! call_generic_decoder {
@@ -33,6 +37,8 @@ macro_rules! call_generic_decoder {
             &GenericImageDecoder::Tiff(ref $decoder) => $expr,
             &GenericImageDecoder::Bmp(ref $decoder) => $expr,
             &GenericImageDecoder::Ico(ref $decoder) => $expr,
+            #[cfg(feature = "jxl")]
+            &GenericImageDecoder::Jxl(ref $decoder) => $expr,
         }
     };
 }
@@ -47,6 +53,8 @@ macro_rules! call_generic_decoder_mut {
             &mut GenericImageDecoder::Tiff(ref mut $decoder) => $expr,
             &mut GenericImageDecoder::Bmp(ref mut $decoder) => $expr,
             &mut GenericImageDecoder::Ico(ref mut $decoder) => $expr,
+            #[cfg(feature = "jxl")]
+            &mut GenericImageDecoder::Jxl(ref mut $decoder) => $expr,
         }
     };
 }
@@ -61,6 +69,8 @@ macro_rules! call_generic_decoder_owned {
             GenericImageDecoder::Tiff($decoder) => $expr,
             GenericImageDecoder::Bmp($decoder) => $expr,
             GenericImageDecoder::Ico($decoder) => $expr,
+            #[cfg(feature = "jxl")]
+            GenericImageDecoder::Jxl($decoder) => $expr,
         }
     };
 }
@@ -480,6 +490,8 @@ impl ImageDecoder {
             GenericImageDecoder::Tiff(_) => Format::Tiff,
             GenericImageDecoder::Bmp(_) => Format::Bmp,
             GenericImageDecoder::Ico(_) => Format::Ico,
+            #[cfg(feature = "jxl")]
+            GenericImageDecoder::Jxl(_) => Format::Jxl,
         }
     }
 
