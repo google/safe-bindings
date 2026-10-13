@@ -330,6 +330,41 @@ TYPED_TEST(RoaringBitmapTest, ExplicitIterator) {
   EXPECT_EQ(values[2], 5);
 }
 
+TYPED_TEST(RoaringBitmapTest, AddOffset) {
+  using ValueType = typename BitmapTraits<TypeParam>::ValueType;
+  TypeParam bm;
+  bm.Insert(10);
+  bm.Insert(100);
+  bm.Insert(1000);
+
+  // Shift by 0 returns an identical bitmap.
+  TypeParam zero_shift = bm.AddOffset(0);
+  EXPECT_EQ(zero_shift, bm);
+
+  // Positive offset.
+  TypeParam shifted_pos = bm.AddOffset(17);
+  EXPECT_EQ(shifted_pos.len(), 3);
+  EXPECT_TRUE(shifted_pos.Contains(27));
+  EXPECT_TRUE(shifted_pos.Contains(117));
+  EXPECT_TRUE(shifted_pos.Contains(1017));
+  EXPECT_FALSE(shifted_pos.Contains(10));
+  EXPECT_EQ(ToStdVec(shifted_pos.ToVec()),
+            (std::vector<ValueType>{27, 117, 1017}));
+
+  // Negative offset with partial drop (10 - 17 < 0 is dropped).
+  TypeParam shifted_neg = bm.AddOffset(-17);
+  EXPECT_EQ(shifted_neg.len(), 2);
+  EXPECT_TRUE(shifted_neg.Contains(83));
+  EXPECT_TRUE(shifted_neg.Contains(983));
+  EXPECT_FALSE(shifted_neg.Contains(10));
+  EXPECT_EQ(ToStdVec(shifted_neg.ToVec()), (std::vector<ValueType>{83, 983}));
+
+  // Large negative offset drops all elements.
+  TypeParam shifted_all_dropped = bm.AddOffset(-2000);
+  EXPECT_TRUE(shifted_all_dropped.IsEmpty());
+  EXPECT_EQ(shifted_all_dropped.len(), 0);
+}
+
 // RoaringBitmap64-specific tests (values > u32::MAX)
 // --------------------------------------------------
 
@@ -406,6 +441,57 @@ TEST(RoaringBitmap64Test, ExplicitIterator) {
 
   // bm is still valid.
   EXPECT_EQ(bm.len(), 3);
+}
+
+TEST(RoaringBitmap32Test, AddOffsetBoundary) {
+  RoaringBitmap32 bm;
+  bm.Insert(0);
+  bm.Insert(100);
+  bm.Insert(UINT32_MAX - 10);
+  bm.Insert(UINT32_MAX);
+
+  // Offset causing overflow for elements near UINT32_MAX.
+  RoaringBitmap32 shifted = bm.AddOffset(5);
+  EXPECT_EQ(shifted.len(), 3);
+  EXPECT_TRUE(shifted.Contains(5));
+  EXPECT_TRUE(shifted.Contains(105));
+  EXPECT_TRUE(shifted.Contains(UINT32_MAX - 5));
+  EXPECT_FALSE(shifted.Contains(UINT32_MAX));  // overflowed and dropped
+
+  // Offset > UINT32_MAX drops everything.
+  EXPECT_TRUE(bm.AddOffset(int64_t{UINT32_MAX} + 1).IsEmpty());
+
+  // Offset < -UINT32_MAX drops everything.
+  EXPECT_TRUE(bm.AddOffset(-int64_t{UINT32_MAX} - 1).IsEmpty());
+
+  // Offset == UINT32_MAX keeps only 0 (shifted to UINT32_MAX).
+  RoaringBitmap32 max_pos = bm.AddOffset(UINT32_MAX);
+  EXPECT_EQ(max_pos.len(), 1);
+  EXPECT_TRUE(max_pos.Contains(UINT32_MAX));
+
+  // Offset == -UINT32_MAX keeps only UINT32_MAX (shifted to 0).
+  RoaringBitmap32 max_neg = bm.AddOffset(-int64_t{UINT32_MAX});
+  EXPECT_EQ(max_neg.len(), 1);
+  EXPECT_TRUE(max_neg.Contains(0));
+}
+
+TEST(RoaringBitmap64Test, AddOffsetLargeValues) {
+  RoaringBitmap64 bm;
+  bm.Insert(100);
+  bm.Insert(uint64_t{1} << 32);
+  bm.Insert(UINT64_MAX - 10);
+
+  RoaringBitmap64 shifted = bm.AddOffset(5);
+  EXPECT_EQ(shifted.len(), 3);
+  EXPECT_TRUE(shifted.Contains(105));
+  EXPECT_TRUE(shifted.Contains((uint64_t{1} << 32) + 5));
+  EXPECT_TRUE(shifted.Contains(UINT64_MAX - 5));
+
+  RoaringBitmap64 overflowed = bm.AddOffset(20);
+  EXPECT_EQ(overflowed.len(), 2);
+  EXPECT_TRUE(overflowed.Contains(120));
+  EXPECT_TRUE(overflowed.Contains((uint64_t{1} << 32) + 20));
+  EXPECT_FALSE(overflowed.Contains(UINT64_MAX - 10));  // overflowed and dropped
 }
 
 }  // namespace

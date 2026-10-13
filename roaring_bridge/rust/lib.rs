@@ -146,7 +146,6 @@ impl RoaringBitmap32 {
     pub fn RemoveRunCompression(&mut self) -> bool {
         self.inner.remove_run_compression()
     }
-
     /// Returns the union of all bitmaps in `bitmaps`.
     ///
     /// Returns an empty bitmap if `bitmaps` is empty.
@@ -184,6 +183,30 @@ impl RoaringBitmap32 {
     /// Returns true if self is a subset of other.
     pub fn IsSubset(&self, other: &RoaringBitmap32) -> bool {
         self.inner.is_subset(&other.inner)
+    }
+
+    /// Returns a copy of the bitmap with all values shifted by `offset`.
+    ///
+    /// Values that fall outside the range [0, 2^32) are dropped.
+    pub fn AddOffset(&self, offset: i64) -> Self {
+        if offset == 0 {
+            return self.clone();
+        }
+        if offset > u32::MAX as i64 || offset < -(u32::MAX as i64) {
+            return Self::default();
+        }
+        let inner = if offset > 0 {
+            let offset = offset as u32;
+            RoaringBitmap::from_sorted_iter(
+                self.inner.range(..=(u32::MAX - offset)).map(|x| x + offset),
+            )
+            .expect("iterator is sorted")
+        } else {
+            let neg_offset = offset.unsigned_abs() as u32;
+            RoaringBitmap::from_sorted_iter(self.inner.range(neg_offset..).map(|x| x - neg_offset))
+                .expect("iterator is sorted")
+        };
+        Self { inner }
     }
 
     /// Collects all values into a vector.
@@ -460,6 +483,29 @@ impl RoaringBitmap64 {
     /// Returns true if self is a subset of other.
     pub fn IsSubset(&self, other: &RoaringBitmap64) -> bool {
         self.inner.is_subset(&other.inner)
+    }
+
+    /// Returns a copy of the bitmap with all values shifted by `offset`.
+    ///
+    /// Values that overflow or underflow `u64` are dropped.
+    pub fn AddOffset(&self, offset: i64) -> Self {
+        if offset == 0 {
+            return self.clone();
+        }
+        let inner = if offset > 0 {
+            let offset = offset as u64;
+            RoaringTreemap::from_sorted_iter(
+                self.inner.iter().take_while(|&x| x <= u64::MAX - offset).map(|x| x + offset),
+            )
+            .expect("iterator is sorted")
+        } else {
+            let neg_offset = offset.unsigned_abs();
+            let mut iter = self.inner.iter();
+            iter.advance_to(neg_offset);
+            RoaringTreemap::from_sorted_iter(iter.map(|x| x - neg_offset))
+                .expect("iterator is sorted")
+        };
+        Self { inner }
     }
 
     /// Collects all values into a vector.
