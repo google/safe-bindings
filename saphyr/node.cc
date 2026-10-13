@@ -30,26 +30,30 @@ bool NodeView::IsEmpty() const { return view_.is_empty(); }
 NodeView::operator bool() const { return IsDefined(); }
 
 NodeView NodeView::operator[](size_t index) const {
-  return NodeView(view_.get_at_index(index).value_or(rust::NodeView()));
+  auto val = view_.get_at_index(index);
+  return NodeView(val.has_value() ? *val : rust::NodeView());
 }
 
 NodeView NodeView::operator[](rs_std::StrRef key) const {
-  return NodeView(view_.get_at_key(key).value_or(rust::NodeView()));
+  auto val = view_.get_at_key(key);
+  return NodeView(val.has_value() ? *val : rust::NodeView());
 }
 
 std::optional<NodeView> NodeView::Get(size_t index) const {
-  if (auto val = view_.get_at_index(index)) {
+  if (auto val = view_.get_at_index(index); val.has_value()) {
     return std::make_optional(NodeView(*val));
   }
   return std::nullopt;
 }
 
 NodeView NodeView::get_key_at_index(size_t index) const {
-  return NodeView(view_.get_key_at_index(index).value_or(rust::NodeView()));
+  auto val = view_.get_key_at_index(index);
+  return NodeView(val.has_value() ? *val : rust::NodeView());
 }
 
 NodeView NodeView::get_value_at_index(size_t index) const {
-  return NodeView(view_.get_value_at_index(index).value_or(rust::NodeView()));
+  auto val = view_.get_value_at_index(index);
+  return NodeView(val.has_value() ? *val : rust::NodeView());
 }
 
 template <>
@@ -60,7 +64,7 @@ std::optional<int64_t> NodeView::as_optional<int64_t>() const {
 template <>
 std::optional<int> NodeView::as_optional<int>() const {
   auto v = view_.as_i64();
-  if (!v) return std::nullopt;
+  if (!v.has_value()) return std::nullopt;
   if (*v < std::numeric_limits<int>::min() ||
       *v > std::numeric_limits<int>::max()) {
     return std::nullopt;
@@ -71,7 +75,7 @@ std::optional<int> NodeView::as_optional<int>() const {
 template <>
 std::optional<size_t> NodeView::as_optional<size_t>() const {
   auto v = view_.as_i64();
-  if (!v || *v < 0) return std::nullopt;
+  if (!v.has_value() || *v < 0) return std::nullopt;
   return static_cast<size_t>(*v);
 }
 
@@ -83,7 +87,10 @@ std::optional<bool> NodeView::as_optional<bool>() const {
 template <>
 std::optional<absl::string_view> NodeView::as_optional<absl::string_view>()
     const {
-  return view_.as_str();
+  if (auto sv = view_.as_str(); sv.has_value()) {
+    return *sv;
+  }
+  return std::nullopt;
 }
 
 template <>
@@ -129,20 +136,22 @@ bool Node::IsEmpty() const { return node_.is_empty(); }
 Node::operator bool() const { return IsDefined(); }
 
 NodeView Node::operator[](rs_std::StrRef key) const {
-  return NodeView(node_.get_at_key(key).value_or(rust::NodeView()));
+  auto val = node_.get_at_key(key);
+  return NodeView(val.has_value() ? *val : rust::NodeView());
 }
 NodeView Node::operator[](size_t index) const {
-  return NodeView(node_.get_at_index(index).value_or(rust::NodeView()));
+  auto val = node_.get_at_index(index);
+  return NodeView(val.has_value() ? *val : rust::NodeView());
 }
 std::optional<NodeView> Node::Get(size_t index) const {
-  if (auto val = node_.get_at_index(index)) {
+  if (auto val = node_.get_at_index(index); val.has_value()) {
     return std::make_optional(NodeView(*val));
   }
   return std::nullopt;
 }
 
 std::optional<NodeView> Node::Get(rs_std::StrRef key) const {
-  if (auto val = node_.get_at_key(key)) {
+  if (auto val = node_.get_at_key(key); val.has_value()) {
     return std::make_optional(NodeView(*val));
   }
   return std::nullopt;
