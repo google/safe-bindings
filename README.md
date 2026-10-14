@@ -10,7 +10,6 @@ C++ wrappers (using Crubit) for Rust libraries.
 | deflate      | [flate2](https://crates.io/crates/flate2)         | Compiles |
 | fft          | [ndrustfft](https://crates.io/crates/ndrustfft)   | Compiles |
 | kamadak_exif | [kamadak-exif](https://crates.io/crates/kamadak-exif) | Compiles      |
-| leveldb      | [rusty_leveldb](https://crates.io/crates/rusty_leveldb)       | Doesn't compile - NOTE: Retry after `cc_std::virtual_unique_ptr` is supported |
 | lzma         | [lzma-rust2](https://crates.io/crates/lzma-rust2) | Compiles |
 | pixel_bridge | [image](https://crates.io/crates/image)           | Compiles |
 | regex        | [regex](https://crates.io/crates/regex)           | Compiles |
