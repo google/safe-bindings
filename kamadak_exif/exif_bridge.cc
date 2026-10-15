@@ -587,8 +587,8 @@ void Writer::set_strips(std::vector<std::vector<uint8_t>> strips, In ifd_num) {
   strips_refs_storage_[idx].clear();
 
   for (const auto& v : strips_storage_[idx]) {
-    strips_refs_storage_[idx].push_back(rs_std::SliceRef<const uint8_t>(
-        absl::Span<const uint8_t>(v.data(), v.size())));
+    strips_refs_storage_[idx].push_back(
+        rs_std::SliceRef<const uint8_t>(absl::MakeConstSpan(v)));
   }
 
   writer_.set_strips(strips_refs_storage_[idx], ifd_num.in_);
@@ -600,8 +600,8 @@ void Writer::set_tiles(std::vector<std::vector<uint8_t>> tiles, In ifd_num) {
   tiles_refs_storage_[idx].clear();
 
   for (const auto& v : tiles_storage_[idx]) {
-    tiles_refs_storage_[idx].push_back(rs_std::SliceRef<const uint8_t>(
-        absl::Span<const uint8_t>(v.data(), v.size())));
+    tiles_refs_storage_[idx].push_back(
+        rs_std::SliceRef<const uint8_t>(absl::MakeConstSpan(v)));
   }
 
   writer_.set_tiles(tiles_refs_storage_[idx], ifd_num.in_);
