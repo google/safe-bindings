@@ -3,14 +3,14 @@
 #include <string>
 #include <vector>
 
-#include "benchmark/benchmark.h"
-#include "regex.h"
-#include "absl/log/check.h"
+#include "benchmark/benchmark.h"  // IWYU pragma: keep
+#include "absl/log/absl_check.h"
 #include "absl/random/random.h"
 #include "absl/strings/str_format.h"
 #include "absl/strings/string_view.h"
 #include "re2/re2.h"
 #include "re2/set.h"
+#include "regex.h"
 
 namespace security::regex {
 namespace {
@@ -111,7 +111,7 @@ std::string RandomText(int64_t nbytes) {
     }
     return text;
   }();
-  CHECK_LE(nbytes, 1 << 20);
+  ABSL_CHECK_LE(nbytes, 1 << 20);
   return text->substr(0, nbytes);
 }
 
@@ -246,7 +246,7 @@ void BM_RE2_Search(benchmark::State& state, const char* pattern) {
   RE2::Options options;
   options.set_max_mem(256 << 20);  // 256MB to avoid DFA out of memory
   RE2 re(pattern, options);
-  CHECK(re.ok()) << re.error();
+  ABSL_CHECK(re.ok()) << re.error();
   for (auto _ : state) {
     bool matched = RE2::PartialMatch(text, re);
     benchmark::DoNotOptimize(matched);
@@ -257,7 +257,7 @@ void BM_RE2_Search(benchmark::State& state, const char* pattern) {
 void BM_Regex_Search(benchmark::State& state, const char* pattern) {
   std::string text = RandomText(state.range(0));
   absl::StatusOr<Regex> re = Regex::Compile(pattern);
-  CHECK(re.ok()) << re.status();
+  ABSL_CHECK(re.ok()) << re.status();
   for (auto _ : state) {
     bool matched = re->IsMatch(text);
     benchmark::DoNotOptimize(matched);
@@ -270,7 +270,7 @@ void BM_RE2_NearMisses(benchmark::State& state) {
   RE2::Options options;
   options.set_max_mem(256 << 20);  // 256MB to avoid DFA out of memory
   RE2 re(kNearMisses, options);
-  CHECK(re.ok()) << re.error();
+  ABSL_CHECK(re.ok()) << re.error();
   for (auto _ : state) {
     bool matched = RE2::PartialMatch(text, re);
     benchmark::DoNotOptimize(matched);
@@ -281,7 +281,7 @@ void BM_RE2_NearMisses(benchmark::State& state) {
 void BM_Regex_NearMisses(benchmark::State& state) {
   std::string text = NearMissesText(state.range(0));
   absl::StatusOr<Regex> re = Regex::Compile(kNearMisses);
-  CHECK(re.ok()) << re.status();
+  ABSL_CHECK(re.ok()) << re.status();
   for (auto _ : state) {
     bool matched = re->IsMatch(text);
     benchmark::DoNotOptimize(matched);
@@ -294,7 +294,7 @@ void BM_RE2_CaptureHelper(benchmark::State& state, const char* pattern) {
   RE2::Options options;
   options.set_max_mem(256 << 20);  // 256MB to avoid DFA out of memory
   RE2 re(pattern, options);
-  CHECK(re.ok()) << re.error();
+  ABSL_CHECK(re.ok()) << re.error();
   for (auto _ : state) {
     absl::string_view sub1, sub2, sub3;
     bool matched = RE2::PartialMatch(text, re, &sub1, &sub2, &sub3);
@@ -309,7 +309,7 @@ void BM_RE2_CaptureHelper(benchmark::State& state, const char* pattern) {
 void BM_Regex_CaptureHelper(benchmark::State& state, const char* pattern) {
   std::string text = CaptureText(state.range(0));
   absl::StatusOr<Regex> re = Regex::Compile(pattern);
-  CHECK(re.ok()) << re.status();
+  ABSL_CHECK(re.ok()) << re.status();
   for (auto _ : state) {
     absl::string_view sub1, sub2, sub3;
     bool matched = PartialMatch(text, *re, &sub1, &sub2, &sub3);
@@ -328,7 +328,7 @@ void BM_Regex_CaptureHelper(benchmark::State& state, const char* pattern) {
 void BM_RE2_Compile_Helper(benchmark::State& state, absl::string_view pattern) {
   RE2::Options options;
   options.set_max_mem(256 << 20);
-  CHECK(RE2(pattern, options).ok());
+  ABSL_CHECK(RE2(pattern, options).ok());
   for (auto _ : state) {
     RE2 re(pattern, options);
     benchmark::DoNotOptimize(re.ok());
@@ -338,7 +338,7 @@ void BM_RE2_Compile_Helper(benchmark::State& state, absl::string_view pattern) {
 
 void BM_Regex_Compile_Helper(benchmark::State& state,
                              absl::string_view pattern) {
-  CHECK_OK(Regex::Compile(pattern));
+  ABSL_CHECK_OK(Regex::Compile(pattern));
   for (auto _ : state) {
     absl::StatusOr<Regex> re = Regex::Compile(pattern);
     benchmark::DoNotOptimize(re.ok());
@@ -351,7 +351,7 @@ void BM_RE2_Compile_CaseInsensitive_Helper(benchmark::State& state,
   RE2::Options options;
   options.set_max_mem(256 << 20);
   options.set_case_sensitive(false);
-  CHECK(RE2(pattern, options).ok());
+  ABSL_CHECK(RE2(pattern, options).ok());
   for (auto _ : state) {
     RE2 re(pattern, options);
     benchmark::DoNotOptimize(re.ok());
@@ -363,7 +363,7 @@ void BM_Regex_Compile_CaseInsensitive_Helper(benchmark::State& state,
                                              absl::string_view pattern) {
   Options options;
   options.case_insensitive = true;
-  CHECK_OK(Regex::Compile(pattern, options));
+  ABSL_CHECK_OK(Regex::Compile(pattern, options));
   for (auto _ : state) {
     absl::StatusOr<Regex> re = Regex::Compile(pattern, options);
     benchmark::DoNotOptimize(re.ok());
@@ -375,7 +375,7 @@ void BM_Regex_Compile_RE2Compat_Helper(benchmark::State& state,
                                        absl::string_view pattern) {
   Options options;
   options.re2_compatibility = true;
-  CHECK_OK(Regex::Compile(pattern, options));
+  ABSL_CHECK_OK(Regex::Compile(pattern, options));
   for (auto _ : state) {
     absl::StatusOr<Regex> re = Regex::Compile(pattern, options);
     benchmark::DoNotOptimize(re.ok());
@@ -389,7 +389,7 @@ void BM_RE2_Compile_AlternationBranches(benchmark::State& state) {
   const std::string pattern = GenerateAlternationPattern(state.range(0));
   RE2::Options options;
   options.set_max_mem(256 << 20);
-  CHECK(RE2(pattern, options).ok());
+  ABSL_CHECK(RE2(pattern, options).ok());
   for (auto _ : state) {
     RE2 re(pattern, options);
     benchmark::DoNotOptimize(re.ok());
@@ -399,7 +399,7 @@ void BM_RE2_Compile_AlternationBranches(benchmark::State& state) {
 
 void BM_Regex_Compile_AlternationBranches(benchmark::State& state) {
   const std::string pattern = GenerateAlternationPattern(state.range(0));
-  CHECK_OK(Regex::Compile(pattern));
+  ABSL_CHECK_OK(Regex::Compile(pattern));
   for (auto _ : state) {
     absl::StatusOr<Regex> re = Regex::Compile(pattern);
     benchmark::DoNotOptimize(re.ok());
@@ -411,7 +411,7 @@ void BM_RE2_Compile_LiteralLength(benchmark::State& state) {
   const std::string pattern = GenerateLiteralPattern(state.range(0));
   RE2::Options options;
   options.set_max_mem(256 << 20);
-  CHECK(RE2(pattern, options).ok());
+  ABSL_CHECK(RE2(pattern, options).ok());
   for (auto _ : state) {
     RE2 re(pattern, options);
     benchmark::DoNotOptimize(re.ok());
@@ -421,7 +421,7 @@ void BM_RE2_Compile_LiteralLength(benchmark::State& state) {
 
 void BM_Regex_Compile_LiteralLength(benchmark::State& state) {
   const std::string pattern = GenerateLiteralPattern(state.range(0));
-  CHECK_OK(Regex::Compile(pattern));
+  ABSL_CHECK_OK(Regex::Compile(pattern));
   for (auto _ : state) {
     absl::StatusOr<Regex> re = Regex::Compile(pattern);
     benchmark::DoNotOptimize(re.ok());
@@ -433,7 +433,7 @@ void BM_RE2_Compile_BoundedRepetition(benchmark::State& state) {
   const std::string pattern = GenerateRepetitionPattern(state.range(0));
   RE2::Options options;
   options.set_max_mem(256 << 20);
-  CHECK(RE2(pattern, options).ok());
+  ABSL_CHECK(RE2(pattern, options).ok());
   for (auto _ : state) {
     RE2 re(pattern, options);
     benchmark::DoNotOptimize(re.ok());
@@ -443,7 +443,7 @@ void BM_RE2_Compile_BoundedRepetition(benchmark::State& state) {
 
 void BM_Regex_Compile_BoundedRepetition(benchmark::State& state) {
   const std::string pattern = GenerateRepetitionPattern(state.range(0));
-  CHECK_OK(Regex::Compile(pattern));
+  ABSL_CHECK_OK(Regex::Compile(pattern));
   for (auto _ : state) {
     absl::StatusOr<Regex> re = Regex::Compile(pattern);
     benchmark::DoNotOptimize(re.ok());
@@ -455,7 +455,7 @@ void BM_RE2_Compile_CharClassRanges(benchmark::State& state) {
   const std::string pattern = GenerateCharClassPattern(state.range(0));
   RE2::Options options;
   options.set_max_mem(256 << 20);
-  CHECK(RE2(pattern, options).ok());
+  ABSL_CHECK(RE2(pattern, options).ok());
   for (auto _ : state) {
     RE2 re(pattern, options);
     benchmark::DoNotOptimize(re.ok());
@@ -465,7 +465,7 @@ void BM_RE2_Compile_CharClassRanges(benchmark::State& state) {
 
 void BM_Regex_Compile_CharClassRanges(benchmark::State& state) {
   const std::string pattern = GenerateCharClassPattern(state.range(0));
-  CHECK_OK(Regex::Compile(pattern));
+  ABSL_CHECK_OK(Regex::Compile(pattern));
   for (auto _ : state) {
     absl::StatusOr<Regex> re = Regex::Compile(pattern);
     benchmark::DoNotOptimize(re.ok());
@@ -477,7 +477,7 @@ void BM_RE2_Compile_CaptureGroups(benchmark::State& state) {
   const std::string pattern = GenerateCaptureGroupsPattern(state.range(0));
   RE2::Options options;
   options.set_max_mem(256 << 20);
-  CHECK(RE2(pattern, options).ok());
+  ABSL_CHECK(RE2(pattern, options).ok());
   for (auto _ : state) {
     RE2 re(pattern, options);
     benchmark::DoNotOptimize(re.ok());
@@ -487,7 +487,7 @@ void BM_RE2_Compile_CaptureGroups(benchmark::State& state) {
 
 void BM_Regex_Compile_CaptureGroups(benchmark::State& state) {
   const std::string pattern = GenerateCaptureGroupsPattern(state.range(0));
-  CHECK_OK(Regex::Compile(pattern));
+  ABSL_CHECK_OK(Regex::Compile(pattern));
   for (auto _ : state) {
     absl::StatusOr<Regex> re = Regex::Compile(pattern);
     benchmark::DoNotOptimize(re.ok());
@@ -499,7 +499,7 @@ void BM_RE2_Compile_NestedDepth(benchmark::State& state) {
   const std::string pattern = GenerateNestedPattern(state.range(0));
   RE2::Options options;
   options.set_max_mem(256 << 20);
-  CHECK(RE2(pattern, options).ok());
+  ABSL_CHECK(RE2(pattern, options).ok());
   for (auto _ : state) {
     RE2 re(pattern, options);
     benchmark::DoNotOptimize(re.ok());
@@ -509,7 +509,7 @@ void BM_RE2_Compile_NestedDepth(benchmark::State& state) {
 
 void BM_Regex_Compile_NestedDepth(benchmark::State& state) {
   const std::string pattern = GenerateNestedPattern(state.range(0));
-  CHECK_OK(Regex::Compile(pattern));
+  ABSL_CHECK_OK(Regex::Compile(pattern));
   for (auto _ : state) {
     absl::StatusOr<Regex> re = Regex::Compile(pattern);
     benchmark::DoNotOptimize(re.ok());
@@ -557,7 +557,7 @@ void BM_RE2_Replace_Capture(benchmark::State& state) {
   RE2::Options options;
   options.set_max_mem(256 << 20);
   RE2 re(kCapturePattern, options);
-  CHECK(re.ok()) << re.error();
+  ABSL_CHECK(re.ok()) << re.error();
   for (auto _ : state) {
     std::string s = text;
     bool ok = RE2::Replace(&s, re, R"(\1.\2.\3)");
@@ -570,7 +570,7 @@ void BM_RE2_Replace_Capture(benchmark::State& state) {
 void BM_Regex_Replace_Capture(benchmark::State& state) {
   std::string text = CaptureText(state.range(0));
   absl::StatusOr<Regex> re = Regex::Compile(kCapturePattern);
-  CHECK(re.ok()) << re.status();
+  ABSL_CHECK(re.ok()) << re.status();
   for (auto _ : state) {
     std::string s = text;
     bool ok = Replace(&s, *re, R"($1.$2.$3)");
@@ -585,7 +585,7 @@ void BM_RE2_Replace_Literal(benchmark::State& state) {
   RE2::Options options;
   options.set_max_mem(256 << 20);
   RE2 re("123-456-7890", options);
-  CHECK(re.ok()) << re.error();
+  ABSL_CHECK(re.ok()) << re.error();
   for (auto _ : state) {
     std::string s = text;
     bool ok = RE2::Replace(&s, re, "REPLACED");
@@ -598,7 +598,7 @@ void BM_RE2_Replace_Literal(benchmark::State& state) {
 void BM_Regex_Replace_Literal(benchmark::State& state) {
   std::string text = CaptureText(state.range(0));
   absl::StatusOr<Regex> re = Regex::Compile("123-456-7890");
-  CHECK(re.ok()) << re.status();
+  ABSL_CHECK(re.ok()) << re.status();
   for (auto _ : state) {
     std::string s = text;
     bool ok = Replace(&s, *re, "REPLACED");
@@ -613,7 +613,7 @@ void BM_RE2_Replace_NoMatch(benchmark::State& state) {
   RE2::Options options;
   options.set_max_mem(256 << 20);
   RE2 re("NON_EXISTENT_TOKEN_12345", options);
-  CHECK(re.ok()) << re.error();
+  ABSL_CHECK(re.ok()) << re.error();
   for (auto _ : state) {
     std::string s = text;
     bool ok = RE2::Replace(&s, re, "REPLACED");
@@ -626,7 +626,7 @@ void BM_RE2_Replace_NoMatch(benchmark::State& state) {
 void BM_Regex_Replace_NoMatch(benchmark::State& state) {
   std::string text = RandomText(state.range(0));
   absl::StatusOr<Regex> re = Regex::Compile("NON_EXISTENT_TOKEN_12345");
-  CHECK(re.ok()) << re.status();
+  ABSL_CHECK(re.ok()) << re.status();
   for (auto _ : state) {
     std::string s = text;
     bool ok = Replace(&s, *re, "REPLACED");
@@ -641,7 +641,7 @@ void BM_RE2_GlobalReplace_Dense(benchmark::State& state) {
   RE2::Options options;
   options.set_max_mem(256 << 20);
   RE2 re(R"(item_(\d+))", options);
-  CHECK(re.ok()) << re.error();
+  ABSL_CHECK(re.ok()) << re.error();
   for (auto _ : state) {
     std::string s = text;
     int count = RE2::GlobalReplace(&s, re, R"(entry_\1)");
@@ -654,7 +654,7 @@ void BM_RE2_GlobalReplace_Dense(benchmark::State& state) {
 void BM_Regex_GlobalReplace_Dense(benchmark::State& state) {
   std::string text = DenseText(state.range(0));
   absl::StatusOr<Regex> re = Regex::Compile(R"(item_(\d+))");
-  CHECK(re.ok()) << re.status();
+  ABSL_CHECK(re.ok()) << re.status();
   for (auto _ : state) {
     std::string s = text;
     int count = GlobalReplace(&s, *re, R"(entry_$1)");
@@ -669,7 +669,7 @@ void BM_RE2_GlobalReplace_Capture(benchmark::State& state) {
   RE2::Options options;
   options.set_max_mem(256 << 20);
   RE2 re(kCapturePattern, options);
-  CHECK(re.ok()) << re.error();
+  ABSL_CHECK(re.ok()) << re.error();
   for (auto _ : state) {
     std::string s = text;
     int count = RE2::GlobalReplace(&s, re, R"(\1.\2.\3)");
@@ -682,7 +682,7 @@ void BM_RE2_GlobalReplace_Capture(benchmark::State& state) {
 void BM_Regex_GlobalReplace_Capture(benchmark::State& state) {
   std::string text = CapturePairsText(state.range(0));
   absl::StatusOr<Regex> re = Regex::Compile(kCapturePattern);
-  CHECK(re.ok()) << re.status();
+  ABSL_CHECK(re.ok()) << re.status();
   for (auto _ : state) {
     std::string s = text;
     int count = GlobalReplace(&s, *re, R"($1.$2.$3)");
@@ -697,7 +697,7 @@ void BM_RE2_GlobalReplace_Literal(benchmark::State& state) {
   RE2::Options options;
   options.set_max_mem(256 << 20);
   RE2 re("item", options);
-  CHECK(re.ok()) << re.error();
+  ABSL_CHECK(re.ok()) << re.error();
   for (auto _ : state) {
     std::string s = text;
     int count = RE2::GlobalReplace(&s, re, "object");
@@ -710,7 +710,7 @@ void BM_RE2_GlobalReplace_Literal(benchmark::State& state) {
 void BM_Regex_GlobalReplace_Literal(benchmark::State& state) {
   std::string text = DenseText(state.range(0));
   absl::StatusOr<Regex> re = Regex::Compile("item");
-  CHECK(re.ok()) << re.status();
+  ABSL_CHECK(re.ok()) << re.status();
   for (auto _ : state) {
     std::string s = text;
     int count = GlobalReplace(&s, *re, "object");
@@ -725,7 +725,7 @@ void BM_RE2_GlobalReplace_NoMatch(benchmark::State& state) {
   RE2::Options options;
   options.set_max_mem(256 << 20);
   RE2 re("NON_EXISTENT_TOKEN_12345", options);
-  CHECK(re.ok()) << re.error();
+  ABSL_CHECK(re.ok()) << re.error();
   for (auto _ : state) {
     std::string s = text;
     int count = RE2::GlobalReplace(&s, re, "REPLACED");
@@ -738,7 +738,7 @@ void BM_RE2_GlobalReplace_NoMatch(benchmark::State& state) {
 void BM_Regex_GlobalReplace_NoMatch(benchmark::State& state) {
   std::string text = RandomText(state.range(0));
   absl::StatusOr<Regex> re = Regex::Compile("NON_EXISTENT_TOKEN_12345");
-  CHECK(re.ok()) << re.status();
+  ABSL_CHECK(re.ok()) << re.status();
   for (auto _ : state) {
     std::string s = text;
     int count = GlobalReplace(&s, *re, "REPLACED");
@@ -795,7 +795,7 @@ void BM_Regex_GlobalReplace_Uncompiled(benchmark::State& state) {
 void BM_Regex_Member_Replace(benchmark::State& state) {
   std::string text = CaptureText(state.range(0));
   absl::StatusOr<Regex> re = Regex::Compile(kCapturePattern);
-  CHECK(re.ok()) << re.status();
+  ABSL_CHECK(re.ok()) << re.status();
   for (auto _ : state) {
     std::string result = re->Replace(text, R"($1.$2.$3)");
     benchmark::DoNotOptimize(result);
@@ -806,7 +806,7 @@ void BM_Regex_Member_Replace(benchmark::State& state) {
 void BM_Regex_Member_ReplaceAll(benchmark::State& state) {
   std::string text = CapturePairsText(state.range(0));
   absl::StatusOr<Regex> re = Regex::Compile(kCapturePattern);
-  CHECK(re.ok()) << re.status();
+  ABSL_CHECK(re.ok()) << re.status();
   for (auto _ : state) {
     std::string result = re->ReplaceAll(text, R"($1.$2.$3)");
     benchmark::DoNotOptimize(result);
@@ -817,7 +817,7 @@ void BM_Regex_Member_ReplaceAll(benchmark::State& state) {
 void BM_Regex_Member_Replacen(benchmark::State& state) {
   std::string text = CapturePairsText(state.range(0));
   absl::StatusOr<Regex> re = Regex::Compile(kCapturePattern);
-  CHECK(re.ok()) << re.status();
+  ABSL_CHECK(re.ok()) << re.status();
   for (auto _ : state) {
     std::string result = re->Replacen(text, 2, R"($1.$2.$3)");
     benchmark::DoNotOptimize(result);
