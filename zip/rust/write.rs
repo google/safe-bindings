@@ -6,8 +6,8 @@ use std::fmt::{Debug, Formatter};
 use std::fs::{File, OpenOptions};
 use std::io::{copy, Cursor, Read, Seek, Write};
 use zip::{
-    write::FileOptions, CompressionMethod as ZipCrateCompressionMethod,
-    ZipWriter as WrappedZipWriter,
+    write::{FileOptions, StreamWriter},
+    CompressionMethod as ZipCrateCompressionMethod, ZipWriter as WrappedZipWriter,
 };
 
 // Expose some of the options for writing files to the zip archive.
@@ -56,10 +56,10 @@ impl From<CompressionMethod> for ZipCrateCompressionMethod {
         match val {
             CompressionMethod::Deflated => ZipCrateCompressionMethod::Deflated,
             CompressionMethod::Stored => ZipCrateCompressionMethod::Stored,
-            CompressionMethod::Bzip2 => ZipCrateCompressionMethod::Bzip2,
-            CompressionMethod::Zstd => ZipCrateCompressionMethod::Zstd,
-            CompressionMethod::Lzma => ZipCrateCompressionMethod::Lzma,
-            CompressionMethod::Xz => ZipCrateCompressionMethod::Xz,
+            CompressionMethod::Bzip2 => ZipCrateCompressionMethod::BZIP2,
+            CompressionMethod::Zstd => ZipCrateCompressionMethod::ZSTD,
+            CompressionMethod::Lzma => ZipCrateCompressionMethod::LZMA,
+            CompressionMethod::Xz => ZipCrateCompressionMethod::XZ,
             CompressionMethod::Unsupported => {
                 panic!("cannot convert CompressionMethod::Unsupported to ZipCrateCompressionMethod")
             }
@@ -83,7 +83,7 @@ impl TryFrom<&ZipWriterFileOptions> for FileOptions<'static, ()> {
         if let Some(method) = val.compression_method {
             options = options.compression_method(method.into());
         }
-        // third_party/rust/zip/v6/src/write.rs
+        // third_party/rust/zip/v8/src/write.rs
         //
         // `None` value specifies default compression level.
         //
@@ -162,7 +162,7 @@ impl ZipWriterFileOptions {
 #[derive(Default)]
 /// A zip writer that writes to an in-memory buffer.
 pub struct BufferedZipWriter {
-    writer: Option<WrappedZipWriter<Cursor<Vec<u8>>>>,
+    writer: Option<Box<WrappedZipWriter<Cursor<Vec<u8>>>>>,
 }
 
 impl Debug for BufferedZipWriter {
@@ -194,13 +194,13 @@ impl BufferedZipWriter {
         if append {
             match WrappedZipWriter::new_append(cursor) {
                 Ok(writer) => {
-                    self.writer = Some(writer);
+                    self.writer = Some(Box::new(writer));
                     Ok(())
                 }
                 Err(e) => Err(e.to_string()),
             }
         } else {
-            self.writer = Some(WrappedZipWriter::new(cursor));
+            self.writer = Some(Box::new(WrappedZipWriter::new(cursor)));
             Ok(())
         }
     }
@@ -266,12 +266,27 @@ impl BufferedZipWriter {
     pub fn write_file_content(&mut self, path: &[u8]) -> Result<(), ZipError> {
         write_file_content_impl(&mut self.writer, path)
     }
+
+    /// Sets the archive comment.
+    pub fn set_comment(&mut self, comment: &[u8]) -> Result<(), ZipError> {
+        set_comment_impl(&mut self.writer, comment)
+    }
+
+    /// Flushes any pending output.
+    pub fn flush(&mut self) -> Result<(), ZipError> {
+        flush_impl(&mut self.writer)
+    }
+
+    /// Returns whether seeking is possible (always true for BufferedZipWriter).
+    pub fn is_seek_possible(&self) -> bool {
+        true
+    }
 }
 
 #[derive(Default)]
 /// A zip writer that writes to a file on the filesystem.
 pub struct FsZipWriter {
-    writer: Option<WrappedZipWriter<File>>,
+    writer: Option<Box<WrappedZipWriter<File>>>,
 }
 
 impl Debug for FsZipWriter {
@@ -311,7 +326,7 @@ impl FsZipWriter {
             {
                 Ok(file) => match WrappedZipWriter::new_append(file) {
                     Ok(writer) => {
-                        self.writer = Some(writer);
+                        self.writer = Some(Box::new(writer));
                         Ok(())
                     }
                     Err(e) => Err(e.to_string()),
@@ -321,7 +336,7 @@ impl FsZipWriter {
         } else {
             match OpenOptions::new().write(true).create(true).truncate(true).open(path_str) {
                 Ok(file) => {
-                    self.writer = Some(WrappedZipWriter::new(file));
+                    self.writer = Some(Box::new(WrappedZipWriter::new(file)));
                     Ok(())
                 }
                 Err(e) => Err(e.to_string()),
@@ -390,14 +405,29 @@ impl FsZipWriter {
     pub fn write_file_content(&mut self, path: &[u8]) -> Result<(), ZipError> {
         write_file_content_impl(&mut self.writer, path)
     }
+
+    /// Sets the archive comment.
+    pub fn set_comment(&mut self, comment: &[u8]) -> Result<(), ZipError> {
+        set_comment_impl(&mut self.writer, comment)
+    }
+
+    /// Flushes any pending output.
+    pub fn flush(&mut self) -> Result<(), ZipError> {
+        flush_impl(&mut self.writer)
+    }
+
+    /// Returns whether seeking is possible (always true for FsZipWriter).
+    pub fn is_seek_possible(&self) -> bool {
+        true
+    }
 }
 
 fn start_file_impl<W: Write + Seek>(
-    writer: &mut Option<WrappedZipWriter<W>>,
+    writer: &mut Option<Box<WrappedZipWriter<W>>>,
     name: &[u8],
     options: ZipWriterFileOptions,
 ) -> Result<(), ZipError> {
-    if let Some(writer) = writer.as_mut() {
+    if let Some(writer) = writer.as_deref_mut() {
         let name_lossy = String::from_utf8_lossy(name);
         let name_str = name_lossy.as_ref();
         match FileOptions::try_from(&options) {
@@ -413,11 +443,11 @@ fn start_file_impl<W: Write + Seek>(
 }
 
 fn add_directory_impl<W: Write + Seek>(
-    writer: &mut Option<WrappedZipWriter<W>>,
+    writer: &mut Option<Box<WrappedZipWriter<W>>>,
     name: &[u8],
     options: ZipWriterFileOptions,
 ) -> Result<(), ZipError> {
-    if let Some(writer) = writer.as_mut() {
+    if let Some(writer) = writer.as_deref_mut() {
         let name_lossy = String::from_utf8_lossy(name);
         let name_str = name_lossy.as_ref();
         match FileOptions::try_from(&options) {
@@ -433,10 +463,10 @@ fn add_directory_impl<W: Write + Seek>(
 }
 
 fn write_data_impl<W: Write + Seek>(
-    writer: &mut Option<WrappedZipWriter<W>>,
+    writer: &mut Option<Box<WrappedZipWriter<W>>>,
     data: VecU8,
 ) -> Result<(), ZipError> {
-    if let Some(writer) = writer.as_mut() {
+    if let Some(writer) = writer.as_deref_mut() {
         match writer.write_all(data.as_slice()) {
             Ok(_) => Ok(()),
             Err(e) => Err(ZipError::internal(e.to_string())),
@@ -447,10 +477,10 @@ fn write_data_impl<W: Write + Seek>(
 }
 
 fn do_copy_impl<W: Write + Seek, R: Read>(
-    writer: &mut Option<WrappedZipWriter<W>>,
+    writer: &mut Option<Box<WrappedZipWriter<W>>>,
     reader: &mut R,
 ) -> Result<(), ZipError> {
-    if let Some(writer) = writer.as_mut() {
+    if let Some(writer) = writer.as_deref_mut() {
         match copy(reader, writer) {
             Ok(_) => Ok(()),
             Err(e) => Err(ZipError::internal(e.to_string())),
@@ -461,10 +491,10 @@ fn do_copy_impl<W: Write + Seek, R: Read>(
 }
 
 fn write_file_content_impl<W: Write + Seek>(
-    writer: &mut Option<WrappedZipWriter<W>>,
+    writer: &mut Option<Box<WrappedZipWriter<W>>>,
     path: &[u8],
 ) -> Result<(), ZipError> {
-    if let Some(writer) = writer.as_mut() {
+    if let Some(writer) = writer.as_deref_mut() {
         let path_lossy = String::from_utf8_lossy(path);
         let path_str = path_lossy.as_ref();
         match File::open(path_str) {
@@ -476,5 +506,353 @@ fn write_file_content_impl<W: Write + Seek>(
         }
     } else {
         Err(ZipError::failed_precondition("writer is not open"))
+    }
+}
+
+fn set_comment_impl<W: Write + Seek>(
+    writer: &mut Option<Box<WrappedZipWriter<W>>>,
+    comment: &[u8],
+) -> Result<(), ZipError> {
+    if let Some(writer) = writer.as_deref_mut() {
+        let comment_lossy = String::from_utf8_lossy(comment);
+        match writer.set_comment(comment_lossy.as_ref()) {
+            Ok(_) => Ok(()),
+            Err(e) => Err(ZipError::internal(e.to_string())),
+        }
+    } else {
+        Err(ZipError::failed_precondition("writer is not open"))
+    }
+}
+
+fn flush_impl<W: Write + Seek>(
+    writer: &mut Option<Box<WrappedZipWriter<W>>>,
+) -> Result<(), ZipError> {
+    if let Some(writer) = writer.as_deref_mut() {
+        match writer.flush() {
+            Ok(_) => Ok(()),
+            Err(e) => Err(ZipError::internal(e.to_string())),
+        }
+    } else {
+        Err(ZipError::failed_precondition("writer is not open"))
+    }
+}
+
+type InnerBufferedStreamWriter = WrappedZipWriter<StreamWriter<Cursor<Vec<u8>>>>;
+
+#[derive(Default)]
+/// A zip writer that streams to an in-memory buffer without seeking.
+pub struct BufferedZipStreamWriter {
+    writer: Option<Box<InnerBufferedStreamWriter>>,
+}
+
+impl Debug for BufferedZipStreamWriter {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("BufferedZipStreamWriter")
+            .field(
+                "writer",
+                &if self.writer.is_some() {
+                    "Some(WrappedZipWriter<StreamWriter<Cursor<Vec<u8>>>>>)"
+                } else {
+                    "None"
+                },
+            )
+            .finish()
+    }
+}
+
+impl BufferedZipStreamWriter {
+    /// Creates a new empty `BufferedZipStreamWriter`.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Creates a new streaming `BufferedZipStreamWriter`.
+    pub fn new_stream() -> Self {
+        let cursor = Cursor::new(Vec::new());
+        Self { writer: Some(Box::new(WrappedZipWriter::new_stream(cursor))) }
+    }
+
+    /// Creates a new streaming `BufferedZipStreamWriter` initialized with data.
+    pub fn new_from_data(data: VecU8) -> Result<Self, ZipError> {
+        let cursor = Cursor::new(data.into_vec());
+        Ok(Self { writer: Some(Box::new(WrappedZipWriter::new_stream(cursor))) })
+    }
+
+    /// Returns whether the zip writer is none (due to being
+    /// default-constructed or moved-from).
+    pub fn is_none(&self) -> bool {
+        self.writer.is_none()
+    }
+
+    /// Returns whether seeking is possible (always false for stream writers).
+    pub fn is_seek_possible(&self) -> bool {
+        false
+    }
+
+    /// Finishes writing the zip archive and returns the buffered data.
+    pub fn finish(&mut self) -> Result<VecU8, ZipError> {
+        if let Some(writer) = self.writer.take() {
+            match writer.finish() {
+                Ok(stream_writer) => Ok(stream_writer.into_inner().into_inner().into()),
+                Err(e) => Err(ZipError::internal(e.to_string())),
+            }
+        } else {
+            Err(ZipError::failed_precondition("writer is not open"))
+        }
+    }
+
+    /// Creates a new file in the zip archive and starts writing to it.
+    pub fn start_file(
+        &mut self,
+        name: &[u8],
+        options: ZipWriterFileOptions,
+    ) -> Result<(), ZipError> {
+        start_file_impl(&mut self.writer, name, options)
+    }
+
+    /// Adds a directory to the zip archive.
+    pub fn add_directory(
+        &mut self,
+        name: &[u8],
+        options: ZipWriterFileOptions,
+    ) -> Result<(), ZipError> {
+        add_directory_impl(&mut self.writer, name, options)
+    }
+
+    /// Writes data to the current file in the zip archive.
+    pub fn write_data(&mut self, data: VecU8) -> Result<(), ZipError> {
+        write_data_impl(&mut self.writer, data)
+    }
+
+    /// Writes file content from a `BufferedZipFile` to the current file in the zip archive.
+    pub fn write_buffered_zip_file_content(
+        &mut self,
+        file: &mut BufferedZipFile,
+    ) -> Result<(), ZipError> {
+        do_copy_impl(&mut self.writer, file)
+    }
+
+    /// Writes file content from a `FsZipFile` to the current file in the zip archive.
+    pub fn write_fs_zip_file_content(&mut self, file: &mut FsZipFile) -> Result<(), ZipError> {
+        do_copy_impl(&mut self.writer, file)
+    }
+
+    /// Writes file content from a path to the current file in the zip archive.
+    pub fn write_file_content(&mut self, path: &[u8]) -> Result<(), ZipError> {
+        write_file_content_impl(&mut self.writer, path)
+    }
+
+    /// Sets the archive comment.
+    pub fn set_comment(&mut self, comment: &[u8]) -> Result<(), ZipError> {
+        set_comment_impl(&mut self.writer, comment)
+    }
+
+    /// Flushes any pending output.
+    pub fn flush(&mut self) -> Result<(), ZipError> {
+        flush_impl(&mut self.writer)
+    }
+}
+
+#[derive(Default)]
+/// A zip writer that streams to a file on the filesystem without seeking.
+pub struct FsZipStreamWriter {
+    writer: Option<Box<WrappedZipWriter<StreamWriter<File>>>>,
+}
+
+impl Debug for FsZipStreamWriter {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("FsZipStreamWriter")
+            .field(
+                "writer",
+                &if self.writer.is_some() {
+                    "Some(WrappedZipWriter<StreamWriter<File>>)"
+                } else {
+                    "None"
+                },
+            )
+            .finish()
+    }
+}
+
+impl FsZipStreamWriter {
+    /// Creates a new `FsZipStreamWriter`.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Creates a new streaming `FsZipStreamWriter` writing to `path`.
+    pub fn new_from_path(path: &[u8]) -> Result<Self, ZipError> {
+        let mut writer = Self::default();
+        if let Err(e) = writer.open(path) {
+            return Err(ZipError::invalid_argument(format!("Failed to open zip archive: {}", e)));
+        }
+        Ok(writer)
+    }
+
+    fn open(&mut self, path: &[u8]) -> Result<(), String> {
+        let path_lossy = String::from_utf8_lossy(path);
+        let path_str = path_lossy.as_ref();
+        match OpenOptions::new().write(true).create(true).truncate(true).open(path_str) {
+            Ok(file) => {
+                self.writer = Some(Box::new(WrappedZipWriter::new_stream(file)));
+                Ok(())
+            }
+            Err(e) => Err(e.to_string()),
+        }
+    }
+
+    /// Returns whether the zip writer is none (due to being
+    /// default-constructed or moved-from).
+    pub fn is_none(&self) -> bool {
+        self.writer.is_none()
+    }
+
+    /// Returns whether seeking is possible (always false for stream writers).
+    pub fn is_seek_possible(&self) -> bool {
+        false
+    }
+
+    /// Finishes writing the zip archive to file.
+    pub fn finish(&mut self) -> Result<(), ZipError> {
+        if let Some(writer) = self.writer.take() {
+            match writer.finish() {
+                Ok(_) => Ok(()),
+                Err(e) => Err(ZipError::internal(e.to_string())),
+            }
+        } else {
+            Err(ZipError::failed_precondition("writer is not open"))
+        }
+    }
+
+    /// Creates a new file in the zip archive and starts writing to it.
+    pub fn start_file(
+        &mut self,
+        name: &[u8],
+        options: ZipWriterFileOptions,
+    ) -> Result<(), ZipError> {
+        start_file_impl(&mut self.writer, name, options)
+    }
+
+    /// Adds a directory to the zip archive.
+    pub fn add_directory(
+        &mut self,
+        name: &[u8],
+        options: ZipWriterFileOptions,
+    ) -> Result<(), ZipError> {
+        add_directory_impl(&mut self.writer, name, options)
+    }
+
+    /// Writes data to the current file in the zip archive.
+    pub fn write_data(&mut self, data: VecU8) -> Result<(), ZipError> {
+        write_data_impl(&mut self.writer, data)
+    }
+
+    /// Writes file content from a `BufferedZipFile` to the current file in the zip archive.
+    pub fn write_buffered_zip_file_content(
+        &mut self,
+        file: &mut BufferedZipFile,
+    ) -> Result<(), ZipError> {
+        do_copy_impl(&mut self.writer, file)
+    }
+
+    /// Writes file content from a `FsZipFile` to the current file in the zip archive.
+    pub fn write_fs_zip_file_content(&mut self, file: &mut FsZipFile) -> Result<(), ZipError> {
+        do_copy_impl(&mut self.writer, file)
+    }
+
+    /// Writes file content from a path to the current file in the zip archive.
+    pub fn write_file_content(&mut self, path: &[u8]) -> Result<(), ZipError> {
+        write_file_content_impl(&mut self.writer, path)
+    }
+
+    /// Sets the archive comment.
+    pub fn set_comment(&mut self, comment: &[u8]) -> Result<(), ZipError> {
+        set_comment_impl(&mut self.writer, comment)
+    }
+
+    /// Flushes any pending output.
+    pub fn flush(&mut self) -> Result<(), ZipError> {
+        flush_impl(&mut self.writer)
+    }
+}
+
+/// Creates a new in-memory streaming zip writer.
+pub fn new_buffered_zip_stream_writer() -> BufferedZipStreamWriter {
+    BufferedZipStreamWriter::new_stream()
+}
+
+/// Creates a new filesystem streaming zip writer.
+pub fn new_fs_zip_stream_writer(path: &[u8]) -> Result<FsZipStreamWriter, ZipError> {
+    FsZipStreamWriter::new_from_path(path)
+}
+
+#[cfg(test)]
+mod tests {
+        use super::*;
+    use crate::BufferedZipArchive;
+    use googletest::prelude::*;
+
+    #[gtest]
+    fn test_buffered_zip_stream_writer() {
+        let mut writer = BufferedZipStreamWriter::new_stream();
+        expect_false!(writer.is_none());
+        expect_false!(writer.is_seek_possible());
+
+        let options = ZipWriterFileOptions::new().compression_method(CompressionMethod::Deflated);
+        writer.start_file(b"test.txt", options).unwrap();
+        writer.write_data(VecU8::from(b"stream writer data".to_vec())).unwrap();
+        writer.add_directory(b"mydir", options).unwrap();
+        writer.set_comment(b"archive comment").unwrap();
+        writer.flush().unwrap();
+
+        let zip_bytes = writer.finish().unwrap();
+        expect_false!(zip_bytes.is_empty());
+
+        // Verify that ZipArchive can read this streaming-written zip archive
+        let mut archive = BufferedZipArchive::new_from_data(zip_bytes).unwrap();
+        expect_eq!(archive.get_length(), 2);
+        expect_eq!(archive.get_comment().as_slice(), b"archive comment");
+
+        {
+            let mut file1 = archive.get_file_by_index(0).unwrap();
+            expect_eq!(file1.get_file_name().as_slice(), b"test.txt");
+            expect_eq!(file1.get_file_data().unwrap().as_slice(), b"stream writer data");
+        }
+
+        {
+            let file2 = archive.get_file_by_index(1).unwrap();
+            expect_true!(file2.is_dir());
+            expect_eq!(file2.get_file_name().as_slice(), b"mydir/");
+        }
+    }
+
+    #[gtest]
+    fn test_free_functions_stream_writer() {
+        let mut writer = new_buffered_zip_stream_writer();
+        expect_false!(writer.is_seek_possible());
+        let options = ZipWriterFileOptions::new();
+        writer.start_file(b"a.txt", options).unwrap();
+        writer.write_data(VecU8::from(b"content".to_vec())).unwrap();
+        let zip_bytes = writer.finish().unwrap();
+
+        let mut archive = BufferedZipArchive::new_from_data(zip_bytes).unwrap();
+        expect_eq!(archive.get_length(), 1);
+        let mut file = archive.get_file_by_index(0).unwrap();
+        expect_eq!(file.get_file_data().unwrap().as_slice(), b"content");
+    }
+
+    #[gtest]
+    fn test_regular_writer_is_seek_possible_and_set_comment() {
+        let mut writer = BufferedZipWriter::new_from_data(VecU8::default(), false).unwrap();
+        expect_true!(writer.is_seek_possible());
+        let options = ZipWriterFileOptions::new();
+        writer.start_file(b"b.txt", options).unwrap();
+        writer.write_data(VecU8::from(b"data".to_vec())).unwrap();
+        writer.set_comment(b"comment on regular writer").unwrap();
+        writer.flush().unwrap();
+        let zip_bytes = writer.finish().unwrap();
+
+        let archive = BufferedZipArchive::new_from_data(zip_bytes).unwrap();
+        expect_eq!(archive.get_comment().as_slice(), b"comment on regular writer");
     }
 }
