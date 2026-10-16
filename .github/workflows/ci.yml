@@ -18,6 +18,7 @@ jobs:
         binding:
         # keep-sorted start
           - deflate
+          - elf
           - fft
           - kamadak_exif
           - lzma
