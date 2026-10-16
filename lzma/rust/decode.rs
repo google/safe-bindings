@@ -45,12 +45,17 @@ pub unsafe extern "C" fn lzma_stream_decoder(
         (memlimit / 1024).clamp(0, u32::MAX as u64) as u32
     };
 
-    let decoder = XzStream::new_mem_limit(allow_multiple, memlimit_kb);
+    let mut decoder = XzStream::new_mem_limit(allow_multiple, memlimit_kb);
+    if flags & (LZMA_TELL_NO_CHECK | LZMA_TELL_ANY_CHECK) != 0
+        && decoder.set_stop_after_stream_header(true).is_err()
+    {
+        return LZMA_PROG_ERROR;
+    }
     let mut state = InternalState::new(CoderInner::XzDecoder(Box::new(decoder)));
     state.tell_flags = flags & (LZMA_TELL_NO_CHECK | LZMA_TELL_ANY_CHECK);
 
-    // SAFETY: `strm` is non-null and valid per caller promise. We have exclusive ownership of `strm`
-    // during this initialization call to safely mutate `internal`.
+    // SAFETY: `strm` is non-null and valid per caller promise. We have exclusive ownership of
+    // `strm` during this initialization call to safely mutate `internal`.
     unsafe { helpers::install_state(strm, state) };
 
     LZMA_OK
@@ -84,8 +89,8 @@ pub unsafe extern "C" fn lzma_alone_decoder(strm: *mut lzma_stream, memlimit: u6
         None,
     ))));
 
-    // SAFETY: `strm` is non-null and valid per caller promise. We have exclusive ownership of `strm`
-    // during this initialization call to safely mutate `internal`.
+    // SAFETY: `strm` is non-null and valid per caller promise. We have exclusive ownership of
+    // `strm` during this initialization call to safely mutate `internal`.
     unsafe { helpers::install_state(strm, state) };
 
     LZMA_OK
@@ -124,7 +129,8 @@ pub unsafe extern "C" fn lzma_raw_decoder(
         if f.id == LZMA_FILTER_LZMA2.into() || f.id == LZMA_FILTER_LZMA1.into() {
             lzma_f_opt = Some(f);
 
-            // According to both liblzma and lzma_rust2, the last filter should be either lzma1 or lzma2.
+            // According to both liblzma and lzma_rust2, the last filter should be either lzma1 or
+            // lzma2.
             if i + 1 != filter_slice.len() {
                 return LZMA_OPTIONS_ERROR;
             }
@@ -208,20 +214,14 @@ pub unsafe extern "C" fn lzma_raw_decoder(
         tell_flags: 0,
     };
 
-    // SAFETY: `strm` is non-null and valid per caller promise. We have exclusive ownership of `strm`
-    // during this initialization call to safely mutate `internal`.
+    // SAFETY: `strm` is non-null and valid per caller promise. We have exclusive ownership of
+    // `strm` during this initialization call to safely mutate `internal`.
     unsafe { helpers::install_state(strm, state) };
 
     LZMA_OK
 }
 
 /// Initialize Lzip decoder.
-///
-/// Note: `LzipStream` in `lzma_rust2` always decodes concatenated `.lz`
-/// members by default. Unlike standard liblzma, which requires `LZMA_CONCATENATED`
-/// to decode multiple members and otherwise stops after the first member, this
-/// implementation will always decode concatenated members regardless of whether
-/// `LZMA_CONCATENATED` is set in `flags`.
 ///
 /// Note: only `.lz` version 1 is decodable, whereas liblzma also decodes version 0.
 /// NOTE(b/562256728): support `.lz` version 0.
@@ -252,7 +252,9 @@ pub unsafe extern "C" fn lzma_lzip_decoder(
         (memlimit / 1024).clamp(0, u32::MAX as u64) as u32
     };
 
+    let allow_multiple = (flags & LZMA_CONCATENATED) != 0;
     let state = InternalState::new(CoderInner::LzipDecoder(Box::new(LzipStream::new_mem_limit(
+        allow_multiple,
         memlimit_kb,
     ))));
     // SAFETY: Exclusive ownership of `strm` is guaranteed by `&mut lzma_stream`. If `strm.internal`
