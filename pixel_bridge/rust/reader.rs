@@ -1,12 +1,13 @@
 use crate::{
     image::{GenericImageDecoder, ImageDecoder},
+    png::{PngDecoder as RustPngDecoder, PNG_USER_HEIGHT_MAX, PNG_USER_WIDTH_MAX},
     vec_u8::VecU8,
 };
 use image::{
     codecs::bmp::BmpDecoder as RustBmpDecoder, codecs::gif::GifDecoder as RustGifDecoder,
     codecs::ico::IcoDecoder as RustIcoDecoder, codecs::jpeg::JpegDecoder as RustJpegDecoder,
-    codecs::png::PngDecoder as RustPngDecoder, codecs::tiff::TiffDecoder as RustTiffDecoder,
-    codecs::webp::WebPDecoder as RustWebPDecoder, ImageFormat, ImageReader as RustImageReader,
+    codecs::tiff::TiffDecoder as RustTiffDecoder, codecs::webp::WebPDecoder as RustWebPDecoder,
+    ImageFormat, ImageReader as RustImageReader,
 };
 use std::fs::File;
 use std::io::{BufRead, BufReader, Cursor, Read, Seek};
@@ -135,7 +136,8 @@ impl ImageReader {
 fn png(
     d: RustImageReader<Box<dyn ReadSeek>>,
 ) -> Result<ImageDecoder, String> {
-    let decoder = RustPngDecoder::new(d.into_inner()).map_err(|e| e.to_string())?;
+    let decoder = RustPngDecoder::new(d.into_inner()).map_err(|e|
+    // e.to_string())?;
     Ok(ImageDecoder::new(GenericImageDecoder::Png(Box::new(decoder))))
 }
 
@@ -143,7 +145,8 @@ fn png(
 fn jpeg(
     d: RustImageReader<Box<dyn ReadSeek>>,
 ) -> Result<ImageDecoder, String> {
-    let decoder = RustJpegDecoder::new(d.into_inner()).map_err(|e| e.to_string())?;
+    let decoder = RustJpegDecoder::new(d.into_inner()).map_err(|e|
+    // e.to_string())?;
     Ok(ImageDecoder::new(GenericImageDecoder::Jpeg(Box::new(decoder))))
 }
 
@@ -198,8 +201,8 @@ fn bmp(d: RustImageReader<Box<dyn ReadSeek>>) -> Result<ImageDecoder, String> {
 
 /// Maximum number of directory entries we accept in an ICO file.
 ///
-/// The ICO format allows up to `u16::MAX` (65535) entries. We enforce a much smaller cap here to bound the
-/// work the decoder performs on untrusted input.
+/// The ICO format allows up to `u16::MAX` (65535) entries. We enforce a much smaller cap here to
+/// bound the work the decoder performs on untrusted input.
 const MAX_ICO_ENTRIES: u16 = 16;
 
 #[inline(never)]

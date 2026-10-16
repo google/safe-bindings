@@ -1,15 +1,15 @@
 use crate::{
+    png::{PngDecoder as RustPngDecoder, PngTextMetadata, Rgb16},
     reader::{Format, ReadSeek},
     vec_u8::VecU8,
 };
 use image::{
     codecs::bmp::BmpDecoder as RustBmpDecoder, codecs::gif::GifDecoder as RustGifDecoder,
     codecs::ico::IcoDecoder as RustIcoDecoder, codecs::jpeg::JpegDecoder as RustJpegDecoder,
-    codecs::png::PngDecoder as RustPngDecoder, codecs::tiff::TiffDecoder as RustTiffDecoder,
-    codecs::webp::WebPDecoder as RustWebPDecoder, flat::SampleLayout as RustSampleLayout,
-    AnimationDecoder, ColorType as RustColorType, ExtendedColorType as RustExtendedColorType,
-    Frame as RustFrame, ImageBuffer as RustImageBuffer, ImageDecoder as RustImageDecoder,
-    Rgba as RustRgba,
+    codecs::tiff::TiffDecoder as RustTiffDecoder, codecs::webp::WebPDecoder as RustWebPDecoder,
+    flat::SampleLayout as RustSampleLayout, AnimationDecoder, ColorType as RustColorType,
+    ExtendedColorType as RustExtendedColorType, Frame as RustFrame, ImageBuffer as RustImageBuffer,
+    ImageDecoder as RustImageDecoder, Rgba as RustRgba,
 };
 use std::collections::VecDeque;
 
@@ -327,9 +327,9 @@ where
     }
 }
 
-fn run_fallible_result<F>(f: F) -> Result<Frames, VecU8>
+fn run_fallible_result<F, T>(f: F) -> Result<T, VecU8>
 where
-    F: FnOnce() -> Result<Frames, VecU8>,
+    F: FnOnce() -> Result<T, VecU8>,
 {
     match run_catching_panics(f) {
         Ok(res) => res,
@@ -529,6 +529,83 @@ impl ImageDecoder {
         })
     }
 
+    /// Returns the colour type encoded in the image header before decoding
+    /// transformations (such as palette or `tRNS` expansion), or `None` if the
+    /// encoded colour type is indexed or unknown.
+    pub fn input_color_type(&self) -> Option<ColorType> {
+        self.inner.as_ref().and_then(|inner| match inner.original_color_type() {
+            RustExtendedColorType::L1
+            | RustExtendedColorType::L2
+            | RustExtendedColorType::L4
+            | RustExtendedColorType::L8
+            | RustExtendedColorType::L16 => Some(ColorType::L),
+            RustExtendedColorType::La1
+            | RustExtendedColorType::La2
+            | RustExtendedColorType::La4
+            | RustExtendedColorType::La8
+            | RustExtendedColorType::La16 => Some(ColorType::La),
+            RustExtendedColorType::Rgb1
+            | RustExtendedColorType::Rgb2
+            | RustExtendedColorType::Rgb4
+            | RustExtendedColorType::Rgb8
+            | RustExtendedColorType::Rgb16
+            | RustExtendedColorType::Rgb32F
+            | RustExtendedColorType::Bgr8
+            | RustExtendedColorType::Cmyk8
+            | RustExtendedColorType::Cmyk16 => Some(ColorType::Rgb),
+            RustExtendedColorType::Rgba1
+            | RustExtendedColorType::Rgba2
+            | RustExtendedColorType::Rgba4
+            | RustExtendedColorType::Rgba8
+            | RustExtendedColorType::Rgba16
+            | RustExtendedColorType::Rgba32F
+            | RustExtendedColorType::Bgra8 => Some(ColorType::Rgba),
+            _ => None,
+        })
+    }
+
+    /// Returns whether the image has a full alpha channel or a spec-valid
+    /// transparency chunk (for PNG, a `tRNS` chunk that `png_handle_tRNS` in
+    /// libpng keeps).
+    pub fn has_valid_transparency(&self) -> bool {
+        match &self.inner {
+            Some(GenericImageDecoder::Png(decoder)) => decoder.has_valid_transparency(),
+            Some(inner) => {
+                matches!(ColorType::from(inner.color_type()), ColorType::La | ColorType::Rgba)
+            }
+            None => false,
+        }
+    }
+
+    /// Returns the raw `bKGD` background colour of a PNG image, or `None` if
+    /// the image is not a PNG or has no valid `bKGD` chunk.
+    pub fn background_color(&self) -> Option<Rgb16> {
+        match &self.inner {
+            Some(GenericImageDecoder::Png(decoder)) => decoder.background_color(),
+            _ => None,
+        }
+    }
+
+    /// Returns the packed RGBA8 palette of an indexed PNG, an empty vector for
+    /// non-indexed PNGs, or `None` if the image is not a PNG.
+    pub fn palette(&self) -> Option<VecU8> {
+        match &self.inner {
+            Some(GenericImageDecoder::Png(decoder)) => decoder.palette(),
+            _ => None,
+        }
+    }
+
+    /// Extracts pre-`IDAT` text-chunk EXIF, IPTC, and XMP metadata from a PNG
+    /// using libpng's chunk rules and verifies that the rest of the PNG stream
+    /// decodes through `IEND`.
+    pub fn read_png_text_metadata(self) -> Result<PngTextMetadata, VecU8> {
+        run_fallible_result(move || match self.inner {
+            Some(GenericImageDecoder::Png(png_decoder)) => png_decoder.read_text_metadata(),
+            Some(_) => Err("Trying to read PNG text metadata on a non-PNG codec".into()),
+            None => Err("Decoder is in invalid, moved out state".into()),
+        })
+    }
+
     /// Returns the strides of the image data produced by this decoder.
     pub fn strides(&self) -> Strides {
         let (channels, width, height) =
@@ -588,14 +665,6 @@ impl ImageDecoder {
     }
 
     /// Returns the Exif metadata embedded in the image, or Ok(None) if the
-    /// image does not have one.
-    /// For formats that don’t support embedded profiles this function should
-    /// always return Ok(None).
-    pub fn exif_metadata(&mut self) -> Result<Option<VecU8>, VecU8> {
-        self.get_metadata(|inner| inner.exif_metadata())
-    }
-
-    /// Returns the XMP metadata embedded in the image, or Ok(None) if the
     /// image does not have one.
     /// For formats that don’t support embedded profiles this function should
     /// always return Ok(None).
