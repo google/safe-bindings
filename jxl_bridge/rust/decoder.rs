@@ -16,7 +16,7 @@ use cpp_std::vector;
 use jxl::api::{JxlBasicInfo, JxlDecoderInner, JxlOutputBuffer, JxlPixelFormat, ProcessingResult};
 use jxl::error::Error as JxlError;
 
-use status::{NewStatus as Status, NewStatusOr as StatusOr, StatusError};
+use status::{Status, StatusError, StatusOr};
 
 /// Maps a `JxlError` to an appropriate `StatusError`.
 fn to_status(e: JxlError) -> StatusError {
