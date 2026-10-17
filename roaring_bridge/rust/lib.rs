@@ -160,6 +160,20 @@ impl RoaringBitmap32 {
         RoaringBitmap32 { inner: bitmaps.iter().map(|b| &b.inner).intersection() }
     }
 
+    /// Returns the union of all bitmaps in `bitmaps`.
+    ///
+    /// Returns an empty bitmap if `bitmaps` is empty.
+    pub fn Union(bitmaps: &[RoaringBitmap32]) -> RoaringBitmap32 {
+        RoaringBitmap32 { inner: bitmaps.iter().map(|b| &b.inner).union() }
+    }
+
+    /// Returns the intersection of all bitmaps in `bitmaps`.
+    ///
+    /// Returns an empty bitmap if `bitmaps` is empty.
+    pub fn Intersect(bitmaps: &[RoaringBitmap32]) -> RoaringBitmap32 {
+        RoaringBitmap32 { inner: bitmaps.iter().map(|b| &b.inner).intersection() }
+    }
+
     /// Size of intersection without creating a new bitmap.
     pub fn IntersectionLen(&self, other: &RoaringBitmap32) -> u64 {
         self.inner.intersection_len(&other.inner)
