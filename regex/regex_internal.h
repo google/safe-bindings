@@ -43,20 +43,25 @@ inline std::string AsString(const rs_std::Vec<uint8_t>& v) {
   return std::string(reinterpret_cast<const char*>(v.data()), v.size());
 }
 
-template <typename Wrapper, typename Inner>
-std::optional<Wrapper> MapOptional(std::optional<Inner> opt);
+// `Opt` is the optional type returned by the Crubit bindings, which is either
+// `rs_std::Option<Inner>` or `std::optional<Inner>` depending on how the
+// bindings were generated (e.g. the open-source CMake build still generates
+// `std::optional<Inner>`).
+template <typename Wrapper, typename Opt>
+std::optional<Wrapper> MapOptional(Opt opt);
 
 // C++ does not allow partial specialization of function templates. To allow
 // specializing MapOptional for std::optional<T>, we delegate to this helper
 // struct which can be partially specialized.
 //
-// Maps an optional<Inner> into an optional<Wrapper> by calling the Wrapper
+// Maps an optional `Inner` into an optional<Wrapper> by calling the Wrapper
 // constructor on the inner object.
 template <typename Wrapper, typename Inner>
 struct MapOptionalHelper {
-  static std::optional<Wrapper> Map(std::optional<Inner> opt) {
+  template <typename Opt>
+  static std::optional<Wrapper> Map(Opt opt) {
     if (opt.has_value()) {
-      return Wrapper(std::move(opt.value()));
+      return Wrapper(*std::move(opt));
     } else {
       return std::nullopt;
     }
@@ -68,10 +73,11 @@ struct MapOptionalHelper {
 // might be explicit (like Match from regex_cpp_bindings::Match).
 template <typename T, typename Inner>
 struct MapOptionalHelper<std::optional<T>, Inner> {
-  static std::optional<std::optional<T>> Map(std::optional<Inner> opt) {
+  template <typename Opt>
+  static std::optional<std::optional<T>> Map(Opt opt) {
     if (opt.has_value()) {
       // Recursively call MapOptional for the inner type.
-      return MapOptional<T>(std::move(opt.value()));
+      return MapOptional<T>(*std::move(opt));
     } else {
       return std::nullopt;
     }
@@ -81,8 +87,8 @@ struct MapOptionalHelper<std::optional<T>, Inner> {
 template <>
 struct MapOptionalHelper<absl::string_view,
                          rs_std::SliceRef<const std::uint8_t>> {
-  static std::optional<absl::string_view> Map(
-      std::optional<rs_std::SliceRef<const std::uint8_t>> opt) {
+  template <typename Opt>
+  static std::optional<absl::string_view> Map(Opt opt) {
     if (opt.has_value()) {
       return AsStringView(*opt);
     } else {
@@ -91,21 +97,10 @@ struct MapOptionalHelper<absl::string_view,
   }
 };
 
-template <>
-struct MapOptionalHelper<std::string, rs_std::Vec<uint8_t>> {
-  static std::optional<std::string> Map(
-      std::optional<rs_std::Vec<uint8_t>> opt) {
-    if (opt.has_value()) {
-      return AsString(*opt);
-    } else {
-      return std::nullopt;
-    }
-  }
-};
-
-template <typename Wrapper, typename Inner>
-std::optional<Wrapper> MapOptional(std::optional<Inner> opt) {
-  return MapOptionalHelper<Wrapper, Inner>::Map(std::move(opt));
+template <typename Wrapper, typename Opt>
+std::optional<Wrapper> MapOptional(Opt opt) {
+  return MapOptionalHelper<Wrapper, typename Opt::value_type>::Map(
+      std::move(opt));
 }
 
 template <typename T>
