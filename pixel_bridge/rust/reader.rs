@@ -8,6 +8,10 @@ use image::{
     codecs::png::PngDecoder as RustPngDecoder, codecs::tiff::TiffDecoder as RustTiffDecoder,
     codecs::webp::WebPDecoder as RustWebPDecoder, ImageFormat, ImageReader as RustImageReader,
 };
+#[cfg(feature = "jxl")]
+use jxl::api::{check_signature as check_jxl_signature, ProcessingResult as JxlProcessingResult};
+#[cfg(feature = "jxl")]
+use jxl_image_rs_integration::JxlDecoder as RustJxlDecoder;
 use std::fs::File;
 use std::io::{BufRead, BufReader, Cursor, Read, Seek};
 
@@ -24,6 +28,7 @@ impl ReadSeek for std::io::BufReader<File> {}
 #[derive(Default)]
 pub struct ImageReader {
     inner: Option<Box<RustImageReader<Box<dyn ReadSeek>>>>,
+    format: Option<Format>,
 }
 
 #[cfg(debug_assertions)]
@@ -46,19 +51,21 @@ pub enum Format {
     Tiff,
     Bmp,
     Ico,
+    Jxl,
 }
 
-impl From<Format> for ImageFormat {
-    fn from(value: Format) -> ImageFormat {
-        match value {
-            Format::Png => ImageFormat::Png,
-            Format::Jpeg => ImageFormat::Jpeg,
-            Format::Gif => ImageFormat::Gif,
-            Format::WebP => ImageFormat::WebP,
-            Format::Tiff => ImageFormat::Tiff,
-            Format::Bmp => ImageFormat::Bmp,
-            Format::Ico => ImageFormat::Ico,
-        }
+fn has_jxl_signature(reader: &mut dyn ReadSeek) -> std::io::Result<bool> {
+    #[cfg(feature = "jxl")]
+    {
+        Ok(matches!(
+            check_jxl_signature(reader.fill_buf()?),
+            JxlProcessingResult::Complete { result: Some(_) }
+        ))
+    }
+    #[cfg(not(feature = "jxl"))]
+    {
+        let _ = reader;
+        Ok(false)
     }
 }
 
@@ -71,6 +78,7 @@ impl ImageReader {
         let bytes_reader = std::io::BufReader::new(std::io::Cursor::new(input.to_vec()));
         Self {
             inner: Some(Box::new(RustImageReader::new(Box::new(bytes_reader)))),
+            format: None,
         }
     }
 
@@ -86,6 +94,7 @@ impl ImageReader {
                 inner: Some(Box::new(RustImageReader::new(
                     Box::new(BufReader::new(file)) as Box<dyn ReadSeek>
                 ))),
+                format: None,
             }),
             Err(err) => Err(err.to_string().into()),
         }
@@ -93,10 +102,7 @@ impl ImageReader {
 
     /// Supply the format as which to interpret the read image.
     pub fn set_format(&mut self, format: Format) {
-        let Some(ref mut inner) = self.inner else {
-            return;
-        };
-        inner.set_format(format.into())
+        self.format = Some(format);
     }
 
     /// Read the image.
@@ -108,24 +114,52 @@ impl ImageReader {
         };
 
         // If we already know the format, we do not need to guess.
-        let inner = if inner.format().is_some() {
-            *inner
+        let (mut inner, format) = if let Some(format) = self.format {
+            (*inner, Some(format))
         } else {
-            match inner.with_guessed_format() {
+            let inner = match inner.with_guessed_format() {
                 Ok(inner) => inner,
                 Err(err) => return Err(err.to_string().into()),
+            };
+            let format = match inner.format() {
+                Some(ImageFormat::Png) => Some(Format::Png),
+                Some(ImageFormat::Jpeg) => Some(Format::Jpeg),
+                Some(ImageFormat::WebP) => Some(Format::WebP),
+                Some(ImageFormat::Gif) => Some(Format::Gif),
+                Some(ImageFormat::Tiff) => Some(Format::Tiff),
+                Some(ImageFormat::Bmp) => Some(Format::Bmp),
+                Some(ImageFormat::Ico) => Some(Format::Ico),
+                _ => None,
+            };
+            (inner, format)
+        };
+
+        let format = match format {
+            Some(format) => Some(format),
+            None => {
+                let mut reader = inner.into_inner();
+                let is_jxl =
+                    has_jxl_signature(&mut *reader).map_err(|e| VecU8::from(e.to_string()))?;
+                inner = RustImageReader::new(reader);
+                if is_jxl {
+                    Some(Format::Jxl)
+                } else {
+                    None
+                }
             }
         };
+
         // Delegate to non-inlined helper functions to reduce the stack frame size by 4k.
-        match inner.format() {
-            Some(ImageFormat::Png) => png(inner),
-            Some(ImageFormat::Jpeg) => jpeg(inner),
-            Some(ImageFormat::WebP) => webp(inner),
-            Some(ImageFormat::Gif) => gif(inner),
-            Some(ImageFormat::Tiff) => tiff(inner),
-            Some(ImageFormat::Bmp) => bmp(inner),
-            Some(ImageFormat::Ico) => ico(inner),
-            _ => Err("unsupported image format".to_string()),
+        match format {
+            Some(Format::Png) => png(inner),
+            Some(Format::Jpeg) => jpeg(inner),
+            Some(Format::WebP) => webp(inner),
+            Some(Format::Gif) => gif(inner),
+            Some(Format::Tiff) => tiff(inner),
+            Some(Format::Bmp) => bmp(inner),
+            Some(Format::Ico) => ico(inner),
+            Some(Format::Jxl) => jxl(inner),
+            None => Err("unsupported image format".to_string()),
         }
         .map_err(|err| err.into())
     }
@@ -198,8 +232,8 @@ fn bmp(d: RustImageReader<Box<dyn ReadSeek>>) -> Result<ImageDecoder, String> {
 
 /// Maximum number of directory entries we accept in an ICO file.
 ///
-/// The ICO format allows up to `u16::MAX` (65535) entries. We enforce a much smaller cap here to bound the
-/// work the decoder performs on untrusted input.
+/// The ICO format allows up to `u16::MAX` (65535) entries. We enforce a much smaller cap here to
+/// bound the work the decoder performs on untrusted input.
 const MAX_ICO_ENTRIES: u16 = 16;
 
 #[inline(never)]
@@ -222,4 +256,19 @@ fn ico(d: RustImageReader<Box<dyn ReadSeek>>) -> Result<ImageDecoder, String> {
     Ok(ImageDecoder::new(GenericImageDecoder::Ico(Box::new(
         RustIcoDecoder::new(reader).map_err(|e| e.to_string())?,
     ))))
+}
+
+#[inline(never)]
+fn jxl(d: RustImageReader<Box<dyn ReadSeek>>) -> Result<ImageDecoder, String> {
+    #[cfg(feature = "jxl")]
+    {
+        Ok(ImageDecoder::new(GenericImageDecoder::Jxl(Box::new(
+            RustJxlDecoder::new(d.into_inner()).map_err(|e| e.to_string())?,
+        ))))
+    }
+    #[cfg(not(feature = "jxl"))]
+    {
+        let _ = d;
+        Err("JXL support is not enabled".to_string())
+    }
 }
