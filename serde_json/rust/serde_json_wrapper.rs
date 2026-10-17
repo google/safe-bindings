@@ -452,13 +452,25 @@ impl From<*const ffi_11::c_char> for Value {
         }
 
         // SAFETY:
-        // - Precondition: The C++ caller MUST pass a valid, null-terminated C-string. This is
-        //   guaranteed for C++ string literals like "foo".
-        // - The `is_null()` check above guarantees we don't pass a null pointer.
-        // - The memory is only read synchronously during this function call.
-        // We don't really know what's behind this pointer. Normally we need to make this function
-        // unsafe, but we cannot make a `From` impl unsafe. This is a trade-off to make the C++
-        // usage easier.
+        // - Operation: `std::ffi::CStr::from_ptr(ptr.cast())`.
+        // - Required contract (`std::ffi::CStr::from_ptr`): `ptr` must be non-null, point to a
+        //   valid NUL-terminated C string whose bytes through the first NUL terminator (inclusive)
+        //   lie within a single allocated object of length at most `isize::MAX`, be valid for reads
+        //   of initialized `c_char` bytes, and not be mutated for the lifetime of the returned
+        //   `&CStr`.
+        // - Evidence:
+        //   - The early return on `if ptr.is_null()` above guarantees `ptr` is non-null at this
+        //     point (`align_of::<c_char>() == 1` is trivially satisfied), and no intervening code
+        //     modifies `ptr`.
+        //   - By the C++ caller FFI invariant (tracked under `b/562037348` because the safe `From`
+        //     trait cannot be marked `unsafe fn` while Crubit requires `From` to generate the C++
+        //     converting constructor `Value(const char*)`), any non-null `ptr` passed here points
+        //     to a NUL-terminated byte range within a single live allocation of length at most
+        //     `isize::MAX` that is valid for reads of initialized `c_char` bytes and is not mutated
+        //     during this synchronous call.
+        // - Postcondition: `c_str` borrows the C string only to copy its contents via
+        //   `c_str.to_string_lossy()` into an owned `serde_json::Value` before this function
+        //   returns, so no reference to `*ptr` escapes.
         let c_str = unsafe { std::ffi::CStr::from_ptr(ptr.cast()) };
         Self { value: serde_json::Value::from(c_str.to_string_lossy()) }
     }
