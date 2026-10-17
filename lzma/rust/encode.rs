@@ -21,8 +21,26 @@ use crate::types::{
 /// Initialize `.xz` stream encoder using a preset number.
 ///
 /// # Safety
-/// `strm` must be null or point to a valid, writable `lzma_stream`. The caller must have
-/// exclusive ownership of the struct (no concurrent aliasing) during this call.
+///
+/// The caller must ensure that:
+/// 1. `strm` is either null or a non-null, properly aligned pointer to a live, initialized,
+///    writable `lzma_stream` (e.g. initialized with `LZMA_STREAM_INIT`) over which this call has
+///    exclusive access for the duration of this call.
+/// 2. If `strm` is non-null and `(*strm).internal` is non-null, `(*strm).internal` points to a live
+///    `InternalState` previously allocated by this crate via
+///    `Box::into_raw(Box::new(InternalState))` and not yet freed, with exclusive ownership
+///    transferred to this call so it can be deallocated before installing the new state.
+///
+/// If these preconditions hold and this function returns `LZMA_OK`, `(*strm).internal` points
+/// to a newly allocated `InternalState` owned by `*strm` until freed by `lzma_end` or replaced
+/// by another initialization function.
+// SAFETY:
+// - Operation: `#[unsafe(export_name = crate::prefix!(lzma_easy_encoder))]`.
+// - Required contract: The exported symbol name must not collide with any incompatible symbol in
+//   the final linked binary, and the `extern "C"` signature must match `lzma_ret
+//   lzma_easy_encoder(lzma_stream* strm, uint32_t preset, lzma_check check)` in `lzma_rust_api.h`.
+// - Evidence: `LZMA_SYS_PREFIX` and `BUILD` target configuration guarantee symbol uniqueness, and
+//   `lzma_rust2_signatures_test` verifies ABI compatibility with `lzma_rust_api.h` at compile time.
 #[unsafe(export_name = crate::prefix!(lzma_easy_encoder))]
 pub unsafe extern "C" fn lzma_easy_encoder(
     strm: *mut lzma_stream,
@@ -55,8 +73,17 @@ pub unsafe extern "C" fn lzma_easy_encoder(
         return LZMA_OPTIONS_ERROR;
     };
 
-    // SAFETY: `strm` is non-null and valid per caller promise. We have exclusive ownership of `strm`
-    // during this initialization call to safely mutate internal state.
+    // SAFETY:
+    // - Operation: `helpers::install_state(strm, ...)`.
+    // - Required contract: `strm` must be non-null, properly aligned, and point to a live,
+    //   initialized, writable `lzma_stream` with exclusive access, and any non-null
+    //   `(*strm).internal` must have been allocated by this crate via
+    //   `Box::into_raw(Box::new(InternalState))` and not yet freed.
+    // - Evidence: `strm` is non-null after the `if strm.is_null()` check above, and preconditions 1
+    //   and 2 of this function's `# Safety` contract guarantee alignment, initialization, exclusive
+    //   access, and `(*strm).internal` provenance.
+    // - Postcondition: Any old `(*strm).internal` is freed, `(*strm).internal` stores the new
+    //   heap-allocated `InternalState`, and `total_in`/`total_out` are reset to `0`.
     unsafe {
         helpers::install_state(
             strm,
@@ -77,13 +104,46 @@ pub unsafe extern "C" fn lzma_easy_encoder(
 /// Initialize `.xz` stream encoder using a custom filter chain.
 ///
 /// # Safety
-/// `strm` must be null or point to a valid, writable `lzma_stream`. The caller must have
-/// exclusive ownership of the struct (no concurrent aliasing) during this call.
-/// `filters` must point to a valid array of `lzma_filter` terminated by a filter
-/// with `id == LZMA_VLI_UNKNOWN`. Each `lzma_filter->options` pointer
-/// must also be valid (either null or pointing to the correct options struct based on its `id`, e.g.,
-/// `lzma_options_lzma` for `LZMA_FILTER_LZMA2`, `lzma_options_delta` for `LZMA_FILTER_DELTA`,
-/// or `lzma_options_bcj` for BCJ filters).
+///
+/// The caller must ensure that:
+/// 1. `strm` is either null or a non-null, properly aligned pointer to a live, initialized,
+///    writable `lzma_stream` (e.g. initialized with `LZMA_STREAM_INIT`) over which this call has
+///    exclusive access for the duration of this call.
+/// 2. If `strm` is non-null and `(*strm).internal` is non-null, `(*strm).internal` points to a live
+///    `InternalState` previously allocated by this crate via
+///    `Box::into_raw(Box::new(InternalState))` and not yet freed, with exclusive ownership
+///    transferred to this call so it can be deallocated before installing the new state.
+/// 3. `filters` is either null or a non-null, properly aligned pointer to a contiguous sequence of
+///    initialized `lzma_filter` elements within a single live allocated object that either contains
+///    a terminator element with `id == LZMA_VLI_UNKNOWN` at some index `i <= FILTERS_MAX` (4) or
+///    contains at least `FILTERS_MAX + 1` (5) initialized elements, and is not mutated or aliased
+///    by `*strm` for the duration of this call.
+/// 4. For every filter element preceding the `LZMA_VLI_UNKNOWN` terminator (within the first
+///    `FILTERS_MAX` elements) whose `options` field is non-null:
+///    - When `id == u64::from(LZMA_FILTER_LZMA2)`, `options` is properly aligned for
+///      `lzma_options_lzma` and points to a live, initialized `lzma_options_lzma` valid for reads
+///      and not mutated for the duration of this call; furthermore, if its `preset_dict` is
+///      non-null and `preset_dict_size > 0`, `preset_dict` points to at least `preset_dict_size as
+///      usize` consecutive initialized readable `u8` bytes within a single live allocated object
+///      (`<= isize::MAX as usize`) not mutated during this call.
+///    - When `id == u64::from(LZMA_FILTER_DELTA)`, `options` is properly aligned for
+///      `lzma_options_delta` and points to a live, initialized `lzma_options_delta` valid for reads
+///      and not mutated for the duration of this call.
+///    - When `id` is a supported BCJ filter ID, `options` is properly aligned for
+///      `lzma_options_bcj` and points to a live, initialized `lzma_options_bcj` valid for reads and
+///      not mutated for the duration of this call.
+///
+/// If these preconditions hold and this function returns `LZMA_OK`, `(*strm).internal` points
+/// to a newly allocated `InternalState` owned by `*strm` until freed by `lzma_end` or replaced
+/// by another initialization function.
+// SAFETY:
+// - Operation: `#[unsafe(export_name = crate::prefix!(lzma_stream_encoder))]`.
+// - Required contract: The exported symbol name must not collide with any incompatible symbol in
+//   the final linked binary, and the `extern "C"` signature must match `lzma_ret
+//   lzma_stream_encoder(lzma_stream* strm, const lzma_filter* filters, lzma_check check)` in
+//   `lzma_rust_api.h`.
+// - Evidence: `LZMA_SYS_PREFIX` and `BUILD` target configuration guarantee symbol uniqueness, and
+//   `lzma_rust2_signatures_test` verifies ABI compatibility with `lzma_rust_api.h` at compile time.
 #[unsafe(export_name = crate::prefix!(lzma_stream_encoder))]
 pub unsafe extern "C" fn lzma_stream_encoder(
     strm: *mut lzma_stream,
@@ -98,7 +158,16 @@ pub unsafe extern "C" fn lzma_stream_encoder(
         return LZMA_OPTIONS_ERROR;
     };
 
-    // SAFETY: `filters` points to a consecutive array per FFI filter contract.
+    // SAFETY:
+    // - Operation: `state::xz_options_from_filters(filters, check_type)`.
+    // - Required contract: `filters` must be non-null, aligned for `lzma_filter`, and point to a
+    //   valid `LZMA_VLI_UNKNOWN`-terminated (or `>= FILTERS_MAX + 1` length) filter array whose
+    //   non-null `options` (and any `preset_dict`) satisfy the alignment, initialization, and
+    //   single-allocation bounds for each filter ID.
+    // - Evidence: `!filters.is_null()` is checked above, and preconditions 3 and 4 of this
+    //   function's `# Safety` contract guarantee all requirements on `filters`, `options`, and
+    //   `preset_dict`.
+    // - Postcondition: Returns an owned `io::Result<XzOptions>` without retaining raw pointers.
     let Ok(opts) = (unsafe { state::xz_options_from_filters(filters, check_type) }) else {
         return LZMA_OPTIONS_ERROR;
     };
@@ -108,8 +177,17 @@ pub unsafe extern "C" fn lzma_stream_encoder(
         return LZMA_OPTIONS_ERROR;
     };
 
-    // SAFETY: `strm` is non-null and valid per caller promise. We have exclusive ownership of `strm`
-    // during this initialization call to safely mutate internal state.
+    // SAFETY:
+    // - Operation: `helpers::install_state(strm, ...)`.
+    // - Required contract: `strm` must be non-null, properly aligned, and point to a live,
+    //   initialized, writable `lzma_stream` with exclusive access, and any non-null
+    //   `(*strm).internal` must have been allocated by this crate via
+    //   `Box::into_raw(Box::new(InternalState))` and not yet freed.
+    // - Evidence: `strm` is non-null after the `if strm.is_null()` check above, and preconditions 1
+    //   and 2 of this function's `# Safety` contract guarantee alignment, initialization, exclusive
+    //   access, and `(*strm).internal` provenance.
+    // - Postcondition: Any old `(*strm).internal` is freed, `(*strm).internal` stores the new
+    //   heap-allocated `InternalState`, and `total_in`/`total_out` are reset to `0`.
     unsafe {
         helpers::install_state(
             strm,
@@ -130,12 +208,49 @@ pub unsafe extern "C" fn lzma_stream_encoder(
 /// Initialize `.xz` multithreaded stream encoder using the provided options.
 ///
 /// # Safety
-/// `strm` must be null or point to a valid, writable `lzma_stream`. The caller must have
-/// exclusive ownership of the struct (no concurrent aliasing) during this call.
-/// `options` must be either null or point to a valid `lzma_mt` struct.
-/// If `options` is non-null and `options->filters` is non-null, the filters array must be a
-/// valid array terminated by a filter with `id == LZMA_VLI_UNKNOWN`, and each filter's
-/// `options` pointer must either be null or valid according to its `id`.
+///
+/// The caller must ensure that:
+/// 1. `strm` is either null or a non-null, properly aligned pointer to a live, initialized,
+///    writable `lzma_stream` (e.g. initialized with `LZMA_STREAM_INIT`) over which this call has
+///    exclusive access for the duration of this call.
+/// 2. If `strm` is non-null and `(*strm).internal` is non-null, `(*strm).internal` points to a live
+///    `InternalState` previously allocated by this crate via
+///    `Box::into_raw(Box::new(InternalState))` and not yet freed, with exclusive ownership
+///    transferred to this call so it can be deallocated before installing the new state.
+/// 3. `options` is either null or a non-null, properly aligned pointer to a live, initialized
+///    `lzma_mt` struct valid for reads and not mutated or aliased by `*strm` for the duration of
+///    this call.
+/// 4. If `options` is non-null and `(*options).filters` is non-null:
+///    - `(*options).filters` is properly aligned for `lzma_filter` and points to a contiguous
+///      sequence of initialized `lzma_filter` elements within a single live allocated object that
+///      either contains a terminator element with `id == LZMA_VLI_UNKNOWN` at some index `i <=
+///      FILTERS_MAX` (4) or contains at least `FILTERS_MAX + 1` (5) initialized elements, and is
+///      not mutated during this call.
+///    - For every filter element preceding the `LZMA_VLI_UNKNOWN` terminator (within the first
+///      `FILTERS_MAX` elements) whose `options` field is non-null:
+///      - When `id == u64::from(LZMA_FILTER_LZMA2)`, `options` is properly aligned for
+///        `lzma_options_lzma` and points to a live, initialized `lzma_options_lzma` valid for reads
+///        and not mutated during this call; furthermore, if its `preset_dict` is non-null and
+///        `preset_dict_size > 0`, `preset_dict` points to at least `preset_dict_size as usize`
+///        consecutive initialized readable `u8` bytes within a single live allocated object (`<=
+///        isize::MAX as usize`) not mutated during this call.
+///      - When `id == u64::from(LZMA_FILTER_DELTA)`, `options` is properly aligned for
+///        `lzma_options_delta` and points to a live, initialized `lzma_options_delta` valid for
+///        reads and not mutated during this call.
+///      - When `id` is a supported BCJ filter ID, `options` is properly aligned for
+///        `lzma_options_bcj` and points to a live, initialized `lzma_options_bcj` valid for reads
+///        and not mutated during this call.
+///
+/// If these preconditions hold and this function returns `LZMA_OK`, `(*strm).internal` points
+/// to a newly allocated `InternalState` owned by `*strm` until freed by `lzma_end` or replaced
+/// by another initialization function.
+// SAFETY:
+// - Operation: `#[unsafe(export_name = crate::prefix!(lzma_stream_encoder_mt))]`.
+// - Required contract: The exported symbol name must not collide with any incompatible symbol in
+//   the final linked binary, and the `extern "C"` signature must match `lzma_ret
+//   lzma_stream_encoder_mt(lzma_stream* strm, const lzma_mt* options)` in `lzma_rust_api.h`.
+// - Evidence: `LZMA_SYS_PREFIX` and `BUILD` target configuration guarantee symbol uniqueness, and
+//   `lzma_rust2_signatures_test` verifies ABI compatibility with `lzma_rust_api.h` at compile time.
 #[unsafe(export_name = crate::prefix!(lzma_stream_encoder_mt))]
 pub unsafe extern "C" fn lzma_stream_encoder_mt(
     strm: *mut lzma_stream,
@@ -145,8 +260,14 @@ pub unsafe extern "C" fn lzma_stream_encoder_mt(
         return LZMA_PROG_ERROR;
     }
 
-    // SAFETY: Per caller promise, `options` is a valid pointer to `lzma_mt` if non-null.
-    // The null check was performed above.
+    // SAFETY:
+    // - Operation: Creating a shared reference `&*options` of type `&lzma_mt`.
+    // - Required contract: `options` must be non-null, properly aligned for `lzma_mt`, and point to
+    //   a live, initialized `lzma_mt` not mutated or mutably aliased for the lifetime of `mt`.
+    // - Evidence: `!options.is_null()` is checked above, and precondition 3 of this function's `#
+    //   Safety` contract guarantees alignment, initialization, liveness, and immutability during
+    //   this call.
+    // - Postcondition: `mt` is a valid shared reference `&lzma_mt` confined to this call.
     let mt = unsafe { &*options };
 
     if mt.flags != 0
@@ -179,7 +300,16 @@ pub unsafe extern "C" fn lzma_stream_encoder_mt(
     };
 
     let mut opts = if !mt.filters.is_null() {
-        // SAFETY: `mt.filters` points to a consecutive array per FFI filter contract.
+        // SAFETY:
+        // - Operation: `state::xz_options_from_filters(mt.filters, check_type)`.
+        // - Required contract: `mt.filters` must be non-null, aligned for `lzma_filter`, and point
+        //   to a valid `LZMA_VLI_UNKNOWN`-terminated (or `>= FILTERS_MAX + 1` length) filter array
+        //   whose non-null `options` (and any `preset_dict`) satisfy the alignment, initialization,
+        //   and single-allocation bounds for each filter ID.
+        // - Evidence: `!mt.filters.is_null()` is checked above, and precondition 4 of this
+        //   function's `# Safety` contract guarantees all requirements on `mt.filters`, `options`,
+        //   and `preset_dict`.
+        // - Postcondition: Returns an owned `io::Result<XzOptions>` without retaining raw pointers.
         let Ok(o) = (unsafe { state::xz_options_from_filters(mt.filters, check_type) }) else {
             return LZMA_OPTIONS_ERROR;
         };
@@ -210,8 +340,18 @@ pub unsafe extern "C" fn lzma_stream_encoder_mt(
         Err(_) => return LZMA_OPTIONS_ERROR,
     };
 
-    // SAFETY: `strm` is non-null and valid per caller promise. We have exclusive ownership of `strm`
-    // during this initialization call to safely mutate internal state.
+    // SAFETY:
+    // - Operation: `helpers::install_state(strm, ...)`.
+    // - Required contract: `strm` must be non-null, properly aligned, and point to a live,
+    //   initialized, writable `lzma_stream` with exclusive access, and any non-null
+    //   `(*strm).internal` must have been allocated by this crate via
+    //   `Box::into_raw(Box::new(InternalState))` and not yet freed.
+    // - Evidence: `strm` is non-null after the `if strm.is_null()` check above, `mt` is not used
+    //   after this point, and preconditions 1–3 of this function's `# Safety` contract guarantee
+    //   alignment, initialization, exclusive access disjoint from `options`, and `(*strm).internal`
+    //   provenance.
+    // - Postcondition: Any old `(*strm).internal` is freed, `(*strm).internal` stores the new
+    //   heap-allocated `InternalState`, and `total_in`/`total_out` are reset to `0`.
     unsafe {
         helpers::install_state(
             strm,
@@ -232,12 +372,33 @@ pub unsafe extern "C" fn lzma_stream_encoder_mt(
 /// Initialize `.lzma` encoder (legacy LZMA_Alone format).
 ///
 /// # Safety
-/// `strm` must be null or point to a valid, writable `lzma_stream`. The caller must have
-/// exclusive ownership of the struct (no concurrent aliasing) during this call.
-/// If `strm` is non-null and `strm.internal` is non-null, it must point to a valid `InternalState`
-/// allocated by this crate.
-/// If `options` is non-null and `options.preset_dict` is non-null, it must point to a valid memory
-/// buffer of at least `options.preset_dict_size` bytes.
+///
+/// The caller must ensure that:
+/// 1. `strm` is either `None` (null in C) or a valid exclusive reference to a live, initialized,
+///    writable `lzma_stream` over which this call has exclusive access for the duration of this
+///    call.
+/// 2. If `strm` is `Some(strm_ref)` and `strm_ref.internal` is non-null, `strm_ref.internal` points
+///    to a live `InternalState` previously allocated by this crate via
+///    `Box::into_raw(Box::new(InternalState))` and not yet freed, with exclusive ownership
+///    transferred to this call so it can be deallocated before installing the new state.
+/// 3. `options` is either `None` (null in C) or a valid shared reference to a live, initialized
+///    `lzma_options_lzma` disjoint from `*strm` and not mutated for the duration of this call.
+/// 4. If `options` is `Some(opts)` and `opts.preset_dict` is non-null with `opts.preset_dict_size >
+///    0`, `opts.preset_dict` is properly aligned for `u8` (alignment 1) and points to at least
+///    `opts.preset_dict_size as usize` consecutive initialized readable `u8` bytes within a single
+///    live allocated object (`<= isize::MAX as usize`) disjoint from `*strm` and not mutated for
+///    the duration of this call.
+///
+/// If these preconditions hold and this function returns `LZMA_OK`, `strm_ref.internal` points
+/// to a newly allocated `InternalState` owned by `*strm_ref` until freed by `lzma_end` or
+/// replaced by another initialization function.
+// SAFETY:
+// - Operation: `#[unsafe(export_name = crate::prefix!(lzma_alone_encoder))]`.
+// - Required contract: The exported symbol name must not collide with any incompatible symbol in
+//   the final linked binary, and the `extern "C"` signature must match `lzma_ret
+//   lzma_alone_encoder(lzma_stream* strm, const lzma_options_lzma* options)` in `lzma_rust_api.h`.
+// - Evidence: `LZMA_SYS_PREFIX` and `BUILD` target configuration guarantee symbol uniqueness, and
+//   `lzma_rust2_signatures_test` verifies ABI compatibility with `lzma_rust_api.h` at compile time.
 #[unsafe(export_name = crate::prefix!(lzma_alone_encoder))]
 pub unsafe extern "C" fn lzma_alone_encoder(
     strm: Option<&mut lzma_stream>,
@@ -251,8 +412,17 @@ pub unsafe extern "C" fn lzma_alone_encoder(
         return e;
     }
 
-    // SAFETY: `options.preset_dict`, if non-null, is valid per safety precondition.
-    let mut lzma_opts = match unsafe { state::lzma_options_from_c(options as *const _) } {
+    // SAFETY:
+    // - Operation: `state::lzma_options_from_c(options)`.
+    // - Required contract: When `options.preset_dict` is non-null and `options.preset_dict_size >
+    //   0`, `options.preset_dict` must point to at least `options.preset_dict_size as usize`
+    //   initialized readable bytes in a single live allocation (`<= isize::MAX as usize`) not
+    //   mutated during this call.
+    // - Evidence: Guaranteed directly by precondition 4 of this function's `# Safety` contract,
+    //   with no intervening mutation of `options`.
+    // - Postcondition: Returns an owned `Result<LzmaOptions, lzma_ret>` without retaining raw
+    //   pointers.
+    let mut lzma_opts = match unsafe { state::lzma_options_from_c(options) } {
         Ok(opts) => opts,
         Err(_) => return LZMA_OPTIONS_ERROR,
     };
@@ -264,8 +434,17 @@ pub unsafe extern "C" fn lzma_alone_encoder(
         Err(_) => return LZMA_OPTIONS_ERROR,
     };
 
-    // SAFETY: Exclusive ownership of `strm` is guaranteed by `&mut lzma_stream`. If `strm.internal`
-    // is non-null, it points to a valid `InternalState` per safety precondition.
+    // SAFETY:
+    // - Operation: `helpers::install_state(strm, ...)`.
+    // - Required contract: `strm` must be non-null, properly aligned, and point to a live,
+    //   initialized, writable `lzma_stream` with exclusive access, and any non-null `strm.internal`
+    //   must have been allocated by this crate via `Box::into_raw(Box::new(InternalState))` and not
+    //   yet freed.
+    // - Evidence: `strm` is a valid `&mut lzma_stream` by precondition 1, and precondition 2 of
+    //   this function's `# Safety` contract guarantees the provenance and exclusive ownership of
+    //   any non-null `strm.internal`.
+    // - Postcondition: Any old `strm.internal` is freed, `strm.internal` stores the new
+    //   heap-allocated `InternalState`, and `total_in`/`total_out` are reset to `0`.
     unsafe {
         helpers::install_state(
             strm,
@@ -286,14 +465,40 @@ pub unsafe extern "C" fn lzma_alone_encoder(
 /// Initialize raw encoder.
 ///
 /// # Safety
-/// `strm` must be null or point to a valid, writable `lzma_stream`. The caller must have
-/// exclusive ownership of the struct (no concurrent aliasing) during this call.
-/// If `strm` is non-null and `strm.internal` is non-null, it must point to a valid `InternalState`
-/// allocated by this crate.
-/// `filters` must point to a valid array of `lzma_filter` terminated by a filter
-/// with `id == LZMA_VLI_UNKNOWN`.
-/// Each `filter.options` must point to an initialized valid struct for that filter type
-/// (e.g., `lzma_options_lzma` for LZMA1/2).
+///
+/// The caller must ensure that:
+/// 1. `strm` is either `None` (null in C) or a valid exclusive reference to a live, initialized,
+///    writable `lzma_stream` over which this call has exclusive access for the duration of this
+///    call.
+/// 2. If `strm` is `Some(strm_ref)` and `strm_ref.internal` is non-null, `strm_ref.internal` points
+///    to a live `InternalState` previously allocated by this crate via
+///    `Box::into_raw(Box::new(InternalState))` and not yet freed, with exclusive ownership
+///    transferred to this call so it can be deallocated before installing the new state.
+/// 3. `filters` is either null or a non-null, properly aligned pointer to a contiguous sequence of
+///    initialized `lzma_filter` elements within a single live allocated object that either contains
+///    a terminator element with `id == LZMA_VLI_UNKNOWN` at some index `i <= FILTERS_MAX` (4) or
+///    contains at least `FILTERS_MAX + 1` (5) initialized elements, disjoint from `*strm` and not
+///    mutated for the duration of this call.
+/// 4. If `filters` is non-null and its first element has `id == u64::from(LZMA_FILTER_LZMA1)` or
+///    `id == u64::from(LZMA_FILTER_LZMA2)` with a non-null `options` field:
+///    - `options` is properly aligned for `lzma_options_lzma` and points to a live, initialized
+///      `lzma_options_lzma` valid for reads, disjoint from `*strm`, and not mutated for the
+///      duration of this call.
+///    - If `(*(options as *const lzma_options_lzma)).preset_dict` is non-null and `preset_dict_size
+///      > 0`, `preset_dict` points to at least `preset_dict_size as usize` consecutive initialized
+///      readable `u8` bytes within a single live allocated object (`<= isize::MAX as usize`),
+///      disjoint from `*strm` and not mutated for the duration of this call.
+///
+/// If these preconditions hold and this function returns `LZMA_OK`, `strm_ref.internal` points
+/// to a newly allocated `InternalState` owned by `*strm_ref` until freed by `lzma_end` or
+/// replaced by another initialization function.
+// SAFETY:
+// - Operation: `#[unsafe(export_name = crate::prefix!(lzma_raw_encoder))]`.
+// - Required contract: The exported symbol name must not collide with any incompatible symbol in
+//   the final linked binary, and the `extern "C"` signature must match `lzma_ret
+//   lzma_raw_encoder(lzma_stream* strm, const lzma_filter* filters)` in `lzma_rust_api.h`.
+// - Evidence: `LZMA_SYS_PREFIX` and `BUILD` target configuration guarantee symbol uniqueness, and
+//   `lzma_rust2_signatures_test` verifies ABI compatibility with `lzma_rust_api.h` at compile time.
 #[unsafe(export_name = crate::prefix!(lzma_raw_encoder))]
 pub unsafe extern "C" fn lzma_raw_encoder(
     strm: Option<&mut lzma_stream>,
@@ -306,8 +511,17 @@ pub unsafe extern "C" fn lzma_raw_encoder(
         return LZMA_PROG_ERROR;
     }
 
-    // SAFETY: `filters` is non-null and points to a valid array terminated by LZMA_VLI_UNKNOWN
-    // per safety precondition.
+    // SAFETY:
+    // - Operation: `helpers::parse_filters(filters)`.
+    // - Required contract: `filters` must be non-null, aligned for `lzma_filter`, and point to a
+    //   single live allocation containing either an `LZMA_VLI_UNKNOWN` terminator within index `<=
+    //   FILTERS_MAX` or at least `FILTERS_MAX + 1` initialized `lzma_filter` elements not mutated
+    //   during the returned slice's lifetime.
+    // - Evidence: `!filters.is_null()` is checked above, and precondition 3 of this function's `#
+    //   Safety` contract guarantees alignment, single allocation, termination/length bounds, and
+    //   immutability during this call.
+    // - Postcondition: `filter_slice` is a valid shared slice `&[lzma_filter]` of length `<=
+    //   FILTERS_MAX` confined to this call.
     let filter_slice = match unsafe { helpers::parse_filters(filters) } {
         Ok(s) => s,
         Err(_) => return LZMA_OPTIONS_ERROR,
@@ -329,16 +543,32 @@ pub unsafe extern "C" fn lzma_raw_encoder(
     let lzma_opts = if f.options.is_null() {
         return LZMA_PROG_ERROR;
     } else {
-        // SAFETY: `f.options` is non-null (checked above) and, per filter array safety
-        // precondition, points to a valid `lzma_options_lzma`.
+        // SAFETY:
+        // - Operation: Creating a shared reference `&*(f.options as *const lzma_options_lzma)`.
+        // - Required contract: `f.options` must be non-null, properly aligned for
+        //   `lzma_options_lzma`, and point to a live, initialized `lzma_options_lzma` not mutated
+        //   for the duration of the reference.
+        // - Evidence: `!f.options.is_null()` and `f.id` being `LZMA_FILTER_LZMA1` or
+        //   `LZMA_FILTER_LZMA2` are checked above, and precondition 4 of this function's `# Safety`
+        //   contract guarantees alignment, initialization, and immutability during this call.
+        // - Postcondition: `options` is a valid shared reference `&lzma_options_lzma`.
         let options = unsafe { &*(f.options as *const lzma_options_lzma) };
 
         if let Err(e) = state::validate_encoder_options(options) {
             return e;
         }
 
-        // SAFETY: `options.preset_dict`, if non-null, is valid per safety precondition.
-        match unsafe { state::lzma_options_from_c(options as *const _) } {
+        // SAFETY:
+        // - Operation: `state::lzma_options_from_c(options)`.
+        // - Required contract: When `options.preset_dict` is non-null and `options.preset_dict_size
+        //   > 0`, `options.preset_dict` must point to at least `options.preset_dict_size as usize`
+        //   initialized readable bytes in a single live allocation (`<= isize::MAX as usize`) not
+        //   mutated during this call.
+        // - Evidence: Guaranteed by precondition 4 of this function's `# Safety` contract, with no
+        //   intervening mutation of `options`.
+        // - Postcondition: Returns an owned `Result<LzmaOptions, lzma_ret>` without retaining raw
+        //   pointers.
+        match unsafe { state::lzma_options_from_c(options) } {
             Ok(opts) => opts,
             Err(_) => return LZMA_OPTIONS_ERROR,
         }
@@ -356,8 +586,17 @@ pub unsafe extern "C" fn lzma_raw_encoder(
         CoderInner::RawLzma1Encoder(WriterAdapter::new(encoder))
     };
 
-    // SAFETY: Exclusive ownership of `strm` is guaranteed by `&mut lzma_stream`. If `strm.internal`
-    // is non-null, it points to a valid `InternalState` per safety precondition.
+    // SAFETY:
+    // - Operation: `helpers::install_state(strm, ...)`.
+    // - Required contract: `strm` must be non-null, properly aligned, and point to a live,
+    //   initialized, writable `lzma_stream` with exclusive access, and any non-null `strm.internal`
+    //   must have been allocated by this crate via `Box::into_raw(Box::new(InternalState))` and not
+    //   yet freed.
+    // - Evidence: `strm` is a valid `&mut lzma_stream` by precondition 1, and precondition 2 of
+    //   this function's `# Safety` contract guarantees the provenance and exclusive ownership of
+    //   any non-null `strm.internal`.
+    // - Postcondition: Any old `strm.internal` is freed, `strm.internal` stores the new
+    //   heap-allocated `InternalState`, and `total_in`/`total_out` are reset to `0`.
     unsafe {
         helpers::install_state(
             strm,
@@ -377,12 +616,29 @@ pub unsafe extern "C" fn lzma_raw_encoder(
 
 /// Initialize Lzip encoder. This method is supported by the lzma_rust2 crate,
 /// but doesn't exist in the original liblzma.
+///
 /// # Safety
-/// `strm` must be null or point to a valid, writable `lzma_stream`. The caller must have
-/// exclusive ownership of the struct (no concurrent aliasing) during this call.
-/// If `strm.internal` is non-null, it must point to a valid `InternalState` allocated by
-/// this crate.
+///
+/// The caller must ensure that:
+/// 1. `strm` is either `None` (null in C) or a valid exclusive reference to a live, initialized,
+///    writable `lzma_stream` over which this call has exclusive access for the duration of this
+///    call.
+/// 2. If `strm` is `Some(strm_ref)` and `strm_ref.internal` is non-null, `strm_ref.internal` points
+///    to a live `InternalState` previously allocated by this crate via
+///    `Box::into_raw(Box::new(InternalState))` and not yet freed, with exclusive ownership
+///    transferred to this call so it can be deallocated before installing the new state.
+///
+/// If these preconditions hold and this function returns `LZMA_OK`, `strm_ref.internal` points
+/// to a newly allocated `InternalState` owned by `*strm_ref` until freed by `lzma_end` or
+/// replaced by another initialization function.
 #[cfg(feature = "lzip")]
+// SAFETY:
+// - Operation: `#[unsafe(export_name = crate::prefix!(lzma_lzip_encoder))]`.
+// - Required contract: The exported symbol name must not collide with any incompatible symbol in
+//   the final linked binary, and the `extern "C"` signature must match `lzma_ret
+//   lzma_lzip_encoder(lzma_stream* strm, uint32_t preset)` in `lzma_rust_api.h`.
+// - Evidence: `LZMA_SYS_PREFIX` and `BUILD` target configuration guarantee symbol uniqueness, and
+//   `lzma_rust2_signatures_test` verifies ABI compatibility with `lzma_rust_api.h` at compile time.
 #[unsafe(export_name = crate::prefix!(lzma_lzip_encoder))]
 pub unsafe extern "C" fn lzma_lzip_encoder(
     strm: Option<&mut lzma_stream>,
@@ -398,8 +654,17 @@ pub unsafe extern "C" fn lzma_lzip_encoder(
     let opts = LzipOptions::with_preset(level);
     let encoder = LzipWriter::new(Vec::new(), opts);
     let state = InternalState::new(CoderInner::LzipEncoder(WriterAdapter::new(encoder)));
-    // SAFETY: Exclusive ownership of `strm` is guaranteed by `&mut lzma_stream`. If `strm.internal`
-    // is non-null, it points to a valid `InternalState` per safety precondition.
+    // SAFETY:
+    // - Operation: `helpers::install_state(strm, state)`.
+    // - Required contract: `strm` must be non-null, properly aligned, and point to a live,
+    //   initialized, writable `lzma_stream` with exclusive access, and any non-null `strm.internal`
+    //   must have been allocated by this crate via `Box::into_raw(Box::new(InternalState))` and not
+    //   yet freed.
+    // - Evidence: `strm` is a valid `&mut lzma_stream` by precondition 1, and precondition 2 of
+    //   this function's `# Safety` contract guarantees the provenance and exclusive ownership of
+    //   any non-null `strm.internal`.
+    // - Postcondition: Any old `strm.internal` is freed, `strm.internal` stores the new
+    //   heap-allocated `InternalState`, and `total_in`/`total_out` are reset to `0`.
     unsafe { helpers::install_state(strm, state) };
     LZMA_OK
 }

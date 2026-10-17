@@ -196,18 +196,22 @@ impl InternalState {
 /// Convert a C `lzma_options_lzma` to a Rust `LzmaOptions`.
 ///
 /// # Safety
-/// `opts` must point to a valid `lzma_options_lzma`. If `opts->preset_dict` is non-null,
-/// it must be valid for `opts->preset_dict_size` bytes.
+///
+/// The caller must ensure that if `opts.preset_dict` is non-null and `opts.preset_dict_size > 0`,
+/// `opts.preset_dict` is properly aligned for `u8` (alignment 1) and points to at least
+/// `opts.preset_dict_size as usize` consecutive initialized `u8` bytes within a single live
+/// allocated object (with `opts.preset_dict_size as usize <= isize::MAX as usize`) that is valid
+/// for reads and not mutated for the duration of this call.
+///
+/// If this precondition holds and this function returns `Ok(lzma_opts)`, any preset
+/// dictionary has been copied into an owned `Vec<u8>` inside `lzma_opts` and no raw pointers
+/// are retained.
 pub(crate) unsafe fn lzma_options_from_c(
-    opts: *const lzma_options_lzma,
+    opts: &lzma_options_lzma,
 ) -> Result<LzmaOptions, lzma_ret> {
-    // SAFETY: `opts` points to a valid `lzma_options_lzma`, as required by
-    // the safety precondition.
-    let opts = unsafe { &*opts };
-
-    // These constraints follows liblzma's logic.
-    // lc, lp and pb are required to be lower than 8, 4, 4 respectively, according to lzma specification
-    // liblzma specifically restricts `lc + lp <= 4` to prevent large memory usage
+    // These constraints follow liblzma's logic.
+    // lc, lp, and pb are required to be lower than 8, 4, 4 respectively, according to the LZMA
+    // specification. liblzma specifically restricts `lc + lp <= 4` to prevent large memory usage.
     if opts.lc > 8 || opts.lp > 4 || opts.pb > 4 || opts.lc + opts.lp > 4 {
         return Err(LZMA_PROG_ERROR);
     }
@@ -225,8 +229,21 @@ pub(crate) unsafe fn lzma_options_from_c(
         i32::try_from(opts.depth).map_err(|_| LZMA_OPTIONS_ERROR)?,
     );
     if !opts.preset_dict.is_null() && opts.preset_dict_size > 0 {
-        // SAFETY: `preset_dict` is valid for `preset_dict_size` bytes, as required by the safety
-        // precondition.
+        // SAFETY:
+        // - Operation: `std::slice::from_raw_parts(opts.preset_dict, opts.preset_dict_size as
+        //   usize)`.
+        // - Required contract: `opts.preset_dict` must be non-null, aligned for `u8`, and point to
+        //   `opts.preset_dict_size as usize` consecutive initialized `u8` values within a single
+        //   allocated object of size `<= isize::MAX as usize` that is not mutated for the lifetime
+        //   of `dict`.
+        // - Evidence:
+        //   - `!opts.preset_dict.is_null()` and `opts.preset_dict_size > 0` are checked above.
+        //   - Alignment for `u8` is 1 by the Rust Reference layout rules.
+        //   - By this function's `# Safety` precondition, `opts.preset_dict` points to
+        //     `opts.preset_dict_size as usize` initialized readable bytes in a single live
+        //     allocation (`<= isize::MAX as usize`) that is not mutated during this call.
+        // - Postcondition: `dict` is immediately copied into an owned `Vec<u8>` via `dict.to_vec()`
+        //   and does not outlive this call.
         let dict =
             unsafe { std::slice::from_raw_parts(opts.preset_dict, opts.preset_dict_size as usize) };
         lzma_opts.preset_dict = Some(dict.to_vec());
@@ -241,7 +258,6 @@ pub(crate) unsafe fn lzma_options_from_c(
 /// These are deliberately kept out of [`lzma_options_from_c`] because
 /// `lzma_properties_encode` does not apply them: it happily encodes options that no
 /// encoder would accept.
-///
 pub(crate) fn validate_encoder_options(opts: &lzma_options_lzma) -> Result<(), lzma_ret> {
     if opts.dict_size < LZMA_DICT_SIZE_MIN || opts.dict_size > LZMA_DICT_SIZE_MAX {
         return Err(LZMA_OPTIONS_ERROR);
@@ -440,10 +456,30 @@ pub(crate) fn check_type_from_c(raw: u32) -> Option<CheckType> {
 /// Converts a C array of `lzma_filter` into `XzOptions`.
 ///
 /// # Safety
-/// `filters` must point to a valid array of `lzma_filter` terminated by a filter
-/// with `id == LZMA_VLI_UNKNOWN`.
-/// Each `lzma_filter->options` must either be null or point to a valid options struct
-/// (`lzma_options_lzma`, `lzma_options_delta`, or `lzma_options_bcj`, depending on lzma_filter->id)
+///
+/// The caller must ensure that:
+/// 1. `filters` is non-null, properly aligned for `lzma_filter`, and points to a contiguous
+///    sequence of initialized `lzma_filter` elements within a single live allocated object that
+///    either contains a terminator element with `id == LZMA_VLI_UNKNOWN` at some index `i <=
+///    FILTERS_MAX` or contains at least `FILTERS_MAX + 1` (5) initialized elements, and is not
+///    mutated for the duration of this call.
+/// 2. For every filter element preceding the `LZMA_VLI_UNKNOWN` terminator (within the first
+///    `FILTERS_MAX` elements) whose `options` field is non-null:
+///    - When `id == u64::from(LZMA_FILTER_LZMA2)`, `options` is properly aligned for
+///      `lzma_options_lzma` and points to a live, initialized `lzma_options_lzma` valid for reads
+///      and not mutated for the duration of this call; furthermore, if its `preset_dict` is
+///      non-null and `preset_dict_size > 0`, `preset_dict` points to at least `preset_dict_size as
+///      usize` consecutive initialized readable `u8` bytes within a single live allocated object
+///      (`<= isize::MAX as usize`) not mutated during this call.
+///    - When `id == u64::from(LZMA_FILTER_DELTA)`, `options` is properly aligned for
+///      `lzma_options_delta` and points to a live, initialized `lzma_options_delta` valid for reads
+///      and not mutated for the duration of this call.
+///    - When `id` is a supported BCJ filter ID, `options` is properly aligned for
+///      `lzma_options_bcj` and points to a live, initialized `lzma_options_bcj` valid for reads and
+///      not mutated for the duration of this call.
+///
+/// If these preconditions hold and this function returns `Ok(xz_opts)`, all filter options have
+/// been copied into owned Rust values inside `xz_opts` and no raw pointers are retained.
 pub(crate) unsafe fn xz_options_from_filters(
     filters: *const lzma_filter,
     check: CheckType,
@@ -455,8 +491,16 @@ pub(crate) unsafe fn xz_options_from_filters(
         filters: Vec::new(),
     };
 
-    // SAFETY: By this function's safety precondition, `filters` points to a valid
-    // array of `lzma_filter` terminated by `LZMA_VLI_UNKNOWN`.
+    // SAFETY:
+    // - Operation: `helpers::parse_filters(filters)`.
+    // - Required contract: `filters` must be non-null, aligned for `lzma_filter`, and point to a
+    //   single live allocation containing either an `LZMA_VLI_UNKNOWN` terminator within index `<=
+    //   FILTERS_MAX` or at least `FILTERS_MAX + 1` initialized `lzma_filter` elements not mutated
+    //   during the returned slice's lifetime.
+    // - Evidence: Guaranteed directly by precondition 1 of this function's `# Safety` contract,
+    //   with no intervening mutation of `filters`.
+    // - Postcondition: `filter_slice` is a valid shared slice `&[lzma_filter]` of length `<=
+    //   FILTERS_MAX` confined to this call.
     let filter_slice = unsafe { helpers::parse_filters(filters) }.map_err(|_| {
         io::Error::new(io::ErrorKind::InvalidInput, "filter chain exceeds maximum length")
     })?;
@@ -464,27 +508,49 @@ pub(crate) unsafe fn xz_options_from_filters(
     for f in filter_slice.iter() {
         if f.id == types::LZMA_FILTER_LZMA2.into() {
             if !f.options.is_null() {
-                // SAFETY: `f.options` is non-null (checked above) and, per this function's filter
-                // array safety precondition, points to a valid `lzma_options_lzma`.
+                // SAFETY:
+                // - Operation: Creating a shared reference `&*(f.options as *const
+                //   lzma_options_lzma)`.
+                // - Required contract: `f.options` must be non-null, properly aligned for
+                //   `lzma_options_lzma`, and point to a live, initialized `lzma_options_lzma` not
+                //   mutated for the duration of the reference.
+                // - Evidence: `f.id == u64::from(LZMA_FILTER_LZMA2)` and `!f.options.is_null()`
+                //   hold in this branch. By precondition 2 of this function's `# Safety` contract,
+                //   `f.options` is aligned, initialized, and not mutated during this call.
+                // - Postcondition: `lzma_opts` is a valid shared reference `&lzma_options_lzma`.
                 let lzma_opts = unsafe { &*(f.options as *const lzma_options_lzma) };
                 let invalid_options =
                     || io::Error::new(io::ErrorKind::InvalidInput, "invalid LZMA2 options");
 
                 validate_encoder_options(lzma_opts).map_err(|_| invalid_options())?;
 
-                // SAFETY: The `options` pointer is valid if non-null, pointing to `lzma_options_lzma`.
-                let parsed_opts =
-                    unsafe { lzma_options_from_c(f.options as *const lzma_options_lzma) };
+                // SAFETY:
+                // - Operation: `lzma_options_from_c(lzma_opts)`.
+                // - Required contract: When `lzma_opts.preset_dict` is non-null and
+                //   `lzma_opts.preset_dict_size > 0`, `lzma_opts.preset_dict` must point to at
+                //   least `lzma_opts.preset_dict_size as usize` initialized readable bytes in a
+                //   single live allocation (`<= isize::MAX as usize`) not mutated during this call.
+                // - Evidence: Guaranteed by precondition 2 of this function's `# Safety` contract,
+                //   with no intervening mutation of `lzma_opts`.
+                // - Postcondition: Returns an owned `LzmaOptions` without retaining raw pointers.
+                let parsed_opts = unsafe { lzma_options_from_c(lzma_opts) };
                 opts.lzma_options = parsed_opts.map_err(|_| invalid_options())?;
             }
-        } else if let Some(filter_cfg) = unsafe {
-            // SAFETY: The provided filter `f` is valid, and its `options` pointer
-            // correctly matches `f.id` per the FFI filter array safety precondition.
-            helpers::filter_config_from_c(f)
-        } {
-            opts.filters.push(filter_cfg);
         } else {
-            return Err(io::Error::new(io::ErrorKind::Unsupported, "unsupported filter ID"));
+            // SAFETY:
+            // - Operation: `helpers::filter_config_from_c(f)`.
+            // - Required contract: If `f.options` is non-null and `f.id` is a Delta or BCJ filter
+            //   ID, `f.options` must be aligned and point to a live, initialized
+            //   `lzma_options_delta` or `lzma_options_bcj` not mutated during the call.
+            // - Evidence: As established by `helpers::parse_filters` above, `f` is an element of
+            //   `filter_slice` preceding the `LZMA_VLI_UNKNOWN` terminator, so precondition 2 of
+            //   this function's `# Safety` contract guarantees the required `f.options` validity.
+            // - Postcondition: Returns an owned `Option<FilterConfig>` without retaining pointers.
+            if let Some(filter_cfg) = unsafe { helpers::filter_config_from_c(f) } {
+                opts.filters.push(filter_cfg);
+            } else {
+                return Err(io::Error::new(io::ErrorKind::Unsupported, "unsupported filter ID"));
+            }
         }
     }
 

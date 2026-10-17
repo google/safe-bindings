@@ -19,18 +19,57 @@ pub(crate) const FILTERS_MAX: usize = 4;
 /// or a defined maximum size.
 ///
 /// # Safety
-/// `filters` must point to a valid array of `lzma_filter` terminated by a filter
-/// with `id == LZMA_VLI_UNKNOWN` or at least `FILTERS_MAX + 1` length.
+///
+/// The caller must ensure that:
+/// 1. `filters` is non-null, properly aligned for `lzma_filter`, and points to a contiguous
+///    sequence of initialized `lzma_filter` elements within a single live allocated object.
+/// 2. The allocated sequence either contains a terminator element with `id == LZMA_VLI_UNKNOWN` at
+///    some index `i <= FILTERS_MAX` (with all elements `0..=i` initialized and valid for reads), or
+///    contains at least `FILTERS_MAX + 1` (5) initialized `lzma_filter` elements valid for reads.
+/// 3. For the entire lifetime `'a` of the returned slice, no element in the accessed range is
+///    mutated through any pointer or reference.
+///
+/// If these preconditions hold and this function returns `Ok(slice)`, `slice` is a valid shared
+/// slice `&'a [lzma_filter]` of length `<= FILTERS_MAX` containing all filters preceding the
+/// first `LZMA_VLI_UNKNOWN` terminator.
 pub(crate) unsafe fn parse_filters<'a>(
     filters: *const lzma_filter,
 ) -> Result<&'a [lzma_filter], ()> {
     for i in 0..=FILTERS_MAX {
-        // SAFETY: The caller guarantees `filters` points to a valid, continuous array of `lzma_filter`
-        // terminated by `LZMA_VLI_UNKNOWN` within `FILTERS_MAX + 1` elements.
-        let f = unsafe { &*filters.add(i) };
+        // SAFETY:
+        // - Operation: `filters.add(i)`.
+        // - Required contract: `filters` and the resulting pointer must lie within (or one past the
+        //   end of) the same allocated object, and `i * size_of::<lzma_filter>()` must not exceed
+        //   `isize::MAX as usize`.
+        // - Evidence: `i <= FILTERS_MAX == 4`, so the byte offset is at most `4 *
+        //   size_of::<lzma_filter>() <= isize::MAX as usize`. No terminator was found at any index
+        //   `< i`, so by preconditions 1 and 2 of this function's `# Safety` contract, the
+        //   allocation contains at least `i + 1` elements in a single live allocated object.
+        // - Postcondition: `elem_ptr` is a valid, in-bounds pointer to the `i`-th `lzma_filter`.
+        let elem_ptr = unsafe { filters.add(i) };
+        // SAFETY:
+        // - Operation: Creating a shared reference `&*elem_ptr` of type `&lzma_filter`.
+        // - Required contract: `elem_ptr` must be non-null, properly aligned for `lzma_filter`, and
+        //   point to a live, initialized `lzma_filter` not mutated during the borrow.
+        // - Evidence: `elem_ptr` is in-bounds of the aligned `filters` array as established by
+        //   `filters.add(i)` above, and by preconditions 2 and 3 of this function's `# Safety`
+        //   contract, element `i` is initialized, valid for reads, and not mutated during this
+        //   call.
+        // - Postcondition: `f` borrows the `i`-th `lzma_filter` element for this iteration.
+        let f = unsafe { &*elem_ptr };
         if f.id == LZMA_VLI_UNKNOWN {
-            // SAFETY: `filters` points to `i` initialized, valid, properly aligned `lzma_filter`
-            // elements contained within a single allocated object, and no concurrent mutation occurs for lifetime 'a.
+            // SAFETY:
+            // - Operation: `std::slice::from_raw_parts(filters, i)`.
+            // - Required contract: `filters` must be non-null, properly aligned for `lzma_filter`,
+            //   and point to `i` consecutive initialized `lzma_filter` values within a single
+            //   allocated object of size `<= isize::MAX as usize` that is not mutated for lifetime
+            //   `'a`.
+            // - Evidence: `i <= FILTERS_MAX == 4`, so `i * size_of::<lzma_filter>() <= isize::MAX
+            //   as usize`. By preconditions 1–3 of this function's `# Safety` contract and the
+            //   preceding loop iterations, `filters` is non-null, aligned for `lzma_filter`, points
+            //   to `i` initialized `lzma_filter` elements within a single live allocation, and is
+            //   not mutated for lifetime `'a`.
+            // - Postcondition: Returns a valid shared slice `&'a [lzma_filter]` of length `i`.
             return Ok(unsafe { std::slice::from_raw_parts(filters, i) });
         }
     }
@@ -40,14 +79,35 @@ pub(crate) unsafe fn parse_filters<'a>(
 /// Converts a C `lzma_filter` into a `FilterConfig`.
 ///
 /// # Safety
-/// If `f.options` is not null, it must point to a valid configuration struct matching `f.id`
-/// (`lzma_options_delta` for DELTA filters, `lzma_options_bcj` for BCJ filters).
+///
+/// The caller must ensure that:
+/// 1. When `f.id == u64::from(LZMA_FILTER_DELTA)` and `!f.options.is_null()`, `f.options` is
+///    properly aligned for `lzma_options_delta` and points to a live, initialized
+///    `lzma_options_delta` valid for reads and not mutated for the duration of this call.
+/// 2. When `f.id` is one of the supported BCJ filter IDs (`LZMA_FILTER_X86`, `LZMA_FILTER_POWERPC`,
+///    `LZMA_FILTER_IA64`, `LZMA_FILTER_ARM`, `LZMA_FILTER_ARMTHUMB`, `LZMA_FILTER_SPARC`,
+///    `LZMA_FILTER_ARM64`, or `LZMA_FILTER_RISCV`) and `!f.options.is_null()`, `f.options` is
+///    properly aligned for `lzma_options_bcj` and points to a live, initialized `lzma_options_bcj`
+///    valid for reads and not mutated for the duration of this call.
+///
+/// If these preconditions hold, this function reads the filter options without retaining any
+/// pointer and returns the corresponding `FilterConfig` (or `None` if `f.id` is not a Delta
+/// or BCJ filter).
 pub(crate) unsafe fn filter_config_from_c(f: &lzma_filter) -> Option<FilterConfig> {
     if f.id == LZMA_FILTER_DELTA.into() {
         let property = if f.options.is_null() {
             1
         } else {
-            // SAFETY: The `options` pointer is valid if non-null, pointing to `lzma_options_delta`.
+            // SAFETY:
+            // - Operation: Creating a shared reference `&*(f.options as *const
+            //   lzma_options_delta)`.
+            // - Required contract: `f.options` must be non-null, properly aligned for
+            //   `lzma_options_delta`, and point to a live, initialized `lzma_options_delta` not
+            //   mutated for the duration of the reference.
+            // - Evidence: `!f.options.is_null()` and `f.id == u64::from(LZMA_FILTER_DELTA)` hold in
+            //   this branch. By precondition 1 of this function's `# Safety` contract, `f.options`
+            //   is aligned, initialized, and not mutated during this call.
+            // - Postcondition: Reads `lzma_opts.dist` by value without retaining the reference.
             let lzma_opts = unsafe { &*(f.options as *const lzma_options_delta) };
             lzma_opts.dist
         };
@@ -67,7 +127,18 @@ pub(crate) unsafe fn filter_config_from_c(f: &lzma_filter) -> Option<FilterConfi
 
         if let Some(make_filter) = constructor {
             let start_offset = if !f.options.is_null() {
-                // SAFETY: The `options` pointer is valid if non-null, pointing to `lzma_options_bcj`.
+                // SAFETY:
+                // - Operation: Creating a shared reference `&*(f.options as *const
+                //   lzma_options_bcj)`.
+                // - Required contract: `f.options` must be non-null, properly aligned for
+                //   `lzma_options_bcj`, and point to a live, initialized `lzma_options_bcj` not
+                //   mutated for the duration of the reference.
+                // - Evidence: `!f.options.is_null()` and `f.id` matching one of the supported BCJ
+                //   filter IDs hold in this branch. By precondition 2 of this function's `# Safety`
+                //   contract, `f.options` is aligned, initialized, and not mutated during this
+                //   call.
+                // - Postcondition: Reads `bcj_opts.start_offset` by value without retaining the
+                //   reference.
                 let bcj_opts = unsafe { &*(f.options as *const lzma_options_bcj) };
                 bcj_opts.start_offset
             } else {
@@ -142,6 +213,15 @@ pub(crate) fn mf_to_c(mf: MfType) -> u32 {
 
 /// Check whether the input and output buffer regions overlap.
 /// Overlapping `&[u8]` and `&mut [u8]` is instant UB in Rust.
+///
+/// # Safety-usable invariant
+///
+/// If this function returns `false`, then:
+/// 1. Neither `in_ptr.addr().overflowing_add(in_len)` nor `out_ptr.addr().overflowing_add(out_len)`
+///    overflows `usize`.
+/// 2. Either `in_len == 0`, `out_len == 0`, or the byte address ranges `[in_ptr.addr(),
+///    in_ptr.addr() + in_len)` and `[out_ptr.addr(), out_ptr.addr() + out_len)` are strictly
+///    disjoint.
 pub(crate) fn buffers_overlap(
     in_ptr: *const u8,
     in_len: usize,
@@ -203,22 +283,73 @@ pub(crate) fn map_rust_error(e: io::Error) -> lzma_ret {
     }
 }
 
+/// Frees and clears `strm_ref.internal` if it is non-null.
+///
+/// # Safety
+///
+/// The caller must ensure that if `strm_ref.internal` is non-null, it points to a live
+/// `InternalState` previously allocated by this crate via `Box::into_raw(Box::new(InternalState))`
+/// and not yet freed, and that no other pointer or reference accesses `*strm_ref.internal`
+/// concurrently with or after this call (exclusive ownership is transferred to this call).
+///
+/// If this precondition holds, any non-null `strm_ref.internal` allocation is dropped and
+/// deallocated via `Box::from_raw`, and `strm_ref.internal` is set to null.
+pub(crate) unsafe fn free_internal_state(strm_ref: &mut lzma_stream) {
+    if !strm_ref.internal.is_null() {
+        let ptr = core::mem::take(&mut strm_ref.internal) as *mut InternalState;
+        // SAFETY:
+        // - Operation: `Box::from_raw(ptr)`.
+        // - Required contract: `ptr` must be non-null and have been allocated via the global
+        //   allocator with `Layout::new::<InternalState>()` (via `Box::into_raw`), and no other
+        //   owner or alias may access or free `ptr` after ownership is reconstructed.
+        // - Evidence: `ptr` is non-null after the `!strm_ref.internal.is_null()` check above,
+        //   `strm_ref.internal` has already been replaced with null via `core::mem::take`, and this
+        //   function's `# Safety` precondition guarantees that a non-null `strm_ref.internal` was
+        //   allocated by this crate via `Box::into_raw(Box::new(InternalState))` and transfers
+        //   exclusive ownership to this call.
+        // - Postcondition: The `Box<InternalState>` is reconstructed and immediately dropped,
+        //   deallocating the state while `strm_ref.internal` is null.
+        unsafe {
+            drop(Box::from_raw(ptr));
+        }
+    }
+}
+
 /// Helper to drop old state and safely install a new one.
 ///
 /// # Safety
-/// `strm` must be non-null and point to a valid `lzma_stream`. The caller must have exclusive
-/// ownership to modify `strm.internal` without racing with other threads.
+///
+/// The caller must ensure that:
+/// 1. `strm` is non-null, properly aligned for `lzma_stream`, and points to a live, initialized,
+///    writable `lzma_stream` over which this call has exclusive access for the duration of this
+///    call.
+/// 2. If `(*strm).internal` is non-null, it points to a live `InternalState` previously allocated
+///    by this crate via `Box::into_raw(Box::new(InternalState))` and not yet freed, with exclusive
+///    ownership transferred to this call so it can be deallocated.
+///
+/// If these preconditions hold, any previous `(*strm).internal` allocation is dropped and
+/// deallocated, `(*strm).internal` is set to a newly heap-allocated `InternalState` created via
+/// `Box::into_raw(Box::new(state))`, and `(*strm).total_in` and `(*strm).total_out` are reset
+/// to `0`.
 pub(crate) unsafe fn install_state(strm: *mut lzma_stream, state: InternalState) {
-    // SAFETY: `strm` is non-null per caller promise. The caller guarantees that if
-    // `(*strm).internal` is non-null, it was allocated by `Box::into_raw` with the same
-    // type `InternalState`, making it safe to reconstruct and drop here.
-    unsafe {
-        if !(*strm).internal.is_null() {
-            let ptr = core::mem::take(&mut (*strm).internal) as *mut InternalState;
-            drop(Box::from_raw(ptr));
-        }
-        (*strm).internal = Box::into_raw(Box::new(state)) as *mut lzma_internal_s;
-        (*strm).total_in = 0;
-        (*strm).total_out = 0;
-    }
+    // SAFETY:
+    // - Operation: Creating an exclusive reference `&mut *strm` of type `&mut lzma_stream`.
+    // - Required contract: `strm` must be non-null, properly aligned for `lzma_stream`, point to a
+    //   live initialized `lzma_stream`, and have exclusive access for the duration of this call.
+    // - Evidence: Guaranteed directly by precondition 1 of this function's `# Safety` contract.
+    // - Postcondition: `strm_ref` is a valid exclusive reference `&mut lzma_stream` for this call.
+    let strm_ref = unsafe { &mut *strm };
+    // SAFETY:
+    // - Operation: `free_internal_state(strm_ref)`.
+    // - Required contract: If `strm_ref.internal` is non-null, it must point to a live
+    //   `InternalState` allocated by this crate via `Box::into_raw(Box::new(InternalState))` and
+    //   transfer exclusive ownership to this call.
+    // - Evidence: Guaranteed by precondition 2 of this function's `# Safety` contract, with no
+    //   intervening mutation of `strm_ref.internal`.
+    // - Postcondition: Any previous `strm_ref.internal` allocation is deallocated and
+    //   `strm_ref.internal` is set to null.
+    unsafe { free_internal_state(strm_ref) };
+    strm_ref.internal = Box::into_raw(Box::new(state)) as *mut lzma_internal_s;
+    strm_ref.total_in = 0;
+    strm_ref.total_out = 0;
 }
