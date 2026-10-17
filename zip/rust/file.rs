@@ -153,7 +153,10 @@ impl<'a> Read for FsZipFile<'a> {
 
 fn get_file_name_impl<'a, R: Read>(file: &Option<WrappedZipFile<'a, R>>) -> VecU8 {
     match file.as_ref() {
-        Some(file) => VecU8::from(file.name()),
+        Some(file) => match file.name() {
+            Ok(name) => VecU8::from(name.as_ref()),
+            Err(_) => VecU8::copy_from_slice(file.name_raw()),
+        },
         None => VecU8::default(),
     }
 }

@@ -49,11 +49,9 @@ impl CompressionMethod {
             Err(_) => CompressionMethod::Unsupported,
         }
     }
-}
 
-impl From<CompressionMethod> for ZipCrateCompressionMethod {
-    fn from(val: CompressionMethod) -> Self {
-        match val {
+    fn into_zip(self) -> ZipCrateCompressionMethod {
+        match self {
             CompressionMethod::Deflated => ZipCrateCompressionMethod::Deflated,
             CompressionMethod::Stored => ZipCrateCompressionMethod::Stored,
             CompressionMethod::Bzip2 => ZipCrateCompressionMethod::Bzip2,
@@ -75,15 +73,15 @@ pub struct ZipWriterFileOptions {
     large_file: Option<bool>,
 }
 
-impl TryFrom<&ZipWriterFileOptions> for FileOptions<'static, ()> {
+impl TryFrom<&ZipWriterFileOptions> for FileOptions<'static, 'static, ()> {
     type Error = String;
 
     fn try_from(val: &ZipWriterFileOptions) -> Result<Self, Self::Error> {
         let mut options = FileOptions::<()>::default();
         if let Some(method) = val.compression_method {
-            options = options.compression_method(method.into());
+            options = options.compression_method(method.into_zip());
         }
-        // third_party/rust/zip/v6/src/write.rs
+        // third_party/rust/zip/v9/src/write/options.rs
         //
         // `None` value specifies default compression level.
         //
