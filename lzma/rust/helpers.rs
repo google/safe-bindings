@@ -25,12 +25,13 @@ pub(crate) unsafe fn parse_filters<'a>(
     filters: *const lzma_filter,
 ) -> Result<&'a [lzma_filter], ()> {
     for i in 0..=FILTERS_MAX {
-        // SAFETY: The caller guarantees `filters` points to a valid, continuous array of `lzma_filter`
-        // terminated by `LZMA_VLI_UNKNOWN` within `FILTERS_MAX + 1` elements.
+        // SAFETY: The caller guarantees `filters` points to a valid, continuous array of
+        // `lzma_filter` terminated by `LZMA_VLI_UNKNOWN` within `FILTERS_MAX + 1` elements.
         let f = unsafe { &*filters.add(i) };
         if f.id == LZMA_VLI_UNKNOWN {
             // SAFETY: `filters` points to `i` initialized, valid, properly aligned `lzma_filter`
-            // elements contained within a single allocated object, and no concurrent mutation occurs for lifetime 'a.
+            // elements contained within a single allocated object, and no concurrent mutation
+            // occurs for lifetime 'a.
             return Ok(unsafe { std::slice::from_raw_parts(filters, i) });
         }
     }
@@ -67,7 +68,8 @@ pub(crate) unsafe fn filter_config_from_c(f: &lzma_filter) -> Option<FilterConfi
 
         if let Some(make_filter) = constructor {
             let start_offset = if !f.options.is_null() {
-                // SAFETY: The `options` pointer is valid if non-null, pointing to `lzma_options_bcj`.
+                // SAFETY: The `options` pointer is valid if non-null, pointing to
+                // `lzma_options_bcj`.
                 let bcj_opts = unsafe { &*(f.options as *const lzma_options_bcj) };
                 bcj_opts.start_offset
             } else {
@@ -164,8 +166,31 @@ pub(crate) fn buffers_overlap(
     in_start < out_end && out_start < in_end
 }
 
+/// Error payload for stream rejections that liblzma reports as `LZMA_FORMAT_ERROR`.
+///
+/// Wrap it in an `io::Error` (see [`format_error`]) and [`map_rust_error`] reports
+/// `LZMA_FORMAT_ERROR`, without relying on the error message.
+#[derive(Debug)]
+pub(crate) struct FormatError(pub(crate) &'static str);
+
+impl std::fmt::Display for FormatError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.0)
+    }
+}
+
+impl std::error::Error for FormatError {}
+
+/// Returns an `io::Error` that [`map_rust_error`] maps to `LZMA_FORMAT_ERROR`.
+pub(crate) fn format_error(msg: &'static str) -> io::Error {
+    io::Error::new(ErrorKind::InvalidData, FormatError(msg))
+}
+
 /// Map a Rust `std::io::Error` to the appropriate `lzma_ret` value.
 pub(crate) fn map_rust_error(e: io::Error) -> lzma_ret {
+    if e.get_ref().is_some_and(|inner| inner.is::<FormatError>()) {
+        return LZMA_FORMAT_ERROR;
+    }
     match e.kind() {
         ErrorKind::InvalidData => {
             // We probably have to rely on this string match.

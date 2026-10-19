@@ -354,6 +354,11 @@ lzma_ret lzma_stream_decoder(lzma_stream* strm, uint64_t memlimit,
 // panic/abort instead.
 // `memlimit` is converted to KiB internally, a limit lower than 1024 bytes will
 // cause the decoder to fail. This is similar to liblzma.
+//
+// Note that this implementation zeroes the whole dictionary declared by the
+// header before decoding, whereas liblzma leaves untouched dictionary pages
+// uncommitted, so a small input can commit up to ~4 GiB of memory. Set
+// `memlimit` when decoding untrusted input (b/575507015).
 lzma_ret lzma_alone_decoder(lzma_stream* strm, uint64_t memlimit);
 
 // Initializes a raw decoder with a filter chain.
@@ -384,9 +389,14 @@ lzma_ret lzma_raw_decoder(lzma_stream* strm, const lzma_filter* filters);
 // `LZMA_TELL_NO_CHECK`, and `LZMA_TELL_ANY_CHECK` flags. Other accepted flags
 // are selectively ignored.
 //
-// Note that when decoding legacy `.lzma` streams, this implementation accepts
-// non-standard dictionary sizes that standard liblzma rejects with
-// `LZMA_FORMAT_ERROR`.
+// Like liblzma, a stream not starting with the `.xz` magic byte is decoded as
+// legacy `.lzma`, and its header is rejected with `LZMA_FORMAT_ERROR` unless
+// it looks like a real `.lzma` header (liblzma's "picky" mode).
+//
+// Note that this implementation zeroes the whole dictionary declared by an
+// accepted header before decoding, whereas liblzma leaves untouched dictionary
+// pages uncommitted, so a small input can commit up to ~4 GiB of memory. Set
+// `memlimit` when decoding untrusted input (b/575507015).
 //
 // Returns `LZMA_OK` upon successful initialization, `LZMA_OPTIONS_ERROR`
 // if unsupported flags are provided, or `LZMA_PROG_ERROR` if state setup fails.

@@ -206,8 +206,8 @@ pub(crate) unsafe fn lzma_options_from_c(
     let opts = unsafe { &*opts };
 
     // These constraints follows liblzma's logic.
-    // lc, lp and pb are required to be lower than 8, 4, 4 respectively, according to lzma specification
-    // liblzma specifically restricts `lc + lp <= 4` to prevent large memory usage
+    // lc, lp and pb are required to be lower than 8, 4, 4 respectively, according to lzma
+    // specification liblzma specifically restricts `lc + lp <= 4` to prevent large memory usage
     if opts.lc > 8 || opts.lp > 4 || opts.pb > 4 || opts.lc + opts.lp > 4 {
         return Err(LZMA_PROG_ERROR);
     }
@@ -241,7 +241,6 @@ pub(crate) unsafe fn lzma_options_from_c(
 /// These are deliberately kept out of [`lzma_options_from_c`] because
 /// `lzma_properties_encode` does not apply them: it happily encodes options that no
 /// encoder would accept.
-///
 pub(crate) fn validate_encoder_options(opts: &lzma_options_lzma) -> Result<(), lzma_ret> {
     if opts.dict_size < LZMA_DICT_SIZE_MIN || opts.dict_size > LZMA_DICT_SIZE_MAX {
         return Err(LZMA_OPTIONS_ERROR);
@@ -472,7 +471,8 @@ pub(crate) unsafe fn xz_options_from_filters(
 
                 validate_encoder_options(lzma_opts).map_err(|_| invalid_options())?;
 
-                // SAFETY: The `options` pointer is valid if non-null, pointing to `lzma_options_lzma`.
+                // SAFETY: The `options` pointer is valid if non-null, pointing to
+                // `lzma_options_lzma`.
                 let parsed_opts =
                     unsafe { lzma_options_from_c(f.options as *const lzma_options_lzma) };
                 opts.lzma_options = parsed_opts.map_err(|_| invalid_options())?;
@@ -632,10 +632,87 @@ impl WriterAdapterOwned {
     }
 }
 
+const LZMA_HEADER_SIZE: usize = 13;
+const LZMA_PROPS_MAX: u8 = (4 * 5 + 4) * 9 + 8;
+const LZMA_LCLP_MAX: u8 = 4;
+const PICKY_UNCOMP_SIZE_LIMIT: u64 = 1u64 << 38;
+
+/// Validates the complete fields of a (possibly partial) 13-byte `.lzma`
+/// (`LZMA_Alone`) header using the `picky` rules from liblzma's
+/// `alone_decoder.c` (`lzma_alone_decoder_init(..., true)`), which is what
+/// liblzma's auto decoder uses.
+///
+/// Like liblzma, each field is checked as soon as all of its bytes are
+/// available: the properties byte at offset 0, the dictionary size at
+/// offsets 1..5 and the uncompressed size at offsets 5..13. Rejections map to
+/// `LZMA_FORMAT_ERROR`.
+///
+/// Because `.lzma` has no magic bytes, `AutoDecoder` routes any stream not
+/// starting with `0xFD` (or `0x4C` when `lzip` is enabled) to the `.lzma`
+/// decoder. Without `picky` header validation, a `.xz` stream whose first byte
+/// was corrupted has its remaining magic bytes (`"7zXZ"` = `0x5A587A37`)
+/// interpreted as a 1.41 GiB `.lzma` dictionary size.
+///
+/// NOTE(b/575507015): These checks only reject headers that are unlikely to be
+/// `.lzma`. A header with a valid but large dictionary size (e.g. 3 GiB) and an
+/// unknown uncompressed size still passes, and `lzma_rust2`'s
+/// `LzDecoder::ensure_capacity` then zeroes the whole dictionary up front,
+/// whereas liblzma leaves untouched dictionary pages uncommitted. Callers that
+/// decode untrusted input should set a `memlimit`.
+fn validate_picky_lzma_header(header: &[u8]) -> io::Result<()> {
+    let Some(&props) = header.first() else {
+        return Ok(());
+    };
+    if props > LZMA_PROPS_MAX {
+        return Err(helpers::format_error("invalid LZMA properties byte"));
+    }
+    let rem = props % (9 * 5);
+    let lp = rem / 9;
+    let lc = rem - lp * 9;
+    if lc + lp > LZMA_LCLP_MAX {
+        return Err(helpers::format_error("invalid LZMA lc + lp"));
+    }
+
+    let Some(&dict_bytes) = header.get(1..5).and_then(|b| b.first_chunk::<4>()) else {
+        return Ok(());
+    };
+    let dict_size = u32::from_le_bytes(dict_bytes);
+    if dict_size != u32::MAX {
+        // Only allow dictionary sizes of the form 2^n or 2^n + 2^(n - 1)
+        // (matching `alone_decoder.c`).
+        let mut d = dict_size.wrapping_sub(1);
+        d |= d >> 2;
+        d |= d >> 3;
+        d |= d >> 4;
+        d |= d >> 8;
+        d |= d >> 16;
+        d = d.wrapping_add(1);
+        if d != dict_size {
+            return Err(helpers::format_error("non-standard LZMA dictionary size"));
+        }
+    }
+
+    let Some(&uncomp_bytes) = header.get(5..13).and_then(|b| b.first_chunk::<8>()) else {
+        return Ok(());
+    };
+    let uncomp_size = u64::from_le_bytes(uncomp_bytes);
+    if uncomp_size != u64::MAX && uncomp_size >= PICKY_UNCOMP_SIZE_LIMIT {
+        return Err(helpers::format_error("LZMA uncompressed size too large"));
+    }
+
+    Ok(())
+}
+
 pub struct AutoDecoder {
     memlimit: u64,
     flags: u32,
     coder: Option<Box<CoderInner>>,
+    /// Accumulates the 13-byte `.lzma` header when the fallback `LzmaDecoder`
+    /// is selected, so `validate_picky_lzma_header` can reject non-`.lzma`
+    /// inputs before `LzmaStream` parses the header and allocates the
+    /// dictionary.
+    lzma_header: [u8; LZMA_HEADER_SIZE],
+    lzma_header_len: u8,
     /// Set once the detected coder finished its stream while `LZMA_CONCATENATED` was
     /// requested. Mirrors `SEQ_FINISH` of liblzma's auto decoder (`auto_decoder.c`).
     seq_finish: bool,
@@ -643,7 +720,14 @@ pub struct AutoDecoder {
 
 impl AutoDecoder {
     pub fn new(memlimit: u64, flags: u32) -> Self {
-        Self { memlimit, flags, coder: None, seq_finish: false }
+        Self {
+            memlimit,
+            flags,
+            coder: None,
+            lzma_header: [0; LZMA_HEADER_SIZE],
+            lzma_header_len: 0,
+            seq_finish: false,
+        }
     }
 
     /// The coder picked for the detected format, or `None` before detection.
@@ -699,6 +783,27 @@ impl AutoDecoder {
         }
 
         let coder = self.coder.as_mut().unwrap();
+        let header_len = self.lzma_header_len as usize;
+        if header_len < LZMA_HEADER_SIZE && matches!(coder.as_ref(), CoderInner::LzmaDecoder(_)) {
+            // Validate the header fields completed by this input before `LzmaStream` sees
+            // them, since it allocates the dictionary as soon as it has the full header.
+            let take = input.len().min(LZMA_HEADER_SIZE - header_len);
+            let mut header = self.lzma_header;
+            header[header_len..header_len + take].copy_from_slice(&input[..take]);
+            if let Err(e) = validate_picky_lzma_header(&header[..header_len + take]) {
+                return CoderResult { bytes_consumed: 0, bytes_produced: 0, result: Err(e) };
+            }
+            if header_len + take < LZMA_HEADER_SIZE {
+                // The header is still incomplete, so `take == input.len()`.
+                let result = coder.process(input, output, action);
+                let consumed = result.bytes_consumed.min(take);
+                self.lzma_header[header_len..header_len + consumed]
+                    .copy_from_slice(&input[..consumed]);
+                self.lzma_header_len += consumed as u8;
+                return result;
+            }
+            self.lzma_header_len = LZMA_HEADER_SIZE as u8;
+        }
         let result = coder.process(input, output, action);
 
         if self.flags & LZMA_CONCATENATED == 0 || !matches!(result.result, Ok(Status::StreamEnd)) {
@@ -730,4 +835,88 @@ fn seq_finish_result(
         Ok(Status::Ok)
     };
     CoderResult { bytes_consumed, bytes_produced, result }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::types::{LZMA_DATA_ERROR, LZMA_FORMAT_ERROR};
+
+    /// Default `lc=3, lp=0, pb=2` properties byte.
+    const PROPS_DEFAULT: u8 = 0x5D;
+
+    fn lzma_header(props: u8, dict_size: u32, uncomp_size: u64) -> [u8; LZMA_HEADER_SIZE] {
+        let mut header = [0; LZMA_HEADER_SIZE];
+        header[0] = props;
+        header[1..5].copy_from_slice(&dict_size.to_le_bytes());
+        header[5..13].copy_from_slice(&uncomp_size.to_le_bytes());
+        header
+    }
+
+    fn is_valid(header: &[u8]) -> bool {
+        validate_picky_lzma_header(header).is_ok()
+    }
+
+    #[test] // allow_core_test
+    fn picky_header_props() {
+        // pb=4, lp=4, lc=0 is the largest accepted properties byte.
+        assert!(is_valid(&lzma_header(216, 1 << 23, u64::MAX)));
+        assert!(is_valid(&lzma_header(PROPS_DEFAULT, 1 << 23, u64::MAX)));
+        // > (4 * 5 + 4) * 9 + 8.
+        assert!(!is_valid(&lzma_header(225, 1 << 23, u64::MAX)));
+        // lc=4, lp=1: lc + lp > 4.
+        assert!(!is_valid(&lzma_header(13, 1 << 23, u64::MAX)));
+        // The `.lz` magic byte: lc=4, lp=3, pb=1.
+        assert!(!is_valid(&lzma_header(0x4C, 1 << 23, u64::MAX)));
+    }
+
+    #[test] // allow_core_test
+    fn picky_header_dict_size() {
+        for dict_size in [0, 4096, 1 << 23, 3 << 22, 1 << 31, 3 << 30, u32::MAX] {
+            assert!(is_valid(&lzma_header(PROPS_DEFAULT, dict_size, u64::MAX)), "{dict_size:#x}");
+        }
+        for dict_size in [(1 << 23) + 1, 5 << 21, 0x5A58_7A37, u32::MAX - 1] {
+            assert!(!is_valid(&lzma_header(PROPS_DEFAULT, dict_size, u64::MAX)), "{dict_size:#x}");
+        }
+    }
+
+    #[test] // allow_core_test
+    fn picky_header_uncomp_size() {
+        assert!(is_valid(&lzma_header(PROPS_DEFAULT, 1 << 23, 0)));
+        assert!(is_valid(&lzma_header(PROPS_DEFAULT, 1 << 23, PICKY_UNCOMP_SIZE_LIMIT - 1)));
+        assert!(is_valid(&lzma_header(PROPS_DEFAULT, 1 << 23, u64::MAX)));
+        assert!(!is_valid(&lzma_header(PROPS_DEFAULT, 1 << 23, PICKY_UNCOMP_SIZE_LIMIT)));
+        assert!(!is_valid(&lzma_header(PROPS_DEFAULT, 1 << 23, u64::MAX - 1)));
+    }
+
+    #[test] // allow_core_test
+    fn picky_header_rejects_each_field_once_complete() {
+        assert!(is_valid(&[]));
+        assert!(!is_valid(&[225]));
+
+        let bad_dict = lzma_header(PROPS_DEFAULT, 0x5A58_7A37, u64::MAX);
+        assert!(is_valid(&bad_dict[..4]));
+        assert!(!is_valid(&bad_dict[..5]));
+
+        let bad_uncomp = lzma_header(PROPS_DEFAULT, 1 << 23, PICKY_UNCOMP_SIZE_LIMIT);
+        assert!(is_valid(&bad_uncomp[..12]));
+        assert!(!is_valid(&bad_uncomp[..13]));
+    }
+
+    #[test] // allow_core_test
+    fn picky_header_rejects_xz_header_with_corrupted_magic() {
+        // The first 13 bytes of an `.xz` stream whose leading 0xFD was zeroed.
+        let header = [0x00, 0x37, 0x7A, 0x58, 0x5A, 0x00, 0x00, 0x04, 0xE6, 0xD6, 0xB4, 0x46, 0x04];
+        let err = validate_picky_lzma_header(&header).unwrap_err();
+        assert_eq!(helpers::map_rust_error(err), LZMA_FORMAT_ERROR);
+    }
+
+    #[test] // allow_core_test
+    fn map_rust_error_format_error() {
+        assert_eq!(helpers::map_rust_error(helpers::format_error("bad header")), LZMA_FORMAT_ERROR);
+        assert_eq!(
+            helpers::map_rust_error(io::Error::new(io::ErrorKind::InvalidData, "bad data")),
+            LZMA_DATA_ERROR
+        );
+    }
 }
