@@ -127,8 +127,13 @@ class Value final {
    * The tag of the value is specified as the argument.
    *
    * If you want to display with the unit, use `Field::display_value`.
+   *
+   * Lifetime: the returned `Display` borrows from this `Value` (`&'a Value` in
+   * Rust) and must not outlive it. Rvalues remain callable so single-expression
+   * uses (`Value::Short({2}).display_as(tag).to_string()`) continue to work.
    */
-  rust::reexport::Display display_as(Tag tag) const;
+  rust::reexport::Display display_as(Tag tag) const
+      ABSL_ATTRIBUTE_LIFETIME_BOUND;
 
   /**
    * Returns `UIntValue` if the value type is unsigned integer (BYTE,
@@ -472,8 +477,37 @@ class Field {
   In ifd_num() const { return ifd_num_; };
   /**
    * The value of this field.
+   *
+   * Lifetime: bound to this Field instance.
+   *
+   * The `const&&` overload is deleted and the accessor is
+   * ABSL_ATTRIBUTE_LIFETIME_BOUND, so Clang rejects (-Werror,-Wdangling)
+   * initializations taken directly off a temporary `Field`:
+   *     const Value& v = MakeField().value();             // error
+   *
+   * KNOWN GAP -- this is exif's primary access path, so read carefully.
+   * `get_field()` and `get_mnote_field()` return `std::optional<Field>` *by
+   * value*. `std::optional::operator->` is the one optional accessor that is
+   * neither ref-qualified nor ABSL_ATTRIBUTE_LIFETIME_BOUND (unlike
+   * `absl::StatusOr::operator->`), so the lifetime chain is broken and the
+   * following compiles *silently* and dangles at runtime:
+   *     const Value& v = exif.get_field(t, i)->value();   // NOT diagnosed!
+   * `operator*` and `value()` ARE ref-qualified, so they propagate rvalue-ness
+   * into the deleted `const&&` overload and the same mistake spelled through
+   * them is rejected:
+   *     const Value& v = (*exif.get_field(t, i)).value();        // error
+   *     const Value& v = exif.get_field(t, i).value().value();   // error
+   * Prefer naming the optional, which is both safe and readable:
+   *     std::optional<Field> f = exif.get_field(t, i);
+   *     if (f.has_value()) { const Value& v = f->value(); ... }
+   *
+   * Also NOT diagnosed, and the caller's responsibility:
+   *   - assigning (rather than initializing) from a temporary;
+   *   - letting the reference escape the scope of a named owner;
+   *   - laundering the reference through an intervening unannotated call.
    */
-  const Value& value() const ABSL_ATTRIBUTE_LIFETIME_BOUND { return value_; };
+  const Value& value() const& ABSL_ATTRIBUTE_LIFETIME_BOUND { return value_; }
+  const Value& value() const&& = delete;
 
  private:
   friend class Exif;
@@ -503,18 +537,31 @@ class Exif final {
 
   /**
    * Returns the slice that contains the TIFF data.
+   *
+   * Lifetime: bound to this Exif instance. Clang rejects dangling
+   * initializations chained off a temporary StatusOr<Exif>; assignment and
+   * escape from an inner scope are NOT diagnosed. See Field::value().
    */
-  absl::Span<const uint8_t> buf() const ABSL_ATTRIBUTE_LIFETIME_BOUND;
+  absl::Span<const uint8_t> buf() const& ABSL_ATTRIBUTE_LIFETIME_BOUND;
+  absl::Span<const uint8_t> buf() const&& = delete;
 
   /**
    * Returns a span of Exif fields.
+   *
+   * Lifetime: bound to this Exif instance. See Field::value() for exactly
+   * what the compiler does and does not catch.
    */
-  absl::Span<const Field> fields() const ABSL_ATTRIBUTE_LIFETIME_BOUND;
+  absl::Span<const Field> fields() const& ABSL_ATTRIBUTE_LIFETIME_BOUND;
+  absl::Span<const Field> fields() const&& = delete;
 
   /**
    * Returns a span of MakerNote fields.
+   *
+   * Lifetime: bound to this Exif instance. See Field::value() for exactly
+   * what the compiler does and does not catch.
    */
-  absl::Span<const Field> mnote_fields() const ABSL_ATTRIBUTE_LIFETIME_BOUND;
+  absl::Span<const Field> mnote_fields() const& ABSL_ATTRIBUTE_LIFETIME_BOUND;
+  absl::Span<const Field> mnote_fields() const&& = delete;
 
   /**
    * Returns true if the Exif data (TIFF structure) is in the
@@ -603,10 +650,15 @@ class ExifBytes final {
 
   /**
    * Returns a view to the Exif data.
+   *
+   * Lifetime: bound to this ExifBytes instance. Clang rejects dangling
+   * initializations chained off a temporary StatusOr<ExifBytes>; assignment
+   * and escape from an inner scope are NOT diagnosed. See Field::value().
    */
-  absl::Span<const uint8_t> view() const ABSL_ATTRIBUTE_LIFETIME_BOUND {
+  absl::Span<const uint8_t> view() const& ABSL_ATTRIBUTE_LIFETIME_BOUND {
     return absl::Span<const uint8_t>(vec_.as_ptr(), vec_.len());
   }
+  absl::Span<const uint8_t> view() const&& = delete;
 
  private:
   friend class Writer;
