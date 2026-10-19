@@ -12,7 +12,7 @@ crate-type = ["staticlib"]
 [dependencies]
 crc = "3"
 libc = "0.2"
-lzma-rust2 = "0.21"
+lzma-rust2 = "0.23"
 
 [build-dependencies]
 bindgen = "0.69"
