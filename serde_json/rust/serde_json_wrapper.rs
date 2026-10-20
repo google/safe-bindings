@@ -405,6 +405,14 @@ impl Value {
             _ => ItemsIterMut::Null,
         }
     }
+
+    /// Returns an iterator over pointers to the elements of this [Value].
+    ///
+    /// NOTE(b/562051251): Remove this temporary migration helper once callers are migrated to
+    /// reference iteration.
+    pub fn iter_by_ptr<'a>(&'a self) -> PtrIter<'a> {
+        PtrIter { iter: self.into_iter() }
+    }
 }
 
 macro_rules! impl_from {
@@ -581,6 +589,19 @@ impl<'a> Iterator for Iter<'a> {
             Iter::Array(iter) => iter.next().map(Value::ref_cast),
             Iter::Object(iter) => iter.next().map(Value::ref_cast),
         }
+    }
+}
+
+#[derive(Clone)]
+pub struct PtrIter<'a> {
+    iter: Iter<'a>,
+}
+
+impl<'a> Iterator for PtrIter<'a> {
+    type Item = *const Value;
+    #[inline]
+    fn next(&mut self) -> Option<Self::Item> {
+        self.iter.next().map(|v| v as *const Value)
     }
 }
 
