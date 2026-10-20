@@ -5,53 +5,109 @@ on:
     branches: [ main ]
   pull_request:
     branches: [ main ]
+  schedule:
+    # Build every binding weekly (Mondays 05:00 UTC) to catch breakages from new
+    # Crubit releases in bindings that have not changed.
+    - cron: '0 5 * * 1'
+  workflow_dispatch:
 
 permissions:
   contents: read
 
 jobs:
-  build:
-    name: build ${{ matrix.binding }}
+  setup:
+    name: setup
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        binding:
-        # keep-sorted start
-          - deflate
-          - fft
-          - kamadak_exif
-          - lzma
-          - pixel_bridge
-          - regex
-          - roaring_bridge
-          - saphyr
-          - serde_json
-          - stemming
-          - zip
-        # keep-sorted end
+    outputs:
+      bindings: ${{ steps.changes.outputs.bindings }}
+      crubit_sha: ${{ steps.toolchain.outputs.crubit_sha }}
+      toolchain: ${{ steps.toolchain.outputs.toolchain }}
     steps:
       - name: Checkout code
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Select bindings to build
+        id: changes
+        env:
+          # Empty for scheduled and manual runs, which build every binding.
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+          HEAD_SHA: ${{ github.sha }}
+        run: bash ci/changed_bindings.sh "${BASE_SHA}" "${HEAD_SHA}" >> "${GITHUB_OUTPUT}"
+
+      - name: Resolve Crubit commit and matching Rust nightly
+        id: toolchain
+        if: steps.changes.outputs.bindings != '[]'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash ci/resolve_toolchain.sh >> "${GITHUB_OUTPUT}"
+
+  build:
+    name: build ${{ matrix.binding }}
+    needs: setup
+    if: needs.setup.outputs.bindings != '[]'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        binding: ${{ fromJSON(needs.setup.outputs.bindings) }}
+    env:
+      # Overrides rust-toolchain.toml with the nightly matching the Crubit commit.
+      RUSTUP_TOOLCHAIN: ${{ needs.setup.outputs.toolchain }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
           persist-credentials: false
 
       - name: Set up Rust
-        uses: actions-rust-lang/setup-rust-toolchain@46268bd060767258de96ed93c1251119784f2ab6 # v1
+        uses: actions-rust-lang/setup-rust-toolchain@46268bd060767258de96ed93c1251119784f2ab6 # v1.16.1
         with:
+          toolchain: ${{ needs.setup.outputs.toolchain }}
+          components: rust-src, rustc-dev, llvm-tools-preview
           # NOTE: b/530101873 - Crubit has some compiler warnings. By default rustflags is
           # "-D warnings" causing the build to fail.
           rustflags: ""
 
+      - name: Fetch Crubit
+        env:
+          CRUBIT_SHA: ${{ needs.setup.outputs.crubit_sha }}
+        run: |
+          git init -q "${RUNNER_TEMP}/crubit"
+          git -C "${RUNNER_TEMP}/crubit" fetch -q --depth 1 https://github.com/google/crubit.git "${CRUBIT_SHA}"
+          git -C "${RUNNER_TEMP}/crubit" checkout -q FETCH_HEAD
+
       - name: Configure CMake
-        run: cmake -B build -S ${{ matrix.binding }}
+        # Use the fetched Crubit commit instead of Corrosion's default `latest`
+        # tag, so it matches RUSTUP_TOOLCHAIN even if the tag moves mid-run.
+        env:
+          BINDING: ${{ matrix.binding }}
+        run: cmake -B build -S "${BINDING}" -DFETCHCONTENT_SOURCE_DIR_CRUBIT="${RUNNER_TEMP}/crubit"
 
       - name: Build
         run: cmake --build build --parallel
 
   summary:
     name: summary
-    needs: build
+    needs: [setup, build]
+    # Always report, since Copybara waits on this check. Builds are skipped when
+    # a change touches no binding, which counts as success.
+    if: always()
     runs-on: ubuntu-latest
     steps:
-      - name: Complete
-        run: echo "All bindings built successfully!"
+      - name: Check results
+        env:
+          SETUP_RESULT: ${{ needs.setup.result }}
+          BUILD_RESULT: ${{ needs.build.result }}
+        run: |
+          if [[ "${SETUP_RESULT}" != "success" ]]; then
+            echo "::error::setup ${SETUP_RESULT}"
+            exit 1
+          fi
+          if [[ "${BUILD_RESULT}" != "success" && "${BUILD_RESULT}" != "skipped" ]]; then
+            echo "::error::build ${BUILD_RESULT}"
+            exit 1
+          fi
+          echo "Build result: ${BUILD_RESULT}"
