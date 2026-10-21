@@ -206,8 +206,8 @@ pub(crate) unsafe fn lzma_options_from_c(
     let opts = unsafe { &*opts };
 
     // These constraints follows liblzma's logic.
-    // lc, lp and pb are required to be lower than 8, 4, 4 respectively, according to lzma specification
-    // liblzma specifically restricts `lc + lp <= 4` to prevent large memory usage
+    // lc, lp and pb are required to be lower than 8, 4, 4 respectively, according to lzma
+    // specification liblzma specifically restricts `lc + lp <= 4` to prevent large memory usage
     if opts.lc > 8 || opts.lp > 4 || opts.pb > 4 || opts.lc + opts.lp > 4 {
         return Err(LZMA_PROG_ERROR);
     }
@@ -241,7 +241,6 @@ pub(crate) unsafe fn lzma_options_from_c(
 /// These are deliberately kept out of [`lzma_options_from_c`] because
 /// `lzma_properties_encode` does not apply them: it happily encodes options that no
 /// encoder would accept.
-///
 pub(crate) fn validate_encoder_options(opts: &lzma_options_lzma) -> Result<(), lzma_ret> {
     if opts.dict_size < LZMA_DICT_SIZE_MIN || opts.dict_size > LZMA_DICT_SIZE_MAX {
         return Err(LZMA_OPTIONS_ERROR);
@@ -472,7 +471,8 @@ pub(crate) unsafe fn xz_options_from_filters(
 
                 validate_encoder_options(lzma_opts).map_err(|_| invalid_options())?;
 
-                // SAFETY: The `options` pointer is valid if non-null, pointing to `lzma_options_lzma`.
+                // SAFETY: The `options` pointer is valid if non-null, pointing to
+                // `lzma_options_lzma`.
                 let parsed_opts =
                     unsafe { lzma_options_from_c(f.options as *const lzma_options_lzma) };
                 opts.lzma_options = parsed_opts.map_err(|_| invalid_options())?;
@@ -651,51 +651,68 @@ impl AutoDecoder {
         self.coder.as_deref()
     }
 
+    #[inline(never)]
+    fn new_xz_coder(allow_multiple: bool, memlimit_kb: u32) -> Box<CoderInner> {
+        let decoder = XzStream::new_mem_limit(allow_multiple, memlimit_kb);
+        Box::new(CoderInner::XzDecoder(Box::new(decoder)))
+    }
+
+    #[inline(never)]
+    fn new_lzip_coder(memlimit_kb: u32) -> Box<CoderInner> {
+        Box::new(CoderInner::LzipDecoder(Box::new(LzipStream::new_mem_limit(memlimit_kb))))
+    }
+
+    #[inline(never)]
+    fn new_lzma_coder(memlimit_kb: u32) -> Box<CoderInner> {
+        Box::new(CoderInner::LzmaDecoder(Box::new(LzmaStream::new_mem_limit(memlimit_kb, None))))
+    }
+
+    #[inline(never)]
+    fn init_coder(&mut self, first_byte: u8) {
+        let memlimit_kb = if self.memlimit == u64::MAX {
+            u32::MAX
+        } else {
+            (self.memlimit / 1024).clamp(0, u32::MAX as u64) as u32
+        };
+
+        // Detect the file format. .xz files start with 0xFD which
+        // cannot be the first byte of .lzma (LZMA_Alone) format.
+        // The .lz format starts with 0x4C which could be the
+        // first byte of a .lzma file but luckily it would mean
+        // lc/lp/pb being 4/3/1 which liblzma doesn't support because
+        // lc + lp > 4. So using just 0x4C to detect .lz is OK here.
+        // This logic is the same as liblzma's auto decoder.
+        //
+        // liblzma only probes for .lz when built with HAVE_LZIP_DECODER, which
+        // google3's liblzma does not define, so .lz falls through to the alone
+        // decoder there. We keep the behavior the same by introducing the
+        // lzip feature, but keep it disabled by default.
+        let coder = if first_byte == 0xFD {
+            let allow_multiple = (self.flags & LZMA_CONCATENATED) != 0;
+            Self::new_xz_coder(allow_multiple, memlimit_kb)
+        } else if cfg!(feature = "lzip") && first_byte == 0x4C {
+            Self::new_lzip_coder(memlimit_kb)
+        } else {
+            Self::new_lzma_coder(memlimit_kb)
+        };
+        self.coder = Some(coder);
+    }
+
     pub fn process(&mut self, input: &[u8], output: &mut [u8], action: FfiAction) -> CoderResult {
         if self.seq_finish {
             return seq_finish_result(input.len(), 0, 0, action);
         }
 
         if self.coder.is_none() {
-            if input.is_empty() {
+            let Some(&first_byte) = input.first() else {
                 // Not enough data to detect stream type yet.
                 return CoderResult {
                     bytes_consumed: 0,
                     bytes_produced: 0,
                     result: Ok(Status::Ok),
                 };
-            }
-            let memlimit_kb = if self.memlimit == u64::MAX {
-                u32::MAX
-            } else {
-                (self.memlimit / 1024).clamp(0, u32::MAX as u64) as u32
             };
-
-            // Detect the file format. .xz files start with 0xFD which
-            // cannot be the first byte of .lzma (LZMA_Alone) format.
-            // The .lz format starts with 0x4C which could be the
-            // first byte of a .lzma file but luckily it would mean
-            // lc/lp/pb being 4/3/1 which liblzma doesn't support because
-            // lc + lp > 4. So using just 0x4C to detect .lz is OK here.
-            // This logic is the same as liblzma's auto decoder.
-            //
-            // liblzma only probes for .lz when built with HAVE_LZIP_DECODER, which
-            // google3's liblzma does not define, so .lz falls through to the alone
-            // decoder there. We keep the behavior the same by introducing the
-            // lzip feature, but keep it disabled by default.
-            if input[0] == 0xFD {
-                let allow_multiple = (self.flags & LZMA_CONCATENATED) != 0;
-                let decoder = XzStream::new_mem_limit(allow_multiple, memlimit_kb);
-                self.coder = Some(Box::new(CoderInner::XzDecoder(Box::new(decoder))));
-            } else if cfg!(feature = "lzip") && input[0] == 0x4C {
-                self.coder = Some(Box::new(CoderInner::LzipDecoder(Box::new(
-                    LzipStream::new_mem_limit(memlimit_kb),
-                ))));
-            } else {
-                self.coder = Some(Box::new(CoderInner::LzmaDecoder(Box::new(
-                    LzmaStream::new_mem_limit(memlimit_kb, None),
-                ))));
-            }
+            self.init_coder(first_byte);
         }
 
         let coder = self.coder.as_mut().unwrap();
