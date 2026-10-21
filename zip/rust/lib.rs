@@ -4,14 +4,22 @@
 //!
 //! WARNING: This crate should never be used from Rust, instead use zip directly.
 
+#![forbid(unsafe_code)]
+
+mod entry_metadata;
+pub use entry_metadata::ZipEntryMetadata;
+
 mod file;
 pub use file::{BufferedZipFile, FsZipFile};
 
 mod read;
-pub use read::{BufferedZipArchive, FsZipArchive};
+pub use read::{BufferedZipArchive, BufferedZipStreamReader, FsZipArchive, FsZipStreamReader};
 
 mod write;
-pub use write::{BufferedZipWriter, CompressionMethod, FsZipWriter, ZipWriterFileOptions};
+pub use write::{
+    new_buffered_zip_stream_writer, new_fs_zip_stream_writer, BufferedZipStreamWriter,
+    BufferedZipWriter, CompressionMethod, FsZipStreamWriter, FsZipWriter, ZipWriterFileOptions,
+};
 
 mod vec_u8;
 pub use vec_u8::VecU8;
