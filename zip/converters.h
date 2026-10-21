@@ -22,9 +22,37 @@ class RustVecU8Wrapper {
   explicit RustVecU8Wrapper(rust::VecU8 vec_u8)
       : vec_u8_(std::move(vec_u8)) {}
 
-  absl::string_view AsStringView() const ABSL_ATTRIBUTE_LIFETIME_BOUND {
+  // Returns a non-owning string_view over the underlying byte buffer.
+  //
+  // WARNING: The returned string_view is NOT null-terminated and may contain
+  // embedded null characters (`\0`). Do NOT pass `.data()` to C-style APIs
+  // expecting null-terminated strings (`open`, `strcmp`, `printf("%s")`).
+  // Construct a `std::string` copy if an owned or null-terminated string is
+  // required.
+  // Lifetime: bound to this RustVecU8Wrapper instance.
+  //
+  // Two compile-time guards apply. The `const&&` overload is deleted, and
+  // ABSL_ATTRIBUTE_LIFETIME_BOUND lets Clang reject (-Werror,-Wdangling)
+  // dangling *initializations*, including ones reached through
+  // `absl::StatusOr::operator->`, which absl annotates:
+  //     absl::string_view v = f.GetFileData()->AsStringView();   // error
+  //
+  // Three cases are NOT diagnosed and remain the caller's responsibility:
+  //     absl::string_view v;
+  //     v = f.GetFileData()->AsStringView();       // assignment: dangles
+  //     { auto w = *f.GetFileData(); v = w.AsStringView(); }     // scope exit
+  //     absl::string_view u =
+  //         Trim(f.GetFileData()->AsStringView());  // laundered: dangles
+  //
+  // The third is the general shape: passing the view through any intervening
+  // function that is not itself lifetime-annotated breaks the chain.
+  //
+  // Consuming inside the full-expression is safe:
+  //     std::string owned(f.GetFileData()->AsStringView());      // OK
+  absl::string_view AsStringView() const& ABSL_ATTRIBUTE_LIFETIME_BOUND {
     return security::crubit_helpers::StringViewFromVecU8(vec_u8_);
   }
+  absl::string_view AsStringView() const&& = delete;
 
  private:
   rust::VecU8 vec_u8_;

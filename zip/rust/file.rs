@@ -69,6 +69,13 @@ impl<'a> BufferedZipFile<'a> {
     pub fn get_file_data(&mut self) -> Result<VecU8, ZipError> {
         get_file_data_impl(&mut self.file)
     }
+
+    /// Returns the data of the file if its decompressed size does not exceed
+    /// `max_size` bytes.
+    /// The result only is valid if `is_none()` returns false.
+    pub fn get_file_data_with_max_size(&mut self, max_size: usize) -> Result<VecU8, ZipError> {
+        get_file_data_with_max_size_impl(&mut self.file, max_size)
+    }
 }
 
 impl<'a> Read for BufferedZipFile<'a> {
@@ -140,6 +147,13 @@ impl<'a> FsZipFile<'a> {
     pub fn get_file_data(&mut self) -> Result<VecU8, ZipError> {
         get_file_data_impl(&mut self.file)
     }
+
+    /// Returns the data of the file if its decompressed size does not exceed
+    /// `max_size` bytes.
+    /// The result only is valid if `is_none()` returns false.
+    pub fn get_file_data_with_max_size(&mut self, max_size: usize) -> Result<VecU8, ZipError> {
+        get_file_data_with_max_size_impl(&mut self.file, max_size)
+    }
 }
 
 impl<'a> Read for FsZipFile<'a> {
@@ -200,6 +214,32 @@ fn get_file_data_impl<'a, R: Read>(
             let mut buffer = Vec::new();
             match file.read_to_end(&mut buffer) {
                 Ok(_) => Ok(buffer.into()),
+                Err(e) => Err(ZipError::internal(e.to_string())),
+            }
+        }
+        None => Ok(VecU8::default()),
+    }
+}
+
+fn get_file_data_with_max_size_impl<'a, R: Read>(
+    file: &mut Option<WrappedZipFile<'a, R>>,
+    max_size: usize,
+) -> Result<VecU8, ZipError> {
+    match file.as_mut() {
+        Some(file) => {
+            let mut buffer = Vec::new();
+            let limit = (max_size as u64).saturating_add(1);
+            match file.take(limit).read_to_end(&mut buffer) {
+                Ok(_) => {
+                    if buffer.len() > max_size {
+                        Err(ZipError::out_of_range(format!(
+                            "Decompressed entry size exceeds maximum allowed size of {} bytes",
+                            max_size
+                        )))
+                    } else {
+                        Ok(buffer.into())
+                    }
+                }
                 Err(e) => Err(ZipError::internal(e.to_string())),
             }
         }

@@ -1,5 +1,6 @@
 #include "file.h"
 
+#include <cstddef>
 #include <string>
 #include <variant>
 
@@ -66,6 +67,12 @@ absl::StatusOr<RustVecU8Wrapper> BufferedZipFile::GetFileData() {
   ABSL_RETURN_IF_ERROR(CheckNone());
   return FromRustResultVecU8(zip_.get_file_data());
 }
+absl::StatusOr<RustVecU8Wrapper> BufferedZipFile::GetFileData(size_t max_size) {
+  if (absl::Status status = CheckNone(); !status.ok()) {
+    return status;
+  }
+  return FromRustResultVecU8(zip_.get_file_data_with_max_size(max_size));
+}
 
 absl::Status FsZipFile::CheckNone() const {
   if (IsNone()) {
@@ -96,6 +103,12 @@ absl::StatusOr<RustVecU8Wrapper> FsZipFile::GetFileData() {
   ABSL_RETURN_IF_ERROR(CheckNone());
   return FromRustResultVecU8(zip_.get_file_data());
 }
+absl::StatusOr<RustVecU8Wrapper> FsZipFile::GetFileData(size_t max_size) {
+  if (absl::Status status = CheckNone(); !status.ok()) {
+    return status;
+  }
+  return FromRustResultVecU8(zip_.get_file_data_with_max_size(max_size));
+}
 
 absl::StatusOr<bool> ZipFile::IsFile() const {
   return std::visit([](auto& zip) { return zip.IsFile(); }, zip_);
@@ -114,6 +127,10 @@ absl::StatusOr<CompressionMethod> ZipFile::GetCompressionMethod() const {
 }
 absl::StatusOr<RustVecU8Wrapper> ZipFile::GetFileData() {
   return std::visit([](auto& zip) { return zip.GetFileData(); }, zip_);
+}
+absl::StatusOr<RustVecU8Wrapper> ZipFile::GetFileData(size_t max_size) {
+  return std::visit([max_size](auto& zip) { return zip.GetFileData(max_size); },
+                    zip_);
 }
 
 }  // namespace security::zip
