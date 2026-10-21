@@ -12,6 +12,8 @@ pub use flate2::Compression;
 pub use flate2::GzHeader;
 
 pub mod read {
+    pub use crate::gz::read::BoundedReadError;
+    pub use crate::gz::read::BoundedReadErrorCode;
     pub use crate::gz::read::GzDecoder;
     pub use crate::gz::read::GzEncoder;
     pub use crate::gz::read::MultiGzDecoder;

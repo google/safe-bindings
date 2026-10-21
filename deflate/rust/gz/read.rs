@@ -28,6 +28,55 @@ fn read_to_end_impl<R: Read>(reader: &mut Option<R>, capacity_hint: usize) -> Re
     }
 }
 
+#[repr(C)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BoundedReadErrorCode {
+    InvalidArgument,
+    OutOfRange,
+}
+
+#[repr(C)]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct BoundedReadError {
+    pub message: VecU8,
+    pub code: BoundedReadErrorCode,
+}
+
+fn read_to_end_bounded_impl<R: Read>(
+    reader: &mut Option<R>,
+    capacity_hint: usize,
+    max_size: usize,
+) -> Result<VecU8, BoundedReadError> {
+    if let Some(reader) = reader {
+        let mut vec: Vec<u8> = Vec::with_capacity(capacity_hint.min(max_size));
+        let limit = (max_size as u64).saturating_add(1);
+        match reader.take(limit).read_to_end(&mut vec) {
+            Ok(_) => {
+                if vec.len() > max_size {
+                    Err(BoundedReadError {
+                        message: VecU8::from(format!(
+                            "Decompressed data exceeds maximum allowed size of {} bytes",
+                            max_size
+                        )),
+                        code: BoundedReadErrorCode::OutOfRange,
+                    })
+                } else {
+                    Ok(VecU8::from(vec))
+                }
+            }
+            Err(e) => Err(BoundedReadError {
+                message: VecU8::from(e.to_string()),
+                code: BoundedReadErrorCode::InvalidArgument,
+            }),
+        }
+    } else {
+        Err(BoundedReadError {
+            message: VecU8::from("No reader available"),
+            code: BoundedReadErrorCode::InvalidArgument,
+        })
+    }
+}
+
 /// Minimal gzip member: 10 byte header, 2 byte empty deflate block and 8 byte
 /// trailer.
 const MIN_GZIP_SIZE: usize = 20;
@@ -54,10 +103,7 @@ fn gzip_uncompressed_size_hint(buf: &[u8]) -> usize {
 }
 
 fn header_impl(header: Option<&GzHeader>) -> Option<GzHeader> {
-    match header {
-        Some(h) => Some(h.clone()),
-        None => None.into(),
-    }
+    header.cloned()
 }
 
 #[derive(Default)]
@@ -97,6 +143,13 @@ impl GzDecoder {
     pub fn read_to_end(&mut self) -> Result<VecU8, VecU8> {
         read_to_end_impl(&mut self.reader, self.size_hint)
     }
+
+    /// Reads the stream into a Result<VecU8, BoundedReadError>, failing with
+    /// `BoundedReadErrorCode::OutOfRange` if the decompressed output exceeds
+    /// `max_size` bytes.
+    pub fn read_to_end_bounded(&mut self, max_size: usize) -> Result<VecU8, BoundedReadError> {
+        read_to_end_bounded_impl(&mut self.reader, self.size_hint, max_size)
+    }
 }
 
 impl GzEncoder {
@@ -127,6 +180,13 @@ impl MultiGzDecoder {
     /// Reads the entire stream into a Result<VecU8, VecU8>.
     pub fn read_to_end(&mut self) -> Result<VecU8, VecU8> {
         read_to_end_impl(&mut self.reader, 0)
+    }
+
+    /// Reads the stream into a Result<VecU8, BoundedReadError>, failing with
+    /// `BoundedReadErrorCode::OutOfRange` if the decompressed output exceeds
+    /// `max_size` bytes.
+    pub fn read_to_end_bounded(&mut self, max_size: usize) -> Result<VecU8, BoundedReadError> {
+        read_to_end_bounded_impl(&mut self.reader, 0, max_size)
     }
 }
 

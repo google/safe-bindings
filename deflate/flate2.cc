@@ -1,5 +1,6 @@
 #include "flate2.h"
 
+#include <cstddef>
 #include <cstdint>
 #include <optional>
 #include <utility>
@@ -21,7 +22,7 @@ using ::security::crubit_helpers::StringViewFromVecU8;
 VecU8Wrapper::VecU8Wrapper(rust::vec_u8::VecU8 vec_u8)
     : vec_u8_(std::move(vec_u8)) {}
 
-absl::string_view VecU8Wrapper::as_string_view() const {
+absl::string_view VecU8Wrapper::as_string_view() const& {
   return StringViewFromVecU8(vec_u8_);
 }
 
@@ -98,6 +99,23 @@ absl::StatusOr<VecU8Wrapper> GzDecoderImpl<RustDecoder>::read_to_end() {
     //    - //third_party/rust/flate2/v1/src/gz/bufread.rs:304
     return absl::InvalidArgumentError(
         StringViewFromVecU8(std::move(result_vec_u8).err()));
+  }
+  return VecU8Wrapper(std::move(result_vec_u8).value());
+}
+
+template <typename RustDecoder>
+absl::StatusOr<VecU8Wrapper> GzDecoderImpl<RustDecoder>::read_to_end(
+    size_t max_size) {
+  rs_std::Result<rust::vec_u8::VecU8, rust::read::BoundedReadError>
+      result_vec_u8 = decoder_.read_to_end_bounded(max_size);
+  if (!result_vec_u8.has_value()) {
+    rust::read::BoundedReadError err = std::move(result_vec_u8).err();
+    absl::string_view msg = StringViewFromVecU8(err.message);
+    if (err.code.tag ==
+        rust::read::BoundedReadErrorCode::Tag::OutOfRange) {
+      return absl::OutOfRangeError(msg);
+    }
+    return absl::InvalidArgumentError(msg);
   }
   return VecU8Wrapper(std::move(result_vec_u8).value());
 }

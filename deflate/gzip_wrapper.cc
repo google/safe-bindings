@@ -1,5 +1,6 @@
 #include "gzip_wrapper.h"
 
+#include <cstddef>
 #include <cstdint>
 #include <utility>
 
@@ -64,6 +65,11 @@ absl::StatusOr<VecU8Wrapper> UncompressGzip(absl::string_view compressed) {
         StringViewFromVecU8(std::move(result).err()));
   }
   return VecU8Wrapper(std::move(result).value());
+}
+
+absl::StatusOr<VecU8Wrapper> UncompressGzip(absl::string_view compressed,
+                                            size_t max_size) {
+  return read::GzDecoder::create(compressed).read_to_end(max_size);
 }
 
 }  // namespace security::deflate
