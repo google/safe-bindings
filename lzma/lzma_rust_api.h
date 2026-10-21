@@ -380,10 +380,6 @@ lzma_ret lzma_raw_decoder(lzma_stream* strm, const lzma_filter* filters);
 // `LZMA_TELL_NO_CHECK`, and `LZMA_TELL_ANY_CHECK` flags. Other accepted flags
 // are selectively ignored.
 //
-// Note that when decoding legacy `.lzma` streams, this implementation accepts
-// non-standard dictionary sizes that standard liblzma rejects with
-// `LZMA_FORMAT_ERROR`.
-//
 // Returns `LZMA_OK` upon successful initialization, `LZMA_OPTIONS_ERROR`
 // if unsupported flags are provided, or `LZMA_PROG_ERROR` if state setup fails.
 // Unlike standard liblzma, `LZMA_MEM_ERROR` is never returned. Memory
