@@ -8,6 +8,7 @@ C++ wrappers (using Crubit) for Rust libraries.
 | Wrapper      | Wrapped crate                                     | Status   |
 | ------------ | ------------------------------------------------- | -------- |
 | deflate      | [flate2](https://crates.io/crates/flate2)         | Compiles |
+| elf          | [elf](https://crates.io/crates/elf)               | Compiles |
 | fft          | [ndrustfft](https://crates.io/crates/ndrustfft)   | Compiles |
 | kamadak_exif | [kamadak-exif](https://crates.io/crates/kamadak-exif) | Compiles      |
 | lzma         | [lzma-rust2](https://crates.io/crates/lzma-rust2) | Compiles |
