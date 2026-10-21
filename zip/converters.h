@@ -99,6 +99,10 @@ absl::StatusOr<RustVecU8Wrapper> FromRustResultVecU8(
     rs_std::Result<rust::VecU8, rust::ZipError> result_vec_u8);
 absl::Status FromRustResultUnit(
     rs_std::Result<rs_std::unit_t, rust::ZipError> result_unit);
+// Converts a byte count, as returned by the reads that write into a buffer the
+// caller owns rather than returning one.
+absl::StatusOr<uint64_t> FromRustResultU64(
+    rs_std::Result<uint64_t, rust::ZipError> result_u64);
 
 absl::StatusOr<rust::BufferedZipArchive> FromRustBufferedZipArchive(
     rs_std::Result<rust::BufferedZipArchive, rust::ZipError>

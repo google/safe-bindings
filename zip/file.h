@@ -12,6 +12,7 @@
 #include "crubit/rust.h"
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
+#include "absl/types/span.h"
 
 namespace security::zip {
 namespace internal {
@@ -291,6 +292,14 @@ class BufferedZipFile final {
   // unverified; always read until an empty result (or an error) before acting
   // on the data.
   absl::StatusOr<RustVecU8Wrapper> ReadBytes(size_t max_bytes);
+  // Reads into `buf` and returns how many bytes were written, which is less
+  // than `buf.size()` only at end of entry. See ZipFile::ReadInto() for the
+  // full contract.
+  absl::StatusOr<size_t> ReadInto(absl::Span<char> buf);
+  // Discards up to `max_bytes` and returns how many were discarded, which is
+  // less than `max_bytes` only at end of entry. See ZipFile::Skip() for the
+  // full contract.
+  absl::StatusOr<uint64_t> Skip(uint64_t max_bytes);
 
   // Decompresses at most `max_size` bytes from the entry, returning
   // `absl::StatusCode::kOutOfRange` if the decompressed size exceeds
@@ -407,6 +416,14 @@ class FsZipFile final {
   // unverified; always read until an empty result (or an error) before acting
   // on the data.
   absl::StatusOr<RustVecU8Wrapper> ReadBytes(size_t max_bytes);
+  // Reads into `buf` and returns how many bytes were written, which is less
+  // than `buf.size()` only at end of entry. See ZipFile::ReadInto() for the
+  // full contract.
+  absl::StatusOr<size_t> ReadInto(absl::Span<char> buf);
+  // Discards up to `max_bytes` and returns how many were discarded, which is
+  // less than `max_bytes` only at end of entry. See ZipFile::Skip() for the
+  // full contract.
+  absl::StatusOr<uint64_t> Skip(uint64_t max_bytes);
 
   // Decompresses at most `max_size` bytes from the entry, returning
   // `absl::StatusCode::kOutOfRange` if the decompressed size exceeds
@@ -539,6 +556,41 @@ class ZipFile final {
   // unverified; always read until an empty result (or an error) before acting
   // on the data.
   absl::StatusOr<RustVecU8Wrapper> ReadBytes(size_t max_bytes);
+  // Reads into `buf` (decompressing unless the entry was opened raw) and
+  // returns how many bytes were written, which is less than `buf.size()` only
+  // at end of entry. This is the full contract; BufferedZipFile::ReadInto()
+  // and FsZipFile::ReadInto() behave identically.
+  //
+  // Unlike ReadBytes(), nothing is allocated and the bytes are not copied
+  // again on the way out, so this is what a caller reading an entry of any
+  // size should use.
+  //
+  // zip-rs verifies the CRC only on the read that reaches the end of the
+  // entry, so reading exactly the uncompressed size never checks it; read
+  // until a short count (or 0) to have the entry validated. Entries opened raw
+  // (GetFileByIndexRaw) are never CRC-checked.
+  //
+  // Returns `absl::StatusCode::kInternal` on a moved-from entry or
+  // decompression/CRC errors, or propagates underlying I/O error codes. On
+  // error, the contents of `buf` and the position within the entry are
+  // unspecified.
+  absl::StatusOr<size_t> ReadInto(absl::Span<char> buf);
+  // Discards up to `max_bytes` and returns how many were discarded, which is
+  // less than `max_bytes` only at end of entry. This is the full contract;
+  // BufferedZipFile::Skip() and FsZipFile::Skip() behave identically.
+  //
+  // A zip entry is a forward-only stream, so this is how a caller seeks
+  // within one. Nothing is allocated, whatever the distance.
+  //
+  // As with ReadInto(), the CRC is checked only by the read or skip that
+  // reaches the end of the entry, so skipping exactly the uncompressed size
+  // never checks it, and entries opened raw (GetFileByIndexRaw) are never
+  // CRC-checked.
+  //
+  // Returns `absl::StatusCode::kInternal` on a moved-from entry or
+  // decompression/CRC errors, or propagates underlying I/O error codes. On
+  // error, the position within the entry is unspecified.
+  absl::StatusOr<uint64_t> Skip(uint64_t max_bytes);
 
   // Decompresses at most `max_size` bytes from the entry, returning
   // `absl::StatusCode::kOutOfRange` if the decompressed size exceeds
