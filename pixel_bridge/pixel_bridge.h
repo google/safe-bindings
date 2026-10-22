@@ -45,6 +45,7 @@ enum class Format {
   kTiff,
   kBmp,
   kIco,
+  kJxl,
 };
 
 // An enumeration over chroma subsampling types.

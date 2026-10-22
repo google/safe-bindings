@@ -46,6 +46,9 @@ rust::reader::Format ToRustFormat(Format format) {
     case Format::kIco:
       result.tag = rust::reader::Format::Tag::Ico;
       break;
+    case Format::kJxl:
+      result.tag = rust::reader::Format::Tag::Jxl;
+      break;
   }
   return result;
 }
@@ -66,6 +69,8 @@ Format FromRustFormat(rust::reader::Format format) {
       return Format::kBmp;
     case rust::reader::Format::Tag::Ico:
       return Format::kIco;
+    case rust::reader::Format::Tag::Jxl:
+      return Format::kJxl;
   }
 }
 
@@ -117,6 +122,8 @@ std::string FormatToString(Format format) {
       return "bmp";
     case Format::kIco:
       return "ico";
+    case Format::kJxl:
+      return "jxl";
   }
 }
 
