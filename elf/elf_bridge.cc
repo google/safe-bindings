@@ -479,12 +479,12 @@ SectionHeaderTableWithStrings::SectionHeaderTableWithStrings(
       string_table_(MapOption<StringTable>(table_with_strings.string_table)) {}
 
 const std::optional<SectionHeaderTable>&
-SectionHeaderTableWithStrings::GetSectionHeaderTable() const {
+SectionHeaderTableWithStrings::GetSectionHeaderTable() const& {
   return section_header_table_;
 }
 
 const std::optional<StringTable>&
-SectionHeaderTableWithStrings::GetStringTable() const {
+SectionHeaderTableWithStrings::GetStringTable() const& {
   return string_table_;
 }
 
@@ -494,8 +494,8 @@ SectionData::SectionData(std::string data,
                          std::optional<CompressionHeader> compression)
     : data_(std::move(data)), compression_(std::move(compression)) {}
 
-absl::string_view SectionData::GetData() const { return data_; }
-const std::optional<CompressionHeader>& SectionData::GetCompression() const {
+absl::string_view SectionData::GetData() const& { return data_; }
+const std::optional<CompressionHeader>& SectionData::GetCompression() const& {
   return compression_;
 }
 
@@ -612,11 +612,11 @@ SymbolTableWithStrings::SymbolTableWithStrings(
     : symbol_table_(SymbolTable(table_with_strings.symbol_table)),
       string_table_(StringTable(table_with_strings.string_table)) {}
 
-const SymbolTable& SymbolTableWithStrings::GetSymbolTable() const {
+const SymbolTable& SymbolTableWithStrings::GetSymbolTable() const& {
   return symbol_table_;
 }
 
-const StringTable& SymbolTableWithStrings::GetStringTable() const {
+const StringTable& SymbolTableWithStrings::GetStringTable() const& {
   return string_table_;
 }
 
@@ -671,11 +671,11 @@ SymbolRequirement::SymbolRequirement(
     elf_cpp_bindings::gnu_symver::SymbolRequirement&& req)
     : req_(std::move(req)) {}
 
-std::string_view SymbolRequirement::GetFile() const {
+std::string_view SymbolRequirement::GetFile() const& {
   return security::crubit_helpers::StringViewFromVecU8(req_.file);
 }
 
-std::string_view SymbolRequirement::GetName() const {
+std::string_view SymbolRequirement::GetName() const& {
   return security::crubit_helpers::StringViewFromVecU8(req_.name);
 }
 
@@ -693,7 +693,7 @@ SymbolFindResult::SymbolFindResult(
 
 size_t SymbolFindResult::GetIndex() const { return index_; }
 
-const Symbol& SymbolFindResult::GetSymbol() const { return symbol_; }
+const Symbol& SymbolFindResult::GetSymbol() const& { return symbol_; }
 
 // SysVHashTable
 
@@ -813,11 +813,11 @@ NoteAny::NoteAny(const elf_cpp_bindings::note::NoteAny& any) : any_(any) {}
 
 Elf_Xword NoteAny::GetType() const { return any_.n_type; }
 
-std::string_view NoteAny::GetName() const {
+std::string_view NoteAny::GetName() const& {
   return security::crubit_helpers::StringViewFromVecU8(any_.name);
 }
 
-std::string_view NoteAny::GetDesc() const {
+std::string_view NoteAny::GetDesc() const& {
   return security::crubit_helpers::StringViewFromVecU8(any_.desc);
 }
 
@@ -854,7 +854,7 @@ NoteGnuBuildId::NoteGnuBuildId(
     const elf_cpp_bindings::note::NoteGnuBuildId& build_id)
     : build_id_(build_id) {}
 
-std::string_view NoteGnuBuildId::GetBuildId() const {
+std::string_view NoteGnuBuildId::GetBuildId() const& {
   return security::crubit_helpers::StringViewFromVecU8(build_id_.build_id);
 }
 
@@ -892,32 +892,34 @@ CommonElfData::CommonElfData(std::optional<SymbolTable> symtab,
       sysv_hash_(std::move(sysv_hash)),
       gnu_hash_(std::move(gnu_hash)) {}
 
-const std::optional<SymbolTable>& CommonElfData::GetSymbolTable() const {
+const std::optional<SymbolTable>& CommonElfData::GetSymbolTable() const& {
   return symtab_;
 }
 
-const std::optional<StringTable>& CommonElfData::GetSymbolTableStrings() const {
+const std::optional<StringTable>& CommonElfData::GetSymbolTableStrings()
+    const& {
   return symtab_strs_;
 }
 
-const std::optional<SymbolTable>& CommonElfData::GetDynamicSymbolTable() const {
+const std::optional<SymbolTable>& CommonElfData::GetDynamicSymbolTable()
+    const& {
   return dynsyms_;
 }
 
 const std::optional<StringTable>& CommonElfData::GetDynamicSymbolTableStrings()
-    const {
+    const& {
   return dynsyms_strs_;
 }
 
-const std::optional<DynTable>& CommonElfData::GetDynamicTable() const {
+const std::optional<DynTable>& CommonElfData::GetDynamicTable() const& {
   return dynamic_;
 }
 
-const std::optional<SysVHashTable>& CommonElfData::GetSysVHashTable() const {
+const std::optional<SysVHashTable>& CommonElfData::GetSysVHashTable() const& {
   return sysv_hash_;
 }
 
-const std::optional<GnuHashTable>& CommonElfData::GetGnuHashTable() const {
+const std::optional<GnuHashTable>& CommonElfData::GetGnuHashTable() const& {
   return gnu_hash_;
 }
 
