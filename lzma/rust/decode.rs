@@ -45,7 +45,12 @@ pub unsafe extern "C" fn lzma_stream_decoder(
         (memlimit / 1024).clamp(0, u32::MAX as u64) as u32
     };
 
-    let decoder = XzStream::new_mem_limit(allow_multiple, memlimit_kb);
+    let mut decoder = XzStream::new_mem_limit(allow_multiple, memlimit_kb);
+    if flags & (LZMA_TELL_NO_CHECK | LZMA_TELL_ANY_CHECK) != 0
+        && decoder.set_stop_after_stream_header(true).is_err()
+    {
+        return LZMA_PROG_ERROR;
+    }
     let mut state = InternalState::new(CoderInner::XzDecoder(Box::new(decoder)));
     state.tell_flags = flags & (LZMA_TELL_NO_CHECK | LZMA_TELL_ANY_CHECK);
 

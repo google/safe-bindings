@@ -4,7 +4,7 @@ use std::sync::{Arc, Mutex};
 use crate::helpers::{self, FfiAction};
 use crate::types::{
     self, lzma_filter, lzma_options_lzma, lzma_ret, LZMA_CONCATENATED, LZMA_OPTIONS_ERROR,
-    LZMA_PROG_ERROR,
+    LZMA_PROG_ERROR, LZMA_TELL_ANY_CHECK, LZMA_TELL_NO_CHECK,
 };
 use lzma_rust2::{
     CheckType, LzipStream, LzipWriter, Lzma2Stream, Lzma2Writer, LzmaOptions, LzmaStream,
@@ -34,15 +34,38 @@ pub(crate) struct CoderResult {
     pub result: io::Result<Status>,
 }
 
-impl From<io::Result<StreamResult>> for CoderResult {
-    fn from(res: io::Result<StreamResult>) -> Self {
-        match res {
-            Ok(r) => CoderResult {
-                bytes_consumed: r.bytes_consumed,
-                bytes_produced: r.bytes_produced,
-                result: Ok(r.status),
-            },
-            Err(e) => CoderResult { bytes_consumed: 0, bytes_produced: 0, result: Err(e) },
+/// Builds a [`CoderResult`] from a sans-I/O decoder's `process()` result.
+///
+/// liblzma advances `next_in`/`next_out` before it looks at the return code, so running out of
+/// input never hides progress. lzma-rust2 drops the counts on `Err`, but its `total_in()` /
+/// `total_out()` counters (`before`/`after`) still record them. Only `UnexpectedEof` is
+/// recovered this way: on data errors the crate reads a whole field before validating it, so its
+/// count is not liblzma's.
+fn decoder_result(
+    res: io::Result<StreamResult>,
+    before: (u64, u64),
+    after: (u64, u64),
+    input_len: usize,
+    output_len: usize,
+) -> CoderResult {
+    match res {
+        Ok(r) => CoderResult {
+            bytes_consumed: r.bytes_consumed,
+            bytes_produced: r.bytes_produced,
+            result: Ok(r.status),
+        },
+        Err(e) if e.kind() != io::ErrorKind::UnexpectedEof => {
+            CoderResult { bytes_consumed: 0, bytes_produced: 0, result: Err(e) }
+        }
+        Err(e) => {
+            let delta = |b: u64, a: u64, cap: usize| {
+                usize::try_from(a.saturating_sub(b)).unwrap_or(usize::MAX).min(cap)
+            };
+            CoderResult {
+                bytes_consumed: delta(before.0, after.0, input_len),
+                bytes_produced: delta(before.1, after.1, output_len),
+                result: Err(e),
+            }
         }
     }
 }
@@ -106,15 +129,24 @@ impl CoderInner {
         match self {
             CoderInner::AutoDecoder(auto) => auto.process(input, output, action),
             CoderInner::XzDecoder(xz) => {
-                xz.process(input, output, action.as_lzma_rust2_decoder_action()).into()
+                let before = (xz.total_in(), xz.total_out());
+                let res = xz.process(input, output, action.as_lzma_rust2_decoder_action());
+                let after = (xz.total_in(), xz.total_out());
+                decoder_result(res, before, after, input.len(), output.len())
             }
             CoderInner::XzEncoder(xz) => xz.process(input, output, action),
             CoderInner::XzEncoderMt(xz_mt) => xz_mt.process(input, output, action),
             CoderInner::LzmaDecoder(lzma) => {
-                lzma.process(input, output, action.as_lzma_rust2_decoder_action()).into()
+                let before = (lzma.total_in(), lzma.total_out());
+                let res = lzma.process(input, output, action.as_lzma_rust2_decoder_action());
+                let after = (lzma.total_in(), lzma.total_out());
+                decoder_result(res, before, after, input.len(), output.len())
             }
             CoderInner::RawLzma2Decoder(lzma2) => {
-                lzma2.process(input, output, action.as_lzma_rust2_decoder_action()).into()
+                let before = (lzma2.total_in(), lzma2.total_out());
+                let res = lzma2.process(input, output, action.as_lzma_rust2_decoder_action());
+                let after = (lzma2.total_in(), lzma2.total_out());
+                decoder_result(res, before, after, input.len(), output.len())
             }
             CoderInner::RawLzma2Encoder(lzma2) => lzma2.process(input, output, action),
             // Reject flush() for LZMA1 here, as the underlying crate only exposes a no-op.
@@ -132,8 +164,10 @@ impl CoderInner {
                 lzma.process(input, output, action)
             }
             CoderInner::LzipDecoder(lzip) => {
-                let mut result: CoderResult =
-                    lzip.process(input, output, action.as_lzma_rust2_decoder_action()).into();
+                let before = (lzip.total_in(), lzip.total_out());
+                let res = lzip.process(input, output, action.as_lzma_rust2_decoder_action());
+                let after = (lzip.total_in(), lzip.total_out());
+                let mut result = decoder_result(res, before, after, input.len(), output.len());
                 // `LzipStream` absorbs the bytes trailing the last member; liblzma leaves them
                 // in the input buffer for the caller.
                 if matches!(result.result, Ok(Status::StreamEnd)) {
@@ -632,10 +666,64 @@ impl WriterAdapterOwned {
     }
 }
 
+const LZMA_HEADER_SIZE: usize = 13;
+const LZMA_PROPS_MAX: u8 = (4 * 5 + 4) * 9 + 8;
+const LZMA_LCLP_MAX: u8 = 4;
+const PICKY_UNCOMP_SIZE_LIMIT: u64 = 1u64 << 38;
+
+/// Applies the "picky" `.lzma` header checks of liblzma's `alone_decoder.c` to the complete
+/// fields of a possibly partial 13-byte header. Since `.lzma` has no magic bytes, this is how
+/// the auto decoder rejects a stream that merely lacks the `.xz` magic (e.g. a `.xz` stream with
+/// a corrupted first byte) before allocating the dictionary its "header" claims.
+fn validate_picky_lzma_header(header: &[u8]) -> io::Result<()> {
+    let Some(&props) = header.first() else {
+        return Ok(());
+    };
+    if props > LZMA_PROPS_MAX {
+        return Err(helpers::format_error("invalid LZMA properties byte"));
+    }
+    let rem = props % (9 * 5);
+    let lp = rem / 9;
+    let lc = rem - lp * 9;
+    if lc + lp > LZMA_LCLP_MAX {
+        return Err(helpers::format_error("invalid LZMA lc + lp"));
+    }
+
+    let Some(&dict_bytes) = header.get(1..5).and_then(|b| b.first_chunk::<4>()) else {
+        return Ok(());
+    };
+    let dict_size = u32::from_le_bytes(dict_bytes);
+    if dict_size != u32::MAX && dict_size != 0 {
+        // Only 2^n and 2^n + 2^(n - 1) are allowed.
+        let mut d = dict_size - 1;
+        d |= d >> 2;
+        d |= d >> 3;
+        d |= d >> 4;
+        d |= d >> 8;
+        d |= d >> 16;
+        if d.checked_add(1) != Some(dict_size) {
+            return Err(helpers::format_error("non-standard LZMA dictionary size"));
+        }
+    }
+
+    let Some(&uncomp_bytes) = header.get(5..13).and_then(|b| b.first_chunk::<8>()) else {
+        return Ok(());
+    };
+    let uncomp_size = u64::from_le_bytes(uncomp_bytes);
+    if uncomp_size != u64::MAX && uncomp_size >= PICKY_UNCOMP_SIZE_LIMIT {
+        return Err(helpers::format_error("LZMA uncompressed size too large"));
+    }
+
+    Ok(())
+}
+
 pub struct AutoDecoder {
     memlimit: u64,
     flags: u32,
     coder: Option<Box<CoderInner>>,
+    /// The `.lzma` header bytes consumed so far, for `validate_picky_lzma_header`.
+    lzma_header: [u8; LZMA_HEADER_SIZE],
+    lzma_header_len: u8,
     /// Set once the detected coder finished its stream while `LZMA_CONCATENATED` was
     /// requested. Mirrors `SEQ_FINISH` of liblzma's auto decoder (`auto_decoder.c`).
     seq_finish: bool,
@@ -643,7 +731,14 @@ pub struct AutoDecoder {
 
 impl AutoDecoder {
     pub fn new(memlimit: u64, flags: u32) -> Self {
-        Self { memlimit, flags, coder: None, seq_finish: false }
+        Self {
+            memlimit,
+            flags,
+            coder: None,
+            lzma_header: [0; LZMA_HEADER_SIZE],
+            lzma_header_len: 0,
+            seq_finish: false,
+        }
     }
 
     /// The coder picked for the detected format, or `None` before detection.
@@ -652,9 +747,16 @@ impl AutoDecoder {
     }
 
     #[inline(never)]
-    fn new_xz_coder(allow_multiple: bool, memlimit_kb: u32) -> Box<CoderInner> {
-        let decoder = XzStream::new_mem_limit(allow_multiple, memlimit_kb);
-        Box::new(CoderInner::XzDecoder(Box::new(decoder)))
+    fn new_xz_coder(
+        allow_multiple: bool,
+        memlimit_kb: u32,
+        stop_after_header: bool,
+    ) -> io::Result<Box<CoderInner>> {
+        let mut decoder = XzStream::new_mem_limit(allow_multiple, memlimit_kb);
+        if stop_after_header {
+            decoder.set_stop_after_stream_header(true)?;
+        }
+        Ok(Box::new(CoderInner::XzDecoder(Box::new(decoder))))
     }
 
     #[inline(never)]
@@ -671,7 +773,7 @@ impl AutoDecoder {
     }
 
     #[inline(never)]
-    fn init_coder(&mut self, first_byte: u8) {
+    fn init_coder(&mut self, first_byte: u8) -> io::Result<()> {
         let memlimit_kb = if self.memlimit == u64::MAX {
             u32::MAX
         } else {
@@ -692,13 +794,15 @@ impl AutoDecoder {
         // lzip feature, but keep it disabled by default.
         let allow_multiple = (self.flags & LZMA_CONCATENATED) != 0;
         let coder = if first_byte == 0xFD {
-            Self::new_xz_coder(allow_multiple, memlimit_kb)
+            let stop_after_header = self.flags & (LZMA_TELL_NO_CHECK | LZMA_TELL_ANY_CHECK) != 0;
+            Self::new_xz_coder(allow_multiple, memlimit_kb, stop_after_header)?
         } else if cfg!(feature = "lzip") && first_byte == 0x4C {
             Self::new_lzip_coder(allow_multiple, memlimit_kb)
         } else {
             Self::new_lzma_coder(memlimit_kb)
         };
         self.coder = Some(coder);
+        Ok(())
     }
 
     pub fn process(&mut self, input: &[u8], output: &mut [u8], action: FfiAction) -> CoderResult {
@@ -715,10 +819,32 @@ impl AutoDecoder {
                     result: Ok(Status::Ok),
                 };
             };
-            self.init_coder(first_byte);
+            if let Err(e) = self.init_coder(first_byte) {
+                return CoderResult { bytes_consumed: 0, bytes_produced: 0, result: Err(e) };
+            }
         }
 
         let coder = self.coder.as_mut().unwrap();
+        let header_len = self.lzma_header_len as usize;
+        if header_len < LZMA_HEADER_SIZE && matches!(coder.as_ref(), CoderInner::LzmaDecoder(_)) {
+            // Check the header before `LzmaStream` parses it and allocates the dictionary.
+            let take = input.len().min(LZMA_HEADER_SIZE - header_len);
+            let mut header = self.lzma_header;
+            header[header_len..header_len + take].copy_from_slice(&input[..take]);
+            if let Err(e) = validate_picky_lzma_header(&header[..header_len + take]) {
+                return CoderResult { bytes_consumed: 0, bytes_produced: 0, result: Err(e) };
+            }
+            if header_len + take < LZMA_HEADER_SIZE {
+                // The header is still incomplete, so `take == input.len()`.
+                let result = coder.process(input, output, action);
+                let consumed = result.bytes_consumed.min(take);
+                self.lzma_header[header_len..header_len + consumed]
+                    .copy_from_slice(&input[..consumed]);
+                self.lzma_header_len += consumed as u8;
+                return result;
+            }
+            self.lzma_header_len = LZMA_HEADER_SIZE as u8;
+        }
         let result = coder.process(input, output, action);
 
         if self.flags & LZMA_CONCATENATED == 0 || !matches!(result.result, Ok(Status::StreamEnd)) {

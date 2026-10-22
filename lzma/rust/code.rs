@@ -6,7 +6,7 @@ use std::slice;
 use lzma_rust2::Status;
 
 use crate::helpers::{self, FfiAction};
-use crate::state::{ActionState, CoderInner, InternalState};
+use crate::state::{ActionState, CoderInner, CoderResult, InternalState};
 use crate::types::{
     lzma_ret, lzma_stream, LZMA_BUF_ERROR, LZMA_CHECK_NONE, LZMA_GET_CHECK, LZMA_NO_CHECK, LZMA_OK,
     LZMA_OPTIONS_ERROR, LZMA_PROG_ERROR, LZMA_STREAM_END, LZMA_TELL_ANY_CHECK, LZMA_TELL_NO_CHECK,
@@ -111,7 +111,33 @@ impl<'a> StreamView<'a> {
     }
 }
 
-const LZMA_STREAM_HEADER_SIZE: usize = 12;
+/// Number of stream headers parsed so far by the `.xz` decoder behind `state`; 0 for any other
+/// decoder.
+fn xz_streams_started(state: &InternalState) -> usize {
+    let coder = match &state.coder {
+        CoderInner::AutoDecoder(auto) => match auto.inner() {
+            Some(coder) => coder,
+            None => return 0,
+        },
+        coder => coder,
+    };
+    match coder {
+        CoderInner::XzDecoder(xz) => xz.streams_started(),
+        _ => 0,
+    }
+}
+
+fn check_report(state: &InternalState) -> Option<lzma_ret> {
+    if state.tell_flags & LZMA_TELL_NO_CHECK != 0
+        && crate::check::check_of(state) == LZMA_CHECK_NONE
+    {
+        Some(LZMA_NO_CHECK)
+    } else if state.tell_flags & LZMA_TELL_ANY_CHECK != 0 {
+        Some(LZMA_GET_CHECK)
+    } else {
+        None
+    }
+}
 
 /// Inner logic for `lzma_code`.
 ///
@@ -167,7 +193,6 @@ unsafe fn lzma_code_inner(
         return LZMA_PROG_ERROR;
     }
 
-    // NOTE(b/563249255): Report the check type once per concatenated stream.
     if state.tell_flags != 0 && strm_ref.avail_in > 0 {
         let detection_pending = match &state.coder {
             CoderInner::AutoDecoder(auto) => auto.inner().is_none(),
@@ -192,107 +217,88 @@ unsafe fn lzma_code_inner(
             }
             return ret;
         }
+    }
 
-        if (strm_ref.total_in as usize) < LZMA_STREAM_HEADER_SIZE {
-            let need = LZMA_STREAM_HEADER_SIZE - (strm_ref.total_in as usize);
-            let header_res = {
-                // SAFETY: The caller guarantees `strm_ref` contains valid, non-overlapping
-                // buffer pointers for their stated lengths.
-                let buffers = match unsafe { StreamView::try_from_c(&mut *strm_ref) } {
-                    Ok(buf) => buf,
-                    Err(e) => return e,
-                };
-                let to_feed = buffers.input.len().min(need);
-                state.coder.process(&buffers.input[..to_feed], buffers.output, FfiAction::Run)
+    // With a check report requested, the `.xz` decoder returns at every stream header, but
+    // liblzma only returns to the caller when it needs to report something.
+    // To match liblzma, we keep calling `process()` in a loop if lzma_rust2 stops at a stream
+    // header and there is no need to report the check type.
+
+    let mut total_consumed = 0;
+    let mut total_produced = 0;
+    let coder_result = loop {
+        let streams_started = xz_streams_started(state);
+        // The crate reports running out of input under `Finish` as a permanent `UnexpectedEof`;
+        // liblzma just reports no progress and lets the BUF_ERROR two-strike logic complain.
+        // Mirror that by never calling the crate again and returning zero progress.
+        let mut coder_result = if state.swallowed_unexpected_eof {
+            CoderResult { bytes_consumed: 0, bytes_produced: 0, result: Ok(Status::Ok) }
+        } else {
+            // SAFETY: On the first iteration, `strm_ref` contains valid, non-overlapping buffer
+            // pointers for their stated lengths by the caller's contract and checks at function
+            // entry. On subsequent loop iterations, `StreamView::advance` in the
+            // previous iteration advanced `next_in` and `next_out` within their
+            // original allocations by at most `avail_in` and `avail_out`, leaving the
+            // remaining slices contiguous, valid, and non-overlapping.
+
+            let buffers = match unsafe { StreamView::try_from_c(&mut *strm_ref) } {
+                Ok(buf) => buf,
+                Err(e) => return e,
             };
-            if let Err(e) = header_res.result {
-                state.allow_buf_error = false;
-                state.action_state = ActionState::Error;
-                return helpers::map_rust_error(e);
+            state.coder.process(buffers.input, buffers.output, action)
+        };
+
+        if let Err(ref e) = coder_result.result {
+            if e.kind() == ErrorKind::UnexpectedEof {
+                state.swallowed_unexpected_eof = true;
+                coder_result.result = Ok(Status::Ok);
             }
+        }
 
-            // SAFETY: The caller guarantees `next_in` and `next_out` point to valid, continuous
-            // buffers of at least `avail_in` and `avail_out` bytes respectively.
-            unsafe {
-                StreamView::advance(strm_ref, header_res.bytes_consumed, header_res.bytes_produced)
-            };
+        let bytes_consumed = coder_result.bytes_consumed;
+        let bytes_produced = coder_result.bytes_produced;
+
+        debug_assert!(
+            bytes_consumed <= strm_ref.avail_in,
+            "process() returned bytes_consumed ({}) > avail_in ({})",
+            bytes_consumed,
+            strm_ref.avail_in
+        );
+        debug_assert!(
+            bytes_produced <= strm_ref.avail_out,
+            "process() returned bytes_produced ({}) > avail_out ({})",
+            bytes_produced,
+            strm_ref.avail_out
+        );
+
+        // SAFETY: By the caller's contract and the loop invariant, `next_in` and `next_out`
+        // point to valid, continuous buffers of at least `avail_in` and `avail_out` bytes
+        // respectively. `advance` internally clamps `bytes_consumed` to `avail_in` and
+        // `bytes_produced` to `avail_out`, ensuring that pointer arithmetic remains in bounds
+        // of the original allocation.
+
+        unsafe { StreamView::advance(strm_ref, bytes_consumed, bytes_produced) };
+        total_consumed += bytes_consumed;
+        total_produced += bytes_produced;
+
+        let stopped_at_header = state.tell_flags != 0
+            && matches!(coder_result.result, Ok(Status::Ok))
+            && xz_streams_started(state) != streams_started;
+        if !stopped_at_header {
+            break coder_result;
+        }
+        if let Some(ret) = check_report(state) {
+            state.allow_buf_error = false;
             if let ActionState::Finish { .. } = state.action_state {
                 state.action_state = ActionState::Finish { saved_avail_in: strm_ref.avail_in };
             }
-
-            if strm_ref.total_in == LZMA_STREAM_HEADER_SIZE as u64 {
-                let check = crate::check::check_of(state);
-                if check == LZMA_CHECK_NONE && (state.tell_flags & LZMA_TELL_NO_CHECK != 0) {
-                    state.tell_flags = 0;
-                    state.allow_buf_error = false;
-                    return LZMA_NO_CHECK;
-                } else if state.tell_flags & LZMA_TELL_ANY_CHECK != 0 {
-                    state.tell_flags = 0;
-                    state.allow_buf_error = false;
-                    return LZMA_GET_CHECK;
-                }
-
-                state.tell_flags = 0;
-                state.allow_buf_error = false;
-                if strm_ref.avail_in == 0 {
-                    return LZMA_OK;
-                }
-            } else {
-                state.allow_buf_error = false;
-                return LZMA_OK;
-            }
+            return ret;
         }
-    }
-
-    // liblzma never returns an error when no progress was made — it
-    // returns Ok with zero progress and lets the BUF_ERROR two-strike
-    // logic surface the problem. lzma-rust2 proactively errors on e.g.
-    // Finish with insufficient data, so we convert zero-progress errors
-    // into zero-progress Ok to match liblzma's behavior.
-    let previous_swallowed_unexpected_eof = state.swallowed_unexpected_eof;
-    state.swallowed_unexpected_eof = false;
-
-    let mut coder_result = {
-        // SAFETY: The caller guarantees `strm_ref` contains valid, non-overlapping
-        // buffer pointers for their stated lengths.
-        let buffers = match unsafe { StreamView::try_from_c(&mut *strm_ref) } {
-            Ok(buf) => buf,
-            Err(e) => return e,
-        };
-        state.coder.process(buffers.input, buffers.output, action)
+        // Nothing to report and no input left: liblzma returns LZMA_OK here.
+        if strm_ref.avail_in == 0 {
+            break coder_result;
+        }
     };
-
-    if let Err(ref e) = coder_result.result {
-        // lzma-rust2 returns UnexpectedEof only once for each decoder.
-        // Subsequent calls would return InvalidData.
-        // We're sure to only jump into this branch once in normal execution.
-        if e.kind() == ErrorKind::UnexpectedEof && !previous_swallowed_unexpected_eof {
-            state.swallowed_unexpected_eof = true;
-            coder_result.result = Ok(Status::Ok);
-        } else if e.kind() == ErrorKind::InvalidData && previous_swallowed_unexpected_eof {
-            coder_result.result = Ok(Status::Ok);
-        }
-    }
-
-    let bytes_consumed = coder_result.bytes_consumed;
-    let bytes_produced = coder_result.bytes_produced;
-
-    debug_assert!(
-        bytes_consumed <= strm_ref.avail_in,
-        "process() returned bytes_consumed ({}) > avail_in ({})",
-        bytes_consumed,
-        strm_ref.avail_in
-    );
-    debug_assert!(
-        bytes_produced <= strm_ref.avail_out,
-        "process() returned bytes_produced ({}) > avail_out ({})",
-        bytes_produced,
-        strm_ref.avail_out
-    );
-
-    // SAFETY: The caller guarantees `next_in` and `next_out` point to valid, continuous
-    // buffers of at least `avail_in` and `avail_out` bytes respectively.
-    unsafe { StreamView::advance(strm_ref, bytes_consumed, bytes_produced) };
 
     match coder_result.result {
         Ok(status) => {
@@ -313,7 +319,7 @@ unsafe fn lzma_code_inner(
                         return LZMA_STREAM_END;
                     }
 
-                    if bytes_consumed == 0 && bytes_produced == 0 {
+                    if total_consumed == 0 && total_produced == 0 {
                         if state.allow_buf_error {
                             return LZMA_BUF_ERROR;
                         } else {
