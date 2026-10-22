@@ -1,6 +1,7 @@
 #include "quick_reader.h"
 
 #include <cstdint>
+#include <memory>
 #include <optional>
 #include <string>
 #include <utility>
@@ -133,29 +134,30 @@ rust::ReaderConfig ToRustConfig(const QuickReader::Config& config) {
 
 }  // namespace
 
-absl::string_view QuickReader::Data::Content() ABSL_ATTRIBUTE_LIFETIME_BOUND {
+absl::string_view QuickReader::Data::Content() & ABSL_ATTRIBUTE_LIFETIME_BOUND {
   return StringViewFromVecU8(
       ReturnCached(content_, [this]() { return event_.content(); }));
 }
 
-absl::string_view QuickReader::Name::QualifiedName()
+absl::string_view QuickReader::Name::QualifiedName() &
     ABSL_ATTRIBUTE_LIFETIME_BOUND {
   return StringViewFromVecU8(
       ReturnCached(qualified_name_, [this]() { return event_.qname(); }));
 }
 
-absl::string_view QuickReader::Name::LocalName() ABSL_ATTRIBUTE_LIFETIME_BOUND {
+absl::string_view QuickReader::Name::LocalName() &
+    ABSL_ATTRIBUTE_LIFETIME_BOUND {
   return StringViewFromVecU8(
       ReturnCached(local_name_, [this]() { return event_.local_name(); }));
 }
 
-std::optional<absl::string_view> QuickReader::Name::NamespacePrefix()
+std::optional<absl::string_view> QuickReader::Name::NamespacePrefix() &
     ABSL_ATTRIBUTE_LIFETIME_BOUND {
   return ReturnCachedOptional(namespace_prefix_,
                               [this]() { return event_.namespace_prefix(); });
 }
 
-absl::StatusOr<absl::string_view> QuickReader::Name::ResolvedNamespace()
+absl::StatusOr<absl::string_view> QuickReader::Name::ResolvedNamespace() &
     ABSL_ATTRIBUTE_LIFETIME_BOUND {
   return ResolveNamespace(
       ReturnCached(qualified_name_, [this]() { return event_.qname(); }),
@@ -173,21 +175,23 @@ bool QuickReader::Name::PrefixValid() const { return event_.prefix_valid; }
 absl::StatusOr<QuickReader> QuickReader::Create(
     absl::string_view xml ABSL_ATTRIBUTE_LIFETIME_BOUND) {
   ASSIGN_OR_RETURN(rs_std::StrRef str_ref, ToStrRef(xml));
-  return QuickReader(xml,
-                     rust::QuickReader::create(std::move(str_ref)));
+  return QuickReader(
+      xml, std::make_unique<rust::QuickReader>(
+               rust::QuickReader::create(std::move(str_ref))));
 }
 
 absl::StatusOr<QuickReader> QuickReader::CreateWithConfig(
     absl::string_view xml ABSL_ATTRIBUTE_LIFETIME_BOUND, Config config) {
   ASSIGN_OR_RETURN(rs_std::StrRef str_ref, ToStrRef(xml));
-  return QuickReader(xml, rust::QuickReader::create_with_config(
-                              std::move(str_ref), ToRustConfig(config)));
+  return QuickReader(xml, std::make_unique<rust::QuickReader>(
+                              rust::QuickReader::create_with_config(
+                                  std::move(str_ref), ToRustConfig(config))));
 }
 
 absl::StatusOr<QuickReader::Event> QuickReader::NextEvent()
     ABSL_ATTRIBUTE_LIFETIME_BOUND {
   rs_std::Result<rust::XmlEvent, rust::XmlError> result =
-      reader_.next_event();
+      reader_->next_event();
   if (!result.has_value()) {
     return XmlErrorToStatus(std::move(result).err());
   }
@@ -197,7 +201,7 @@ absl::StatusOr<QuickReader::Event> QuickReader::NextEvent()
     case rust::EventType::Tag::Start: {
       rs_std::Result<rs_std::Option<rust::Range>,
                      rust::XmlError>
-          range_result = reader_.subtree_range();
+          range_result = reader_->subtree_range();
       if (!range_result.has_value()) {
         absl::Status status = XmlErrorToStatus(std::move(range_result).err());
         return absl::Status(
@@ -216,15 +220,16 @@ absl::StatusOr<QuickReader::Event> QuickReader::NextEvent()
       rust::Attributes attrs = event.attrs();
       bool self_closing =
           event.event_type().tag == rust::EventType::Tag::Empty;
-      auto result = Start{.name = Name(std::move(event), &reader_),
-                          .attributes = Attributes(std::move(attrs), &reader_),
-                          .inner_xml = inner_xml,
-                          .outer_xml = outer_xml,
-                          .self_closing = self_closing};
+      auto result =
+          Start{.name = Name(std::move(event), reader_.get()),
+                .attributes = Attributes(std::move(attrs), reader_.get()),
+                .inner_xml = inner_xml,
+                .outer_xml = outer_xml,
+                .self_closing = self_closing};
       return result;
     }
     case rust::EventType::Tag::End:
-      return End{.name = Name(std::move(event), &reader_)};
+      return End{.name = Name(std::move(event), reader_.get())};
     case rust::EventType::Tag::Text:
       return Text{.data = Data(std::move(event))};
     case rust::EventType::Tag::CData:
@@ -253,25 +258,25 @@ absl::StatusOr<QuickReader::Event> QuickReader::NextEvent()
              << static_cast<int>(event.event_type().tag);
 }
 
-absl::string_view QuickReader::Attribute::QualifiedName()
+absl::string_view QuickReader::Attribute::QualifiedName() &
     ABSL_ATTRIBUTE_LIFETIME_BOUND {
   return StringViewFromVecU8(
       ReturnCached(qualified_key_, [this]() { return attribute_.key; }));
 }
 
-absl::string_view QuickReader::Attribute::LocalName()
+absl::string_view QuickReader::Attribute::LocalName() &
     ABSL_ATTRIBUTE_LIFETIME_BOUND {
   return StringViewFromVecU8(
       ReturnCached(local_name_, [this]() { return attribute_.local_name(); }));
 }
 
-std::optional<absl::string_view> QuickReader::Attribute::NamespacePrefix()
+std::optional<absl::string_view> QuickReader::Attribute::NamespacePrefix() &
     ABSL_ATTRIBUTE_LIFETIME_BOUND {
   return ReturnCachedOptional(
       namespace_prefix_, [this]() { return attribute_.namespace_prefix(); });
 }
 
-absl::StatusOr<absl::string_view> QuickReader::Attribute::ResolvedNamespace()
+absl::StatusOr<absl::string_view> QuickReader::Attribute::ResolvedNamespace() &
     ABSL_ATTRIBUTE_LIFETIME_BOUND {
   return ResolveNamespace(
       ReturnCached(qualified_key_, [this]() { return attribute_.key; }),
@@ -280,7 +285,7 @@ absl::StatusOr<absl::string_view> QuickReader::Attribute::ResolvedNamespace()
       });
 }
 
-absl::string_view QuickReader::Attribute::Value()
+absl::string_view QuickReader::Attribute::Value() &
     ABSL_ATTRIBUTE_LIFETIME_BOUND {
   return StringViewFromVecU8(
       ReturnCached(value_, [this]() { return attribute_.value; }));

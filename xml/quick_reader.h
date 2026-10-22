@@ -2,6 +2,7 @@
 #define SECURITY_XML_QUICK_READER_H_
 
 #include <cstdint>
+#include <memory>
 #include <optional>
 #include <string>
 #include <utility>
@@ -72,6 +73,8 @@ class QuickReader {
   class Attribute;
   class Attributes;
 
+  // WARNING: `xml` is borrowed, not copied. The underlying XML buffer must
+  // outlive the QuickReader instance and any events returned by it.
   static absl::StatusOr<QuickReader> Create(
       absl::string_view xml ABSL_ATTRIBUTE_LIFETIME_BOUND);
   static absl::StatusOr<QuickReader> CreateWithConfig(
@@ -79,14 +82,34 @@ class QuickReader {
 
   // Provides the next event. When the parsing is complete, returns `Eof` and
   // keeps returning that afterwards.
+  //
+  // WARNING: Calling NextEvent() advances the streaming parser and updates
+  // the reader's namespace state.
+  // Lifetime: Events and their child accessor objects (Name, Attribute,
+  // Attributes) hold non-owning pointers to the QuickReader's heap-allocated
+  // parser state, so the QuickReader (or the instance it was moved into) must
+  // outlive them. In addition, views returned by Data, Name, and Attribute
+  // accessors borrow from cached buffers owned by that Event/Attribute object,
+  // so the Event/Attribute (or the instance it was moved into) must outlive any
+  // view obtained from it.
+  //
+  // Accessors are `&`-qualified with ABSL_ATTRIBUTE_LIFETIME_BOUND, so Clang
+  // rejects (-Werror,-Wdangling) dangling initializations chained off a
+  // temporary StatusOr<Event>. Three things are NOT diagnosed: assignment
+  // into an already-declared variable, escape from an inner scope, and
+  // laundering the view through an intervening unannotated function call.
+  // Attributes::NextAttribute() has a further gap of its own; see there.
+  // Bind the Event to a named local variable and copy anything that must
+  // outlive the Event or the next NextEvent() call.
   absl::StatusOr<Event> NextEvent() ABSL_ATTRIBUTE_LIFETIME_BOUND;
 
  private:
-  explicit QuickReader(absl::string_view xml, rust::QuickReader reader)
-      : xml_(xml), reader_(std::move(reader)) {}
+  explicit QuickReader(absl::string_view xml,
+                       std::unique_ptr<rust::QuickReader> reader)
+      : xml_(xml), reader_(ABSL_DIE_IF_NULL(std::move(reader))) {}
 
   absl::string_view xml_;
-  rust::QuickReader reader_;
+  std::unique_ptr<rust::QuickReader> reader_;
 };
 
 class QuickReader::Data {
@@ -99,7 +122,13 @@ class QuickReader::Data {
   // Rust one cannot construct a `std::string`. Therefore Rust always delivers a
   // `rs_std::Vec<uint8_t>`. Turning that into a `std::string` on the C++ side
   // would be the second copy.
-  absl::string_view Content() ABSL_ATTRIBUTE_LIFETIME_BOUND;
+  //
+  // WARNING: The returned string_view is NOT null-terminated and may contain
+  // embedded null characters (`\0`) if present in the XML text or CDATA. Do NOT
+  // pass `.data()` to C APIs expecting null-terminated strings (`printf("%s")`,
+  // `strcmp`). Construct a `std::string` first.
+  absl::string_view Content() & ABSL_ATTRIBUTE_LIFETIME_BOUND;
+  absl::string_view Content() && = delete;
 
  private:
   friend class QuickReader;
@@ -119,15 +148,23 @@ class QuickReader::Name {
   // for every call. Even if there were just one call, there would be two
   // copies, because inside Rust one cannot construct a `std::string` so it's
   // always input -> `rs_std::Vec<uint8_t>` -> `std::string`.
-  absl::string_view QualifiedName() ABSL_ATTRIBUTE_LIFETIME_BOUND;
+  //
+  // WARNING: The returned string_views are NOT null-terminated and may contain
+  // embedded null characters (`\0`). Do NOT pass `.data()` to C-style APIs
+  // expecting null-terminated strings.
+  absl::string_view QualifiedName() & ABSL_ATTRIBUTE_LIFETIME_BOUND;
+  absl::string_view QualifiedName() && = delete;
 
-  absl::string_view LocalName() ABSL_ATTRIBUTE_LIFETIME_BOUND;
+  absl::string_view LocalName() & ABSL_ATTRIBUTE_LIFETIME_BOUND;
+  absl::string_view LocalName() && = delete;
 
-  std::optional<absl::string_view> NamespacePrefix()
+  std::optional<absl::string_view> NamespacePrefix() &
       ABSL_ATTRIBUTE_LIFETIME_BOUND;
+  std::optional<absl::string_view> NamespacePrefix() && = delete;
 
-  absl::StatusOr<absl::string_view> ResolvedNamespace()
+  absl::StatusOr<absl::string_view> ResolvedNamespace() &
       ABSL_ATTRIBUTE_LIFETIME_BOUND;
+  absl::StatusOr<absl::string_view> ResolvedNamespace() && = delete;
 
   bool LocalNameValid() const;
   bool PrefixValid() const;
@@ -156,18 +193,26 @@ class QuickReader::Name {
 
 class QuickReader::Attribute {
  public:
-  absl::string_view QualifiedName() ABSL_ATTRIBUTE_LIFETIME_BOUND;
+  // WARNING: The returned string_views from Attribute methods are NOT
+  // null-terminated and may contain embedded null characters (`\0`). Do NOT
+  // pass `.data()` to C-style APIs expecting null-terminated strings.
+  absl::string_view QualifiedName() & ABSL_ATTRIBUTE_LIFETIME_BOUND;
+  absl::string_view QualifiedName() && = delete;
 
   // Returns the local name part of the key.
-  absl::string_view LocalName() ABSL_ATTRIBUTE_LIFETIME_BOUND;
+  absl::string_view LocalName() & ABSL_ATTRIBUTE_LIFETIME_BOUND;
+  absl::string_view LocalName() && = delete;
 
-  std::optional<absl::string_view> NamespacePrefix()
+  std::optional<absl::string_view> NamespacePrefix() &
       ABSL_ATTRIBUTE_LIFETIME_BOUND;
+  std::optional<absl::string_view> NamespacePrefix() && = delete;
 
-  absl::StatusOr<absl::string_view> ResolvedNamespace()
+  absl::StatusOr<absl::string_view> ResolvedNamespace() &
       ABSL_ATTRIBUTE_LIFETIME_BOUND;
+  absl::StatusOr<absl::string_view> ResolvedNamespace() && = delete;
 
-  absl::string_view Value() ABSL_ATTRIBUTE_LIFETIME_BOUND;
+  absl::string_view Value() & ABSL_ATTRIBUTE_LIFETIME_BOUND;
+  absl::string_view Value() && = delete;
 
   bool LocalNameValid() const;
   bool PrefixValid() const;
@@ -196,6 +241,28 @@ class QuickReader::Attribute {
 
 class QuickReader::Attributes {
  public:
+  // Returns the next attribute of the current start-tag, or std::nullopt once
+  // the attribute list is exhausted.
+  //
+  // Lifetime: the returned Attribute holds a non-owning pointer to the
+  // QuickReader's heap-allocated parser state (used by ResolvedNamespace()),
+  // and its accessors hand out views into cached buffers owned by the
+  // Attribute itself. The QuickReader must outlive the Attribute, and the
+  // Attribute (or the instance it was moved into) must outlive any view taken
+  // from it.
+  //
+  // KNOWN GAP: the return type routes through std::optional, and
+  // `std::optional::operator->` is the one optional accessor that is neither
+  // ref-qualified nor ABSL_ATTRIBUTE_LIFETIME_BOUND. It therefore breaks the
+  // lifetime chain, and this compiles *silently* and dangles at runtime:
+  //     absl::string_view v = (*attrs.NextAttribute())->Value();
+  // Fully dereferencing instead reaches the deleted `&&` overload and IS
+  // rejected, but it is an unpleasant spelling:
+  //     absl::string_view v = (**attrs.NextAttribute()).Value();  // error
+  // Prefer binding the optional to a named local:
+  //     ASSIGN_OR_RETURN(std::optional<Attribute> attr,
+  //                      attrs.NextAttribute());
+  //     if (attr.has_value()) { absl::string_view v = attr->Value(); ... }
   absl::StatusOr<std::optional<Attribute>> NextAttribute()
       ABSL_ATTRIBUTE_LIFETIME_BOUND;
 
@@ -218,6 +285,13 @@ struct QuickReader::Start {
   // The substring of the input XML that is the subtree of the tag, excluding
   // and including, resp., the tag itself. Filled if and only if the
   // `xml_substrings` option was enabled.
+  //
+  // Lifetime differs from other views in this header: these point into the
+  // buffer the caller passed to Create(), not into reader state, so they are
+  // NOT invalidated by the next NextEvent(). They are valid for exactly as
+  // long as that input buffer is. Being plain data members, they carry no
+  // ref-qualification or LIFETIME_BOUND guard at all; nothing here is checked
+  // at compile time.
   std::optional<absl::string_view> inner_xml;
   std::optional<absl::string_view> outer_xml;
   bool self_closing;
