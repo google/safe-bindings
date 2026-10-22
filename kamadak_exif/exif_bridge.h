@@ -473,7 +473,8 @@ class Field {
   /**
    * The value of this field.
    */
-  const Value& value() const ABSL_ATTRIBUTE_LIFETIME_BOUND { return value_; };
+  const Value& value() const& ABSL_ATTRIBUTE_LIFETIME_BOUND { return value_; }
+  const Value& value() const&& = delete;
 
  private:
   friend class Exif;
@@ -504,17 +505,20 @@ class Exif final {
   /**
    * Returns the slice that contains the TIFF data.
    */
-  absl::Span<const uint8_t> buf() const ABSL_ATTRIBUTE_LIFETIME_BOUND;
+  absl::Span<const uint8_t> buf() const& ABSL_ATTRIBUTE_LIFETIME_BOUND;
+  absl::Span<const uint8_t> buf() const&& = delete;
 
   /**
    * Returns a span of Exif fields.
    */
-  absl::Span<const Field> fields() const ABSL_ATTRIBUTE_LIFETIME_BOUND;
+  absl::Span<const Field> fields() const& ABSL_ATTRIBUTE_LIFETIME_BOUND;
+  absl::Span<const Field> fields() const&& = delete;
 
   /**
    * Returns a span of MakerNote fields.
    */
-  absl::Span<const Field> mnote_fields() const ABSL_ATTRIBUTE_LIFETIME_BOUND;
+  absl::Span<const Field> mnote_fields() const& ABSL_ATTRIBUTE_LIFETIME_BOUND;
+  absl::Span<const Field> mnote_fields() const&& = delete;
 
   /**
    * Returns true if the Exif data (TIFF structure) is in the
@@ -604,9 +608,10 @@ class ExifBytes final {
   /**
    * Returns a view to the Exif data.
    */
-  absl::Span<const uint8_t> view() const ABSL_ATTRIBUTE_LIFETIME_BOUND {
+  absl::Span<const uint8_t> view() const& ABSL_ATTRIBUTE_LIFETIME_BOUND {
     return absl::Span<const uint8_t>(vec_.as_ptr(), vec_.len());
   }
+  absl::Span<const uint8_t> view() const&& = delete;
 
  private:
   friend class Writer;
