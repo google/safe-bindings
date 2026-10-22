@@ -1,0 +1,20 @@
+[package]
+name = "rust"
+version = "0.1.0"
+edition = "2024"
+license-file = "../../LICENSE"
+
+[lib]
+path = "lib.rs"
+doctest = false
+
+[dependencies]
+anyhow = "1.0"
+log = "0.4"
+quick-xml = "0.40"
+xml = "1.4"
+xmlparser = "0.13"
+# xmltree-ns is published from https://github.com/kaidokert/xmltree-rs, a fork of
+# upstream xmltree that carries https://github.com/eminence/xmltree-rs/pull/38
+# (attributes keyed by their qualified name).
+xmltree = { package = "xmltree-ns", version = "0.13", features = ["attribute-order"] }
