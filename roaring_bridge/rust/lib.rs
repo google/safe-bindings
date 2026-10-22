@@ -196,14 +196,15 @@ impl RoaringBitmap32 {
             return Self::default();
         }
         let inner = if offset > 0 {
-            let offset = offset as u32;
-            RoaringBitmap::from_sorted_iter(
-                self.inner.range(..=(u32::MAX - offset)).map(|x| x + offset),
-            )
-            .expect("iterator is sorted")
+            let off = offset as u32;
+            let max = u32::MAX - off;
+            let iter = self.inner.range(..=max).map(|x| x + off);
+            RoaringBitmap::from_sorted_iter(iter)
+                .expect("iterator is sorted")
         } else {
-            let neg_offset = offset.unsigned_abs() as u32;
-            RoaringBitmap::from_sorted_iter(self.inner.range(neg_offset..).map(|x| x - neg_offset))
+            let neg = offset.unsigned_abs() as u32;
+            let iter = self.inner.range(neg..).map(|x| x - neg);
+            RoaringBitmap::from_sorted_iter(iter)
                 .expect("iterator is sorted")
         };
         Self { inner }
@@ -493,16 +494,16 @@ impl RoaringBitmap64 {
             return self.clone();
         }
         let inner = if offset > 0 {
-            let offset = offset as u64;
-            RoaringTreemap::from_sorted_iter(
-                self.inner.iter().take_while(|&x| x <= u64::MAX - offset).map(|x| x + offset),
-            )
-            .expect("iterator is sorted")
+            let off = offset as u64;
+            let max = u64::MAX - off;
+            let iter = self.inner.iter().take_while(|&x| x <= max);
+            RoaringTreemap::from_sorted_iter(iter.map(|x| x + off))
+                .expect("iterator is sorted")
         } else {
-            let neg_offset = offset.unsigned_abs();
+            let neg = offset.unsigned_abs();
             let mut iter = self.inner.iter();
-            iter.advance_to(neg_offset);
-            RoaringTreemap::from_sorted_iter(iter.map(|x| x - neg_offset))
+            iter.advance_to(neg);
+            RoaringTreemap::from_sorted_iter(iter.map(|x| x - neg))
                 .expect("iterator is sorted")
         };
         Self { inner }

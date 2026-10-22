@@ -475,6 +475,47 @@ TEST(RoaringBitmap32Test, AddOffsetBoundary) {
   EXPECT_TRUE(max_neg.Contains(0));
 }
 
+TEST(RoaringBitmap32Test, AddOffsetContainerTypesAndAlignments) {
+  RoaringBitmap32 bm;
+  std::vector<uint32_t> expected_orig;
+
+  // Container 0: Bitmap container (5000 multiples of 13, > 4096 elements).
+  for (uint32_t i = 0; i < 5000; ++i) {
+    uint32_t v = i * 13;
+    bm.Insert(v);
+    expected_orig.push_back(v);
+  }
+  // Container 1: Array container (500 elements).
+  for (uint32_t i = 0; i < 500; ++i) {
+    uint32_t v = 65536 + i * 100;
+    bm.Insert(v);
+    expected_orig.push_back(v);
+  }
+  // Container 2: Run container (contiguous range + Optimize).
+  bm.InsertRange(2 * 65536 + 1000, 2 * 65536 + 60000);
+  for (uint32_t v = 2 * 65536 + 1000; v < 2 * 65536 + 60000; ++v) {
+    expected_orig.push_back(v);
+  }
+  bm.Optimize();
+
+  // Test container-aligned (positive and negative, with partial container
+  // drop), word-aligned, and unaligned offsets.
+  for (int64_t offset :
+       {int64_t{65536}, int64_t{-65536}, int64_t{64}, int64_t{-128},
+        int64_t{19}, int64_t{-37}, int64_t{30000}, int64_t{-100000}}) {
+    RoaringBitmap32 shifted = bm.AddOffset(offset);
+    std::vector<uint32_t> expected;
+    expected.reserve(expected_orig.size());
+    for (uint32_t v : expected_orig) {
+      int64_t s = static_cast<int64_t>(v) + offset;
+      if (s >= 0 && s <= UINT32_MAX) {
+        expected.push_back(static_cast<uint32_t>(s));
+      }
+    }
+    EXPECT_EQ(ToStdVec(shifted.ToVec()), expected) << "offset=" << offset;
+  }
+}
+
 TEST(RoaringBitmap64Test, AddOffsetLargeValues) {
   RoaringBitmap64 bm;
   bm.Insert(100);
@@ -492,6 +533,19 @@ TEST(RoaringBitmap64Test, AddOffsetLargeValues) {
   EXPECT_TRUE(overflowed.Contains(120));
   EXPECT_TRUE(overflowed.Contains((uint64_t{1} << 32) + 20));
   EXPECT_FALSE(overflowed.Contains(UINT64_MAX - 10));  // overflowed and dropped
+
+  // Crossing 32-bit partition boundaries in both directions.
+  RoaringBitmap64 cross;
+  cross.Insert((uint64_t{1} << 32) - 5);
+  cross.Insert((uint64_t{1} << 32) + 5);
+  RoaringBitmap64 cross_pos = cross.AddOffset(10);
+  EXPECT_EQ(ToStdVec(cross_pos.ToVec()),
+            (std::vector<uint64_t>{(uint64_t{1} << 32) + 5,
+                                   (uint64_t{1} << 32) + 15}));
+  RoaringBitmap64 cross_neg = cross.AddOffset(-10);
+  EXPECT_EQ(ToStdVec(cross_neg.ToVec()),
+            (std::vector<uint64_t>{(uint64_t{1} << 32) - 15,
+                                   (uint64_t{1} << 32) - 5}));
 }
 
 }  // namespace
