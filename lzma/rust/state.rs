@@ -658,8 +658,11 @@ impl AutoDecoder {
     }
 
     #[inline(never)]
-    fn new_lzip_coder(memlimit_kb: u32) -> Box<CoderInner> {
-        Box::new(CoderInner::LzipDecoder(Box::new(LzipStream::new_mem_limit(memlimit_kb))))
+    fn new_lzip_coder(allow_multiple: bool, memlimit_kb: u32) -> Box<CoderInner> {
+        Box::new(CoderInner::LzipDecoder(Box::new(LzipStream::new_mem_limit(
+            allow_multiple,
+            memlimit_kb,
+        ))))
     }
 
     #[inline(never)]
@@ -687,11 +690,11 @@ impl AutoDecoder {
         // google3's liblzma does not define, so .lz falls through to the alone
         // decoder there. We keep the behavior the same by introducing the
         // lzip feature, but keep it disabled by default.
+        let allow_multiple = (self.flags & LZMA_CONCATENATED) != 0;
         let coder = if first_byte == 0xFD {
-            let allow_multiple = (self.flags & LZMA_CONCATENATED) != 0;
             Self::new_xz_coder(allow_multiple, memlimit_kb)
         } else if cfg!(feature = "lzip") && first_byte == 0x4C {
-            Self::new_lzip_coder(memlimit_kb)
+            Self::new_lzip_coder(allow_multiple, memlimit_kb)
         } else {
             Self::new_lzma_coder(memlimit_kb)
         };

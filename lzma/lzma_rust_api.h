@@ -298,13 +298,9 @@ typedef struct {
 //
 // `memlimit` sets the memory usage limit as bytes.
 //
-// `flags` is a bitwise-OR of zero or more of the decoder flags. Note that
-// unlike standard liblzma, which only decodes concatenated .lz files if
-// `LZMA_CONCATENATED` is set and otherwise stops after the first member,
-// this implementation always decodes concatenated .lz members by default
-// due to underlying `lzma_rust2::LzipStream` behavior. Accepted flags are
-// validated, but not acted upon.
-// NOTE(b/562256542): match default concatenated behavior of liblzma.
+// `flags` is a bitwise-OR of zero or more of the decoder flags. Only
+// `LZMA_CONCATENATED` is acted upon; other accepted flags are validated but
+// ignored.
 //
 // Returns `LZMA_OK` upon successful initialization, `LZMA_OPTIONS_ERROR`
 // if unsupported flags are provided, or `LZMA_PROG_ERROR` if state setup fails.
