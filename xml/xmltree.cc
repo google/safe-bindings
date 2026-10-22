@@ -16,8 +16,8 @@
 #include "absl/types/span.h"
 #include "support/rs_std/option.h"
 #include "support/rs_std/result.h"
-#include "crubit/alloc.h"
-#include "crubit/std.h"
+#include "support/rs_std/rs_alloc.h"
+#include "support/rs_std/rs_std.h"
 #include "support/rs_std/slice_ref.h"
 #include "support/rs_std/str_ref.h"
 

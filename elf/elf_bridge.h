@@ -54,7 +54,7 @@
 #include <optional>
 #include <string>
 
-#include "crubit/elf_cpp_bindings.h"
+#include "elf_wrapper.h"
 #include "absl/status/statusor.h"
 #include "absl/strings/string_view.h"
 
