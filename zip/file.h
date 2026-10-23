@@ -41,6 +41,33 @@ class BufferedZipFile final {
   // separators).
   absl::StatusOr<std::string> GetFileName() const;
   absl::StatusOr<CompressionMethod> GetCompressionMethod() const;
+  absl::StatusOr<std::string> GetComment() const;
+  // WARNING: Untrusted Header Value: Returns the uncompressed size declared in
+  // the ZIP header without verifying it against the actual decompressed
+  // payload. Crafty or corrupted archives (including zip bombs) may spoof this
+  // value; do not trust it for unbounded memory pre-allocation.
+  absl::StatusOr<uint64_t> GetUncompressedSize() const;
+  absl::StatusOr<uint64_t> GetCompressedSize() const;
+  // WARNING: Untrusted Header Value: Returns the raw CRC-32 checksum declared
+  // in the ZIP header. The checksum is only verified when the entry payload is
+  // actually read and decompressed.
+  absl::StatusOr<uint32_t> GetCrc32() const;
+  // Returns the last-modified date encoded as an MS-DOS FAT date bitfield
+  // (bits 15-9: year offset from 1980, bits 8-5: month [1-12], bits 4-0: day
+  // [1-31]), or 0 if no valid modification timestamp is present in the header.
+  absl::StatusOr<uint16_t> GetLastModifiedDate() const;
+  // Returns the last-modified time encoded as an MS-DOS FAT time bitfield
+  // (bits 15-11: hour [0-23], bits 10-5: minute [0-59], bits 4-0: second / 2
+  // [0-29]), or 0 if no valid modification timestamp is present in the header.
+  absl::StatusOr<uint16_t> GetLastModifiedTime() const;
+  // Returns the full POSIX `st_mode` bitmask (including `S_IFMT` file-type bits
+  // such as `0100644` for regular files), or 0 if Unix mode metadata is absent
+  // (e.g. non-Unix archives).
+  absl::StatusOr<uint32_t> GetUnixMode() const;
+  // Returns the entry's extra fields re-serialized by zip-rs (note that zip-rs
+  // omits ExtendedTimestamp (0x5455) and Ntfs (0x000a) extra fields when
+  // re-serializing `extra_data()`).
+  absl::StatusOr<RustVecU8Wrapper> GetExtraData() const;
 
   // WARNING: Decompression Bomb Hazard: This overload decompresses the entire
   // entry into an unbounded heap buffer. For untrusted zip archives, prefer
@@ -75,6 +102,33 @@ class FsZipFile final {
   // separators).
   absl::StatusOr<std::string> GetFileName() const;
   absl::StatusOr<CompressionMethod> GetCompressionMethod() const;
+  absl::StatusOr<std::string> GetComment() const;
+  // WARNING: Untrusted Header Value: Returns the uncompressed size declared in
+  // the ZIP header without verifying it against the actual decompressed
+  // payload. Crafty or corrupted archives (including zip bombs) may spoof this
+  // value; do not trust it for unbounded memory pre-allocation.
+  absl::StatusOr<uint64_t> GetUncompressedSize() const;
+  absl::StatusOr<uint64_t> GetCompressedSize() const;
+  // WARNING: Untrusted Header Value: Returns the raw CRC-32 checksum declared
+  // in the ZIP header. The checksum is only verified when the entry payload is
+  // actually read and decompressed.
+  absl::StatusOr<uint32_t> GetCrc32() const;
+  // Returns the last-modified date encoded as an MS-DOS FAT date bitfield
+  // (bits 15-9: year offset from 1980, bits 8-5: month [1-12], bits 4-0: day
+  // [1-31]), or 0 if no valid modification timestamp is present in the header.
+  absl::StatusOr<uint16_t> GetLastModifiedDate() const;
+  // Returns the last-modified time encoded as an MS-DOS FAT time bitfield
+  // (bits 15-11: hour [0-23], bits 10-5: minute [0-59], bits 4-0: second / 2
+  // [0-29]), or 0 if no valid modification timestamp is present in the header.
+  absl::StatusOr<uint16_t> GetLastModifiedTime() const;
+  // Returns the full POSIX `st_mode` bitmask (including `S_IFMT` file-type bits
+  // such as `0100644` for regular files), or 0 if Unix mode metadata is absent
+  // (e.g. non-Unix archives).
+  absl::StatusOr<uint32_t> GetUnixMode() const;
+  // Returns the entry's extra fields re-serialized by zip-rs (note that zip-rs
+  // omits ExtendedTimestamp (0x5455) and Ntfs (0x000a) extra fields when
+  // re-serializing `extra_data()`).
+  absl::StatusOr<RustVecU8Wrapper> GetExtraData() const;
 
   // WARNING: Decompression Bomb Hazard: This overload decompresses the entire
   // entry into an unbounded heap buffer. For untrusted zip archives, prefer
@@ -116,6 +170,33 @@ class ZipFile final {
   // separators).
   absl::StatusOr<std::string> GetFileName() const;
   absl::StatusOr<CompressionMethod> GetCompressionMethod() const;
+  absl::StatusOr<std::string> GetComment() const;
+  // WARNING: Untrusted Header Value: Returns the uncompressed size declared in
+  // the ZIP header without verifying it against the actual decompressed
+  // payload. Crafty or corrupted archives (including zip bombs) may spoof this
+  // value; do not trust it for unbounded memory pre-allocation.
+  absl::StatusOr<uint64_t> GetUncompressedSize() const;
+  absl::StatusOr<uint64_t> GetCompressedSize() const;
+  // WARNING: Untrusted Header Value: Returns the raw CRC-32 checksum declared
+  // in the ZIP header. The checksum is only verified when the entry payload is
+  // actually read and decompressed.
+  absl::StatusOr<uint32_t> GetCrc32() const;
+  // Returns the last-modified date encoded as an MS-DOS FAT date bitfield
+  // (bits 15-9: year offset from 1980, bits 8-5: month [1-12], bits 4-0: day
+  // [1-31]), or 0 if no valid modification timestamp is present in the header.
+  absl::StatusOr<uint16_t> GetLastModifiedDate() const;
+  // Returns the last-modified time encoded as an MS-DOS FAT time bitfield
+  // (bits 15-11: hour [0-23], bits 10-5: minute [0-59], bits 4-0: second / 2
+  // [0-29]), or 0 if no valid modification timestamp is present in the header.
+  absl::StatusOr<uint16_t> GetLastModifiedTime() const;
+  // Returns the full POSIX `st_mode` bitmask (including `S_IFMT` file-type bits
+  // such as `0100644` for regular files), or 0 if Unix mode metadata is absent
+  // (e.g. non-Unix archives).
+  absl::StatusOr<uint32_t> GetUnixMode() const;
+  // Returns the entry's extra fields re-serialized by zip-rs (note that zip-rs
+  // omits ExtendedTimestamp (0x5455) and Ntfs (0x000a) extra fields when
+  // re-serializing `extra_data()`).
+  absl::StatusOr<RustVecU8Wrapper> GetExtraData() const;
 
   // WARNING: Decompression Bomb Hazard: This overload decompresses the entire
   // entry into an unbounded heap buffer. For untrusted zip archives, prefer
