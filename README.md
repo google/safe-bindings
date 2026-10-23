@@ -24,6 +24,5 @@ C++ wrappers (using Crubit) for Rust libraries.
 
 ## Contributing
 
-We want to be open and set the right expectations: We're currently not set up to
-accept contributions. We plan to open source more bindings and gather interest
-and may accept contributions in the future.
+We are accepting contributions for the regex bindings. We plan to open source more bindings and gather interest
+and may accept contributions in the future for the other bindings as well.
