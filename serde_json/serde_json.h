@@ -59,6 +59,17 @@ auto get(const ItemMut& item) {
   else if constexpr (I == 1)
     return item.value;
 }
+
+// Returns a JSON array containing `Value(item)` for each element in `range`.
+template <typename Range>
+Value ArrayOf(const Range& range) {
+  Value array = Value::array();
+  for (const auto& item : range) {
+    // `push_back` only errors if `array` is not an array or null.
+    static_cast<void>(array.push_back(Value(item)));
+  }
+  return array;
+}
 }  // namespace rust
 
 #endif  // SECURITY_JSON_SERDE_JSON_SERDE_JSON_H_
