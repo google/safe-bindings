@@ -71,6 +71,12 @@ absl::StatusOr<std::string> MapResult(rs_std::Result<T, E>&& r) {
   return std::string(security::crubit_helpers::StringViewFromVecU8(r.value()));
 }
 
+template <template <typename> class Wrapper, typename T, typename E>
+absl::StatusOr<std::string> MapResult(Wrapper<rs_std::Result<T, E>>&& r) {
+  rs_std::Result<T, E> unwrapped = std::move(r);
+  return MapResult(std::move(unwrapped));
+}
+
 template <typename To, typename From, typename F>
 absl::StatusOr<To> MapResult(const From& r, F func) {
   if (r.is_err()) {
