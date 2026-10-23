@@ -147,8 +147,8 @@
 //
 // -----------------------------------------------------------------------
 
-#ifndef SECURITY_REGEX_REGEX_H_
-#define SECURITY_REGEX_REGEX_H_
+#ifndef SAFE_BINDINGS_REGEX_REGEX_H_
+#define SAFE_BINDINGS_REGEX_REGEX_H_
 
 #include <cstdint>
 #include <cstdlib>
@@ -159,12 +159,12 @@
 #include <utility>
 #include <vector>
 
-#include "regex_internal.h"
-#include "crubit/regex_cpp_bindings.h"
 #include "absl/status/statusor.h"
 #include "absl/strings/str_cat.h"
 #include "absl/strings/string_view.h"
 #include "absl/types/span.h"
+#include "regex_internal.h"
+#include "crubit/regex_cpp_bindings.h"
 
 namespace security::regex {
 
@@ -914,4 +914,4 @@ bool ParseNumeric(const Match& match, T* dest) {
 
 }  // namespace security::regex
 
-#endif  // SECURITY_REGEX_REGEX_H_
+#endif  // SAFE_BINDINGS_REGEX_REGEX_H_

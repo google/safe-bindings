@@ -1,7 +1,7 @@
 // This file provides a set of helpers to define flags whose value is a Regex.
 // It is heavily based on google3/util/regexp/re2/regexp_flag.h, but it uses
-// the //security/regex package rather than RE2. It is otherwise almost
-// identical.
+// the //third_party/safe_bindings/regex package rather than RE2. It is
+// otherwise almost identical.
 //
 // RegexFlag
 // ---------
@@ -84,8 +84,8 @@
 // Similar to RegexFlagWithOptions, but for a list of regexes. It accepts an
 // options template argument and it's used exactly like RegexListFlag.
 
-#ifndef SECURITY_REGEX_REGEX_FLAG_H_
-#define SECURITY_REGEX_REGEX_FLAG_H_
+#ifndef SAFE_BINDINGS_REGEX_REGEX_FLAG_H_
+#define SAFE_BINDINGS_REGEX_REGEX_FLAG_H_
 
 #include <cstddef>
 #include <initializer_list>
@@ -94,13 +94,14 @@
 #include <utility>
 #include <vector>
 
-#include "regex.h"
 #include "absl/log/absl_check.h"
+#include "absl/status/statusor.h"
 #include "absl/strings/match.h"
 #include "absl/strings/str_cat.h"
 #include "absl/strings/str_join.h"
 #include "absl/strings/str_split.h"
 #include "absl/strings/string_view.h"
+#include "regex.h"
 
 namespace security::regex {
 
@@ -224,4 +225,4 @@ using RegexListFlag =
 
 }  // namespace security::regex
 
-#endif  // SECURITY_REGEX_REGEX_FLAG_H_
+#endif  // SAFE_BINDINGS_REGEX_REGEX_FLAG_H_
