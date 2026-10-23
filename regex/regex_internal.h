@@ -1,5 +1,5 @@
-#ifndef SECURITY_REGEX_REGEX_INTERNAL_H_
-#define SECURITY_REGEX_REGEX_INTERNAL_H_
+#ifndef SAFE_BINDINGS_REGEX_REGEX_INTERNAL_H_
+#define SAFE_BINDINGS_REGEX_REGEX_INTERNAL_H_
 
 #include <cstddef>
 #include <cstdint>
@@ -12,10 +12,10 @@
 
 #include "support/rs_std/slice_ref.h"
 #include "support/rs_std/vec.h"
-#include "crubit/regex_cpp_bindings.h"
 #include "absl/log/absl_check.h"
 #include "absl/strings/string_view.h"
 #include "absl/types/span.h"
+#include "crubit/regex_cpp_bindings.h"
 
 namespace security::regex {
 
@@ -171,4 +171,4 @@ bool ParseNumeric(const Match& m, T* dest);
 }  // namespace internal
 }  // namespace security::regex
 
-#endif  // SECURITY_REGEX_REGEX_INTERNAL_H_
+#endif  // SAFE_BINDINGS_REGEX_REGEX_INTERNAL_H_
