@@ -1,6 +1,7 @@
 #include "pixel_bridge.h"
 
 #include <array>
+#include <cstddef>
 #include <cstdint>
 #include <optional>
 #include <string>
@@ -72,6 +73,27 @@ Format FromRustFormat(rust::reader::Format format) {
     case rust::reader::Format::Tag::Jxl:
       return Format::kJxl;
   }
+}
+
+ColorType FromRustColorType(rust::image::ColorType color_type) {
+  switch (color_type.tag) {
+    case rust::image::ColorType::Tag::L:
+      return ColorType::kL;
+    case rust::image::ColorType::Tag::La:
+      return ColorType::kLa;
+    case rust::image::ColorType::Tag::Rgb:
+      return ColorType::kRgb;
+    case rust::image::ColorType::Tag::Rgba:
+      return ColorType::kRgba;
+  }
+}
+
+std::optional<std::string> OptionalStringFromVecU8(
+    rs_std::Option<rust::vec_u8::VecU8> opt) {
+  if (!opt.has_value()) {
+    return std::nullopt;
+  }
+  return std::string(StringViewFromVecU8(std::move(opt).value()));
 }
 
 absl::string_view StringViewFromSpanU8(absl::Span<const uint8_t> data) {
@@ -271,16 +293,7 @@ PixelType ImageDecoder::GetPixelType() {
 }
 
 ColorType ImageDecoder::GetColorType() {
-  switch (decoder_.color_type().tag) {
-    case rust::image::ColorType::Tag::L:
-      return ColorType::kL;
-    case rust::image::ColorType::Tag::La:
-      return ColorType::kLa;
-    case rust::image::ColorType::Tag::Rgb:
-      return ColorType::kRgb;
-    case rust::image::ColorType::Tag::Rgba:
-      return ColorType::kRgba;
-  }
+  return FromRustColorType(decoder_.color_type());
 }
 
 Strides ImageDecoder::GetStrides() {
@@ -302,6 +315,68 @@ bool ImageDecoder::HasPalette() const { return decoder_.has_palette(); }
 
 std::optional<uint8_t> ImageDecoder::GetInputBitDepth() const {
   return decoder_.bit_depth();
+}
+
+std::optional<ColorType> ImageDecoder::GetInputColorType() const {
+  rs_std::Option<rust::image::ColorType> color_type =
+      decoder_.input_color_type();
+  if (!color_type.has_value()) {
+    return std::nullopt;
+  }
+  return FromRustColorType(std::move(color_type).value());
+}
+
+bool ImageDecoder::HasValidTransparency() const {
+  return decoder_.has_valid_transparency();
+}
+
+std::optional<std::array<uint16_t, 3>> ImageDecoder::GetBackgroundColor()
+    const {
+  rs_std::Option<rust::png::Rgb16> bkgd =
+      decoder_.background_color();
+  if (!bkgd.has_value()) {
+    return std::nullopt;
+  }
+  rust::png::Rgb16 rgb = std::move(bkgd).value();
+  return std::array<uint16_t, 3>{rgb.r, rgb.g, rgb.b};
+}
+
+std::optional<std::vector<Rgba8>> ImageDecoder::GetPalette() const {
+  rs_std::Option<rust::vec_u8::VecU8> raw = decoder_.palette();
+  if (!raw.has_value()) {
+    return std::nullopt;
+  }
+  absl::string_view bytes = StringViewFromVecU8(raw.value());
+  constexpr size_t kRgbaChannels = 4;
+  std::vector<Rgba8> palette;
+  palette.reserve(bytes.size() / kRgbaChannels);
+  for (size_t i = 0; i + kRgbaChannels <= bytes.size(); i += kRgbaChannels) {
+    palette.push_back(Rgba8{
+        .r = static_cast<uint8_t>(bytes[i]),
+        .g = static_cast<uint8_t>(bytes[i + 1]),
+        .b = static_cast<uint8_t>(bytes[i + 2]),
+        .a = static_cast<uint8_t>(bytes[i + 3]),
+    });
+  }
+  return palette;
+}
+
+absl::StatusOr<PngTextMetadata> ImageDecoder::ReadPngTextMetadata() && {
+  Format format = GetFormat();
+  rs_std::Result<rust::png::PngTextMetadata,
+                 rust::vec_u8::VecU8>
+      result = std::move(decoder_).read_png_text_metadata();
+  if (!result.has_value()) {
+    rust::vec_u8::VecU8 err_msg_vec = std::move(result).err();
+    absl::string_view err_msg = StringViewFromVecU8(err_msg_vec);
+    return absl::InvalidArgumentError(err_msg);
+  }
+  rust::png::PngTextMetadata metadata = std::move(result).value();
+  return PngTextMetadata{
+      .exif = OptionalStringFromVecU8(std::move(metadata.exif)),
+      .iptc = OptionalStringFromVecU8(std::move(metadata.iptc)),
+      .xmp = OptionalStringFromVecU8(std::move(metadata.xmp)),
+  };
 }
 
 absl::StatusOr<std::optional<std::string>> ImageDecoder::GetIccProfile() {
