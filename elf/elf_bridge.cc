@@ -8,7 +8,7 @@
 #include <utility>
 
 #include "crubit_helpers/string_conversions.h"
-#include "crubit/elf_cpp_bindings.h"
+#include "elf_wrapper.h"
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
 #include "absl/strings/str_cat.h"
