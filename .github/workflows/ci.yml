@@ -67,7 +67,7 @@ jobs:
         with:
           toolchain: ${{ needs.setup.outputs.toolchain }}
           components: rust-src, rustc-dev, llvm-tools-preview
-          # NOTE: b/530101873 - Crubit has some compiler warnings. By default rustflags is
+          # See b/530101873: Crubit has some compiler warnings. By default rustflags is
           # "-D warnings" causing the build to fail.
           rustflags: ""
 
