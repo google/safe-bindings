@@ -6,6 +6,7 @@
 #include <gtest/gtest.h>
 #include "testing/fuzzing/fuzztest.h"
 #include "absl/status/statusor.h"
+#include "absl/strings/string_view.h"
 
 namespace security::yaml {
 namespace {
@@ -13,7 +14,7 @@ namespace {
 using ::google::protobuf::Value;
 using ::testing::EqualsProto;
 
-void ParseArbitraryYamlDoesNotCrash(const std::string& yaml_input) {
+void ParseArbitraryYamlDoesNotCrash(absl::string_view yaml_input) {
   absl::StatusOr<Value> result1 = ParseYaml<Value>(yaml_input);
   absl::StatusOr<Value> result2 = ParseYaml<Value>(yaml_input);
 
