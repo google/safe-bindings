@@ -157,8 +157,12 @@ typedef struct {
   void* options;
 } lzma_filter;
 
+#define LZMA_LCLP_MIN 0
+#define LZMA_LCLP_MAX 4
 #define LZMA_LC_DEFAULT 3
 #define LZMA_LP_DEFAULT 0
+#define LZMA_PB_MIN 0
+#define LZMA_PB_MAX 4
 #define LZMA_PB_DEFAULT 2
 
 /* ---- Preset flags ---- */
@@ -379,10 +383,6 @@ lzma_ret lzma_raw_decoder(lzma_stream* strm, const lzma_filter* filters);
 // this FFI implementation currently only acts upon the `LZMA_CONCATENATED`,
 // `LZMA_TELL_NO_CHECK`, and `LZMA_TELL_ANY_CHECK` flags. Other accepted flags
 // are selectively ignored.
-//
-// Note that when decoding legacy `.lzma` streams, this implementation accepts
-// non-standard dictionary sizes that standard liblzma rejects with
-// `LZMA_FORMAT_ERROR`.
 //
 // Returns `LZMA_OK` upon successful initialization, `LZMA_OPTIONS_ERROR`
 // if unsupported flags are provided, or `LZMA_PROG_ERROR` if state setup fails.
