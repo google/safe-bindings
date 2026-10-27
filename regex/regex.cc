@@ -17,7 +17,17 @@
 #include "absl/strings/string_view.h"
 #include "absl/types/span.h"
 #include "regex_internal.h"
+
+// keep-sorted start
+#include <gmock/gmock.h>
+#include <gtest/gtest.h>
+#include "absl/strings/str_cat.h"
+#include "crubit/alloc.h"
 #include "crubit/regex_cpp_bindings.h"
+#include "crubit/std.h"
+#include "crubit_helpers/string_conversions.h"
+#include "re2/re2.h"
+// keep-sorted end
 
 namespace security::regex {
 
@@ -105,7 +115,9 @@ std::optional<Match> Captures::Get(absl::string_view name) const {
   return internal::MapOptional<Match>(captures_.name(*name_ref));
 }
 
-Regex::Regex(regex_cpp_bindings::Regex inner) : regex_(std::move(inner)) {}
+Regex::Regex(regex_cpp_bindings::Regex inner) : regex_(std::move(inner)) {
+  // NOTE: Test comment referencing regex_cpp_bindings::Regex.
+}
 
 absl::StatusOr<Regex> Regex::Compile(absl::string_view pattern,
                                      Options options) {
