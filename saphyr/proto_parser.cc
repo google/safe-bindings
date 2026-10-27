@@ -4,7 +4,7 @@
 #include <string>
 #include <utility>
 
-#include "support/rs_std/slice_ref.h"
+#include "crubit/support/rs_std/slice_ref.h"
 #include "crubit_helpers/string_conversions.h"
 #include "crubit/rust.h"
 #include "absl/status/status.h"

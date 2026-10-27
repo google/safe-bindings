@@ -18,7 +18,7 @@ template <typename T>
 using IntoDeserializer = ::serde_core::de::IntoDeserializer<T>;
 }
 
-#include "support/rs_std/vec.h"
+#include "crubit/support/rs_std/vec.h"
 #include "crubit/rust.h"
 #include "absl/base/attributes.h"
 #include "absl/base/nullability.h"

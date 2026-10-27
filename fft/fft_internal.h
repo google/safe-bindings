@@ -7,10 +7,10 @@
 #include <functional>
 #include <numeric>
 
-#include "support/rs_std/result.h"
-#include "support/rs_std/slice_ref.h"
-#include "support/rs_std/unit.h"
-#include "support/rs_std/vec.h"
+#include "crubit/support/rs_std/result.h"
+#include "crubit/support/rs_std/slice_ref.h"
+#include "crubit/support/rs_std/unit.h"
+#include "crubit/support/rs_std/vec.h"
 #include "array_layout.h"
 #include "crubit/rust.h"
 #include "absl/status/status.h"

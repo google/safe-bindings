@@ -6,7 +6,7 @@
 #include <utility>
 #include <variant>
 
-#include "support/rs_std/slice_ref.h"
+#include "crubit/support/rs_std/slice_ref.h"
 #include "crubit_helpers/string_conversions.h"
 #include "quick_reader.h"
 #include "crubit/rust.h"

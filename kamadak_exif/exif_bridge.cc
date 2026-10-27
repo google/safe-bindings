@@ -9,7 +9,7 @@
 #include <utility>
 #include <vector>
 
-#include "support/rs_std/slice_ref.h"
+#include "crubit/support/rs_std/slice_ref.h"
 #include "crubit/rust.h"
 #include "crubit_helpers/string_conversions.h"
 #include "absl/algorithm/container.h"
