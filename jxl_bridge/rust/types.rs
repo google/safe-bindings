@@ -196,8 +196,8 @@ impl Default for JxlBridgeExtraChannelType {
 }
 
 impl JxlBridgeExtraChannelType {
-    fn from_jxl(ec_type: jxl::headers::extra_channels::ExtraChannel) -> Self {
-        use jxl::headers::extra_channels::ExtraChannel;
+    fn from_jxl(ec_type: jxl::api::ExtraChannel) -> Self {
+        use jxl::api::ExtraChannel;
         match ec_type {
             ExtraChannel::Alpha => Self::Alpha,
             ExtraChannel::Depth => Self::Depth,
@@ -351,7 +351,11 @@ impl JxlBridgeDecoderOptions {
         opts.coalescing = self.coalescing;
         opts.skip_preview = self.skip_preview;
         opts.high_precision = self.high_precision;
-        opts.premultiply_output = self.premultiply_output;
+        opts.alpha_mode = if self.premultiply_output {
+            jxl::api::AlphaMode::Premultiplied
+        } else {
+            jxl::api::AlphaMode::AsIs
+        };
         opts.scan_frames_only = self.scan_frames_only;
         if self.sample_limit > 0 {
             opts.sample_limit = Some(usize::try_from(self.sample_limit).unwrap_or(usize::MAX));
