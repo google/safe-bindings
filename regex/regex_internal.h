@@ -10,11 +10,11 @@
 #include <type_traits>
 #include <utility>
 
-#include "support/rs_std/slice_ref.h"
-#include "support/rs_std/vec.h"
 #include "absl/log/absl_check.h"
 #include "absl/strings/string_view.h"
 #include "absl/types/span.h"
+#include "support/rs_std/slice_ref.h"
+#include "support/rs_std/vec.h"
 #include "crubit/regex_cpp_bindings.h"
 
 namespace security::regex {

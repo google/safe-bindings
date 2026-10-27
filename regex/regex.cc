@@ -8,14 +8,14 @@
 #include <utility>
 #include <vector>
 
-#include "support/rs_std/slice_ref.h"
-#include "support/rs_std/str_ref.h"
-#include "support/rs_std/vec.h"
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
 #include "absl/strings/str_format.h"
 #include "absl/strings/string_view.h"
 #include "absl/types/span.h"
+#include "support/rs_std/slice_ref.h"
+#include "support/rs_std/str_ref.h"
+#include "support/rs_std/vec.h"
 #include "regex_internal.h"
 #include "crubit/regex_cpp_bindings.h"
 
