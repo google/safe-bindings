@@ -1,6 +1,6 @@
 //! JXL decoder bridge for C++ consumption via Crubit.
 //!
-//! Provides a simple, stateful decoder that wraps jxl-rs's `JxlDecoderInner`
+//! Provides a simple, stateful decoder that wraps jxl-rs's `JxlDecoder`
 //! into a linear workflow suitable for C++ callers.
 //!
 //! Each decoding stage takes a `&[u8]` input and returns a `StatusOr<JxlBridgeProcessResult>`.
@@ -13,7 +13,7 @@ use crate::types::{
     JxlBridgeFeedResult, JxlBridgeFrameHeader, JxlBridgeProcessResult, JxlBridgeSampleFormat,
 };
 use cpp_std::vector;
-use jxl::api::{JxlBasicInfo, JxlDecoderInner, JxlOutputBuffer, JxlPixelFormat, ProcessingResult};
+use jxl::api::{Event, JxlBasicInfo, JxlDecoder, JxlOutputBuffer, JxlPixelFormat, JxlSignature};
 use jxl::error::Error as JxlError;
 
 use status::{Status, StatusError, StatusOr};
@@ -54,7 +54,7 @@ fn to_status(e: JxlError) -> StatusError {
         | JxlError::UnexpectedCodestreamBoxEnd
         | JxlError::BlendingPreColorTransform(..)
         | JxlError::PaletteTooLarge(..)
-        | JxlError::TooManyModularChannels(..)
+        | JxlError::LevelLimitExceeded { .. }
         | JxlError::SectionTooShort => status::invalid_argument(msg),
 
         // Resource exhaustion.
@@ -75,7 +75,7 @@ fn to_status(e: JxlError) -> StatusError {
         | JxlError::InvalidOutputBufferSize(..) => status::invalid_argument(msg),
 
         // Caller used the decoder API in the wrong order.
-        JxlError::PixelFormatChangedAfterFirstFrame => status::failed_precondition(msg),
+        JxlError::ApiUsageError(..) => status::failed_precondition(msg),
 
         // Everything else is an internal decoder error.
         _ => status::internal(msg),
@@ -116,7 +116,7 @@ enum DecoderState {
 /// 6. `decoder.decode_frame(data, output)` -> returns bytes consumed
 /// 7. For animation: repeat steps 5-6 for each frame
 pub struct JxlBridgeDecoder {
-    decoder: Box<JxlDecoderInner>,
+    decoder: Box<JxlDecoder>,
     state: DecoderState,
     /// Cached basic info after header decode.
     basic_info: Option<JxlBridgeBasicInfo>,
@@ -164,7 +164,7 @@ impl JxlBridgeDecoder {
         let coalescing = options.coalescing;
         let jxl_options = options.to_jxl_options();
         Self {
-            decoder: Box::new(JxlDecoderInner::new(jxl_options)),
+            decoder: Box::new(JxlDecoder::new(jxl_options)),
             state: DecoderState::Initializing,
             basic_info: None,
             pixel_format: None,
@@ -202,7 +202,7 @@ impl JxlBridgeDecoder {
         let consumed = original_len - input.len();
 
         match result {
-            ProcessingResult::Complete { .. } => {
+            Event::BasicInfo => {
                 let profile = self.decoder.output_color_profile().ok_or_else(|| {
                     status::internal("Output color profile not available after header decode")
                 })?;
@@ -219,10 +219,13 @@ impl JxlBridgeDecoder {
                     consumed,
                 })
             }
-            ProcessingResult::NeedsMoreInput { .. } => status::ok(JxlBridgeProcessResult {
+            Event::NeedMoreInput { .. } => status::ok(JxlBridgeProcessResult {
                 status: JxlBridgeFeedResult::NeedsMoreInput,
                 consumed,
             }),
+            other => status::err(status::internal(format!(
+                "Unexpected decoder event during header decode: {other:?}"
+            ))),
         }
     }
 
@@ -260,7 +263,7 @@ impl JxlBridgeDecoder {
         let consumed = original_len - input.len();
 
         match result {
-            ProcessingResult::Complete { .. } => {
+            Event::FrameHeader => {
                 self.state = DecoderState::FrameHeaderDecoded;
                 // Eagerly cache the frame header so that frame_header()
                 // can be called with &self.
@@ -273,10 +276,13 @@ impl JxlBridgeDecoder {
                     consumed,
                 })
             }
-            ProcessingResult::NeedsMoreInput { .. } => status::ok(JxlBridgeProcessResult {
+            Event::NeedMoreInput { .. } => status::ok(JxlBridgeProcessResult {
                 status: JxlBridgeFeedResult::NeedsMoreInput,
                 consumed,
             }),
+            other => status::err(status::internal(format!(
+                "Unexpected decoder event during frame header decode: {other:?}"
+            ))),
         }
     }
 
@@ -364,13 +370,12 @@ impl JxlBridgeDecoder {
         let total_consumed = header_consumed + frame_consumed;
 
         match result {
-            ProcessingResult::Complete { .. } => {
-                let has_more = self.decoder.has_more_frames();
+            Event::FrameComplete { has_more_frames } => {
                 // Clear cached frame header from this frame.
                 self.frame_header = None;
                 self.state =
-                    if has_more { DecoderState::HeaderDecoded } else { DecoderState::Done };
-                if has_more {
+                    if has_more_frames { DecoderState::HeaderDecoded } else { DecoderState::Done };
+                if has_more_frames {
                     status::ok(JxlBridgeProcessResult {
                         status: JxlBridgeFeedResult::FrameReady,
                         consumed: total_consumed,
@@ -382,10 +387,13 @@ impl JxlBridgeDecoder {
                     })
                 }
             }
-            ProcessingResult::NeedsMoreInput { .. } => status::ok(JxlBridgeProcessResult {
+            Event::NeedMoreInput { .. } => status::ok(JxlBridgeProcessResult {
                 status: JxlBridgeFeedResult::NeedsMoreInput,
                 consumed: total_consumed,
             }),
+            other => status::err(status::internal(format!(
+                "Unexpected decoder event during frame decode: {other:?}"
+            ))),
         }
     }
 
@@ -501,7 +509,7 @@ impl JxlBridgeDecoder {
     /// Returns `true` if there are more frames left to decode in the image.
     #[must_use]
     pub fn has_more_frames(&self) -> bool {
-        self.state != DecoderState::Done && self.decoder.has_more_frames()
+        self.state != DecoderState::Done
     }
 
     /// Returns the frame header for the next frame to be decoded.
@@ -526,8 +534,5 @@ impl JxlBridgeDecoder {
 /// Returns true for both bare codestream and container formats.
 #[must_use]
 pub fn has_jxl_signature(data: &[u8]) -> bool {
-    match jxl::api::check_signature(data) {
-        ProcessingResult::Complete { result } => result.is_some(),
-        _ => false,
-    }
+    matches!(jxl::api::check_signature(data), JxlSignature::Codestream | JxlSignature::Container)
 }

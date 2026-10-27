@@ -9,7 +9,7 @@ use image::{
     codecs::webp::WebPDecoder as RustWebPDecoder, ImageFormat, ImageReader as RustImageReader,
 };
 #[cfg(feature = "jxl")]
-use jxl::api::{check_signature as check_jxl_signature, ProcessingResult as JxlProcessingResult};
+use jxl::api::{check_signature as check_jxl_signature, JxlSignature};
 #[cfg(feature = "jxl")]
 use jxl_image_rs_integration::JxlDecoder as RustJxlDecoder;
 use std::fs::File;
@@ -59,7 +59,7 @@ fn has_jxl_signature(reader: &mut dyn ReadSeek) -> std::io::Result<bool> {
     {
         Ok(matches!(
             check_jxl_signature(reader.fill_buf()?),
-            JxlProcessingResult::Complete { result: Some(_) }
+            JxlSignature::Codestream | JxlSignature::Container
         ))
     }
     #[cfg(not(feature = "jxl"))]
