@@ -14,6 +14,7 @@ namespace security::yaml {
 struct ParseOptions {
   int recursion_depth_limit = 30;
   bool ignore_unknown_fields = true;
+  bool case_insensitive_enum_parsing = false;
 };
 
 // Converts a YAML string to JSON.
@@ -28,6 +29,8 @@ absl::StatusOr<ProtoT> ParseYaml(absl::string_view yaml_text,
   ProtoT proto;
   proto2::util::JsonParseOptions json_options;
   json_options.ignore_unknown_fields = options.ignore_unknown_fields;
+  json_options.case_insensitive_enum_parsing =
+      options.case_insensitive_enum_parsing;
   RETURN_IF_ERROR(
       proto2::util::JsonStringToMessage(json, &proto, json_options));
   return proto;

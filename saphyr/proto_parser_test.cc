@@ -3,6 +3,7 @@
 #include <string>
 
 #include "google/protobuf/struct.proto.h"
+#include "google/protobuf/type.proto.h"
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 #include "absl/status/status.h"
@@ -10,6 +11,7 @@
 namespace security::yaml {
 namespace {
 
+using ::google::protobuf::Field;
 using ::google::protobuf::Value;
 using ::testing::EqualsProto;
 using ::testing::HasSubstr;
@@ -164,6 +166,32 @@ TEST(ProtoParserTest, RecursionLimit) {
   options.recursion_depth_limit = 10;
   ASSERT_OK_AND_ASSIGN(Value proto, ParseYaml<Value>(yaml_text, options));
   EXPECT_TRUE(proto.has_struct_value());
+}
+
+TEST(ProtoParserTest, CaseInsensitiveEnumParsing) {
+  // Note that "type_string" is defined in upper case.
+  std::string yaml_text = "name: my_field\nkind: type_string";
+
+  EXPECT_THAT(ParseYaml<Field>(yaml_text), IsOkAndHolds(EqualsProto(R"pb(
+                name: "my_field"
+                kind: TYPE_UNKNOWN
+              )pb")));
+
+  EXPECT_THAT(ParseYaml<Field>(yaml_text, {.ignore_unknown_fields = false}),
+              StatusIs(absl::StatusCode::kInvalidArgument));
+
+  EXPECT_THAT(
+      ParseYaml<Field>(yaml_text, {.case_insensitive_enum_parsing = true}),
+      IsOkAndHolds(EqualsProto(R"pb(
+        name: "my_field" kind: TYPE_STRING
+      )pb")));
+
+  EXPECT_THAT(
+      ParseYaml<Field>(yaml_text, {.ignore_unknown_fields = false,
+                                   .case_insensitive_enum_parsing = true}),
+      IsOkAndHolds(EqualsProto(R"pb(
+        name: "my_field" kind: TYPE_STRING
+      )pb")));
 }
 
 }  // namespace
