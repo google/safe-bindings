@@ -546,10 +546,10 @@ lzma_check lzma_get_check(const lzma_stream* strm);
 // For encoders and raw decoders where options are explicitly configured at
 // initialization, returns the calculated memory usage in bytes.
 //
-// Note: For streaming decoders where dictionary size is determined dynamically
+// For streaming decoders where dictionary size is determined dynamically
 // from the stream header (e.g., `lzma_stream_decoder`, `lzma_alone_decoder`,
-// `lzma_auto_decoder`, `lzma_lzip_decoder`), this implementation returns 0
-// as the underlying Rust decoders do not expose runtime memory usage.
+// `lzma_auto_decoder`, `lzma_lzip_decoder`), returns the memory usage in bytes
+// once the header has been parsed, and 0 before that.
 uint64_t lzma_memusage(const lzma_stream* strm);
 
 #ifdef __cplusplus
