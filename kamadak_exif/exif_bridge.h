@@ -9,11 +9,11 @@
 #include <string>
 #include <vector>
 
-#include "support/rs_std/slice_ref.h"
 #include "crubit/rust.h"
 #include "absl/base/attributes.h"
 #include "absl/status/statusor.h"
 #include "absl/types/span.h"
+#include "support/rs_std/slice_ref.h"
 
 namespace security::exif_bridge {
 
