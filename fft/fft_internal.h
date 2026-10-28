@@ -7,15 +7,15 @@
 #include <functional>
 #include <numeric>
 
-#include "support/rs_std/result.h"
-#include "support/rs_std/slice_ref.h"
-#include "support/rs_std/unit.h"
-#include "support/rs_std/vec.h"
 #include "array_layout.h"
 #include "crubit/rust.h"
 #include "absl/status/status.h"
 #include "absl/strings/string_view.h"
 #include "absl/types/span.h"
+#include "support/rs_std/result.h"
+#include "support/rs_std/slice_ref.h"
+#include "support/rs_std/unit.h"
+#include "support/rs_std/vec.h"
 
 namespace security::fft::internal {
 
