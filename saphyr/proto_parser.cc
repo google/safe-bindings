@@ -4,13 +4,13 @@
 #include <string>
 #include <utility>
 
-#include "support/rs_std/slice_ref.h"
 #include "crubit_helpers/string_conversions.h"
 #include "crubit/rust.h"
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
 #include "absl/strings/string_view.h"
 #include "absl/types/span.h"
+#include "support/rs_std/slice_ref.h"
 
 namespace security::yaml {
 
