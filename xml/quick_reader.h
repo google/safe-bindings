@@ -18,13 +18,13 @@ template <typename T>
 using IntoDeserializer = ::serde_core::de::IntoDeserializer<T>;
 }
 
-#include "support/rs_std/vec.h"
 #include "crubit/rust.h"
 #include "absl/base/attributes.h"
 #include "absl/base/nullability.h"
 #include "absl/log/die_if_null.h"
 #include "absl/status/statusor.h"
 #include "absl/strings/string_view.h"
+#include "support/rs_std/vec.h"
 
 namespace security::xml {
 

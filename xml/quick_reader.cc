@@ -7,9 +7,6 @@
 #include <utility>
 #include <variant>
 
-#include "support/rs_std/result.h"
-#include "support/rs_std/str_ref.h"
-#include "support/rs_std/vec.h"
 #include "crubit_helpers/string_conversions.h"
 #include "crubit/rust.h"
 #include "absl/base/attributes.h"
@@ -21,6 +18,9 @@
 #include "absl/status/statusor.h"
 #include "absl/strings/str_cat.h"
 #include "absl/strings/string_view.h"
+#include "support/rs_std/result.h"
+#include "support/rs_std/str_ref.h"
+#include "support/rs_std/vec.h"
 
 namespace security::xml {
 
