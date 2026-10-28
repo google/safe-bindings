@@ -27,15 +27,15 @@ pub extern "C" fn lzma_cputhreads() -> u32 {
 ///
 /// Implements `lzma_memusage` by interrogating the rust state struct.
 /// Returns memory usage for encoders and raw decoders where options are known.
-/// For streaming decoders (XZ, Alone, Lzip, Auto), returns 0 because
-/// the underlying decoders do not expose dynamically parsed dictionary size.
+/// For streaming decoders (XZ, Alone, Lzip, Auto), returns the figure the crate
+/// checks against the memory limit, which is 0 until the header has been parsed.
 ///
 /// # Safety
 /// - `strm` must be null or point to a valid, properly aligned `lzma_stream`.
 /// - If `strm` is non-null and `strm.internal` is non-null, it must point to a valid
 ///   `InternalState` allocated by this crate.
-/// - The caller must guarantee that `*strm` and `*strm.internal` are not concurrently modified
-///   or deallocated during this call.
+/// - The caller must guarantee that `*strm` and `*strm.internal` are not concurrently modified or
+///   deallocated during this call.
 #[unsafe(export_name = crate::prefix!(lzma_memusage))]
 pub unsafe extern "C" fn lzma_memusage(strm: Option<&crate::types::lzma_stream>) -> u64 {
     let Some(strm) = strm else {
