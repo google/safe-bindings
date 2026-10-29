@@ -17,6 +17,25 @@
 
 namespace security::pixel_bridge {
 
+inline constexpr uint32_t kPngMaxWidth =
+    rust::png::PNG_USER_WIDTH_MAX;
+inline constexpr uint32_t kPngMaxHeight =
+    rust::png::PNG_USER_HEIGHT_MAX;
+
+struct Rgba8 final {
+  uint8_t r;
+  uint8_t g;
+  uint8_t b;
+  uint8_t a;
+  friend bool operator==(const Rgba8&, const Rgba8&) = default;
+};
+
+struct PngTextMetadata final {
+  std::optional<std::string> exif;
+  std::optional<std::string> iptc;
+  std::optional<std::string> xmp;
+};
+
 // An enumeration over the types that back the value of a pixel.
 enum class PixelType {
   kUint8,
@@ -165,6 +184,25 @@ class ImageDecoder final {
   // whether an image is decodable. Returns `std::nullopt` if this cannot be
   // determined for a given image (does not mean the image is invalid).
   std::optional<uint8_t> GetInputBitDepth() const;
+  // Returns the colour type encoded in the image header before decoding
+  // transformations (such as palette or `tRNS` expansion), or `std::nullopt`
+  // if the encoded colour type is indexed or unknown.
+  std::optional<ColorType> GetInputColorType() const;
+  // Returns whether the image has a full alpha channel or a spec-valid
+  // transparency chunk (for PNG, a `tRNS` chunk that `png_handle_tRNS` in
+  // libpng keeps).
+  bool HasValidTransparency() const;
+  // Returns the raw `bKGD` background colour (`{r, g, b}`) of a PNG image, or
+  // `std::nullopt` if the image is not a PNG or has no valid `bKGD` chunk.
+  std::optional<std::array<uint16_t, 3>> GetBackgroundColor() const;
+  // Returns the RGBA8 palette of an indexed PNG (truncated to the entries
+  // indexable by its bit depth, with alpha from `tRNS` when valid), an empty
+  // vector for non-indexed PNGs, or `std::nullopt` if the image is not a PNG.
+  std::optional<std::vector<Rgba8>> GetPalette() const;
+  // Extracts pre-`IDAT` text-chunk EXIF, IPTC, and XMP metadata from a PNG
+  // using libpng's chunk rules and verifies that the rest of the PNG stream
+  // decodes through `IEND`.
+  absl::StatusOr<PngTextMetadata> ReadPngTextMetadata() &&;
   // Returns the ICC color profile embedded in the image, or
   // std::nullopt if the image does not have one. For formats that
   // don’t support embedded profiles this function should always return
