@@ -8,8 +8,9 @@ use lzma_rust2::Status;
 use crate::helpers::{self, FfiAction};
 use crate::state::{ActionState, CoderInner, CoderResult, InternalState};
 use crate::types::{
-    lzma_ret, lzma_stream, LZMA_BUF_ERROR, LZMA_CHECK_NONE, LZMA_GET_CHECK, LZMA_NO_CHECK, LZMA_OK,
-    LZMA_OPTIONS_ERROR, LZMA_PROG_ERROR, LZMA_STREAM_END, LZMA_TELL_ANY_CHECK, LZMA_TELL_NO_CHECK,
+    lzma_ret, lzma_stream, LZMA_BUF_ERROR, LZMA_CHECK_NONE, LZMA_GET_CHECK, LZMA_MEMLIMIT_ERROR,
+    LZMA_NO_CHECK, LZMA_OK, LZMA_OPTIONS_ERROR, LZMA_PROG_ERROR, LZMA_STREAM_END,
+    LZMA_TELL_ANY_CHECK, LZMA_TELL_NO_CHECK,
 };
 
 pub(crate) struct StreamView<'a> {
@@ -339,10 +340,17 @@ unsafe fn lzma_code_inner(
         }
         Err(e) => {
             state.allow_buf_error = false;
-            // NOTE(b/563249135): liblzma keeps reporting LZMA_MEMLIMIT_ERROR
-            // instead of failing the stream.
-            state.action_state = ActionState::Error;
-            helpers::map_rust_error(e)
+            let ret = helpers::map_rust_error(e);
+            if ret == LZMA_MEMLIMIT_ERROR {
+                // Like liblzma, a memory limit error leaves the stream usable: the decoder
+                // checks the limit again on the next call, from the same point in the input.
+                if let ActionState::Finish { .. } = state.action_state {
+                    state.action_state = ActionState::Finish { saved_avail_in: strm_ref.avail_in };
+                }
+            } else {
+                state.action_state = ActionState::Error;
+            }
+            ret
         }
     }
 }

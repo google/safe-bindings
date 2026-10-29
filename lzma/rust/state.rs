@@ -4,7 +4,8 @@ use std::sync::{Arc, Mutex};
 use crate::helpers::{self, FfiAction};
 use crate::types::{
     self, lzma_filter, lzma_options_lzma, lzma_ret, LZMA_CONCATENATED, LZMA_LCLP_MAX,
-    LZMA_OPTIONS_ERROR, LZMA_PB_MAX, LZMA_PROG_ERROR, LZMA_TELL_ANY_CHECK, LZMA_TELL_NO_CHECK,
+    LZMA_MEMLIMIT_ERROR, LZMA_OK, LZMA_OPTIONS_ERROR, LZMA_PB_MAX, LZMA_PROG_ERROR,
+    LZMA_TELL_ANY_CHECK, LZMA_TELL_NO_CHECK,
 };
 use lzma_rust2::{
     CheckType, LzipStream, LzipWriter, Lzma2Stream, Lzma2Writer, LzmaOptions, LzmaStream,
@@ -54,7 +55,9 @@ fn decoder_result(
             bytes_produced: r.bytes_produced,
             result: Ok(r.status),
         },
-        Err(e) if e.kind() != io::ErrorKind::UnexpectedEof => {
+        Err(e)
+            if !matches!(e.kind(), io::ErrorKind::UnexpectedEof | io::ErrorKind::OutOfMemory) =>
+        {
             CoderResult { bytes_consumed: 0, bytes_produced: 0, result: Err(e) }
         }
         Err(e) => {
@@ -186,6 +189,24 @@ impl CoderInner {
             _ => 0,
         }
     }
+
+    /// Hands a new memory limit, in bytes, to a decoder that takes one. Returns `false` for
+    /// the others.
+    fn set_memlimit(&mut self, memlimit: u64) -> bool {
+        let memlimit_kb = if memlimit == u64::MAX {
+            u32::MAX
+        } else {
+            (memlimit / 1024).clamp(0, u32::MAX as u64) as u32
+        };
+        match self {
+            CoderInner::XzDecoder(xz) => xz.set_mem_limit(memlimit_kb),
+            CoderInner::LzmaDecoder(lzma) => lzma.set_mem_limit(memlimit_kb),
+            CoderInner::LzipDecoder(lzip) => lzip.set_mem_limit(memlimit_kb),
+            CoderInner::AutoDecoder(auto) => auto.set_memlimit(memlimit),
+            _ => return false,
+        }
+        true
+    }
 }
 
 impl InternalState {
@@ -200,8 +221,29 @@ impl InternalState {
         }
     }
 
+    /// Returns `LZMA_PROG_ERROR` for coders without a memory limit, which includes the raw decoders
+    /// (the ones built from `lzma_options`).
+    pub fn set_memlimit(&mut self, new_memlimit: u64) -> lzma_ret {
+        if self.lzma_options.is_some() {
+            return LZMA_PROG_ERROR;
+        }
+        let new_memlimit = new_memlimit.max(1);
+        if new_memlimit < self.memusage() {
+            return LZMA_MEMLIMIT_ERROR;
+        }
+        if !self.coder.set_memlimit(new_memlimit) {
+            return LZMA_PROG_ERROR;
+        }
+        LZMA_OK
+    }
+
     pub fn memusage(&self) -> u64 {
-        match &self.coder {
+        // The auto decoder answers for the format it detected.
+        let coder = match &self.coder {
+            CoderInner::AutoDecoder(auto) => auto.inner().unwrap_or(&self.coder),
+            coder => coder,
+        };
+        match coder {
             CoderInner::RawLzma2Decoder(_) => {
                 if let Some(opts) = &self.lzma_options {
                     let dict_size = opts.dict_size.max(lzma_rust2::DICT_SIZE_MIN);
@@ -209,7 +251,7 @@ impl InternalState {
                 }
                 0
             }
-            CoderInner::LzmaDecoder(_) => {
+            CoderInner::LzmaDecoder(lzma) => {
                 if let Some(opts) = &self.lzma_options {
                     let dict_size = opts.dict_size.max(lzma_rust2::DICT_SIZE_MIN);
                     if let Ok(mem_kb) =
@@ -218,10 +260,12 @@ impl InternalState {
                         return (mem_kb as u64) * 1024;
                     }
                 }
-                0
+                lzma.memory_usage().map_or(0, |kb| u64::from(kb) * 1024)
             }
-            // NOTE (b/562586054): Add support for lzma_stream_decoder,
-            // lzma_auto_decoder, lzma_lzip_decoder, and lzma_alone_decoder.
+            CoderInner::XzDecoder(xz) => xz.memory_usage().map_or(0, |kb| u64::from(kb) * 1024),
+            CoderInner::LzipDecoder(lzip) => {
+                lzip.memory_usage().map_or(0, |kb| u64::from(kb) * 1024)
+            }
             _ => 0,
         }
     }
@@ -746,6 +790,14 @@ impl AutoDecoder {
     /// The coder picked for the detected format, or `None` before detection.
     pub fn inner(&self) -> Option<&CoderInner> {
         self.coder.as_deref()
+    }
+
+    /// Sets the limit the detected coder gets, or has.
+    fn set_memlimit(&mut self, memlimit: u64) {
+        self.memlimit = memlimit;
+        if let Some(coder) = self.coder.as_deref_mut() {
+            coder.set_memlimit(memlimit);
+        }
     }
 
     #[inline(never)]

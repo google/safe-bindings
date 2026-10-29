@@ -546,11 +546,23 @@ lzma_check lzma_get_check(const lzma_stream* strm);
 // For encoders and raw decoders where options are explicitly configured at
 // initialization, returns the calculated memory usage in bytes.
 //
-// Note: For streaming decoders where dictionary size is determined dynamically
+// For streaming decoders where dictionary size is determined dynamically
 // from the stream header (e.g., `lzma_stream_decoder`, `lzma_alone_decoder`,
-// `lzma_auto_decoder`, `lzma_lzip_decoder`), this implementation returns 0
-// as the underlying Rust decoders do not expose runtime memory usage.
+// `lzma_auto_decoder`, `lzma_lzip_decoder`), returns the memory usage in bytes
+// once the header has been parsed, and 0 before that.
 uint64_t lzma_memusage(const lzma_stream* strm);
+
+// Sets the memory usage limit in bytes. A limit of 0 is treated as 1.
+//
+// Supported only for the decoders that take a `memlimit` argument. After
+// `LZMA_MEMLIMIT_ERROR` from `lzma_code`, raising the limit to at least
+// `lzma_memusage` lets the next `lzma_code` call continue.
+//
+// Returns `LZMA_OK` on success, `LZMA_MEMLIMIT_ERROR` if `new_memlimit` is
+// lower than `lzma_memusage` (the limit is left unchanged), or
+// `LZMA_PROG_ERROR` if `strm` is nullptr, lacks an internal state, or its coder
+// has no memory usage limit.
+lzma_ret lzma_memlimit_set(lzma_stream* strm, uint64_t new_memlimit);
 
 #ifdef __cplusplus
 }
