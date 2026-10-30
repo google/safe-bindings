@@ -38,6 +38,42 @@ absl::StatusOr<CompressionMethod> ToSecurityZipCompressionMethod(
 
 }  // namespace
 
+bool ZipEntryMetadata::IsFile() const { return metadata_.is_file(); }
+bool ZipEntryMetadata::IsDir() const { return metadata_.is_dir(); }
+bool ZipEntryMetadata::IsEncrypted() const { return metadata_.is_encrypted(); }
+std::string ZipEntryMetadata::GetFileName() const {
+  rust::VecU8 name_vec = metadata_.get_file_name();
+  return std::string(security::crubit_helpers::StringViewFromVecU8(name_vec));
+}
+absl::StatusOr<CompressionMethod> ZipEntryMetadata::GetCompressionMethod()
+    const {
+  return ToSecurityZipCompressionMethod(metadata_.get_compression_method());
+}
+std::string ZipEntryMetadata::GetComment() const {
+  rust::VecU8 comment_vec = metadata_.get_comment();
+  return std::string(
+      security::crubit_helpers::StringViewFromVecU8(comment_vec));
+}
+uint64_t ZipEntryMetadata::GetUncompressedSize() const {
+  return metadata_.get_uncompressed_size();
+}
+uint64_t ZipEntryMetadata::GetCompressedSize() const {
+  return metadata_.get_compressed_size();
+}
+uint32_t ZipEntryMetadata::GetCrc32() const { return metadata_.get_crc32(); }
+uint16_t ZipEntryMetadata::GetLastModifiedDate() const {
+  return metadata_.get_last_modified_date();
+}
+uint16_t ZipEntryMetadata::GetLastModifiedTime() const {
+  return metadata_.get_last_modified_time();
+}
+uint32_t ZipEntryMetadata::GetUnixMode() const {
+  return metadata_.get_unix_mode();
+}
+uint64_t ZipEntryMetadata::GetHeaderStart() const {
+  return metadata_.get_header_start();
+}
+
 absl::Status BufferedZipFile::CheckNone() const {
   if (IsNone()) {
     return absl::InternalError("ZipFile object used after being moved-out");
@@ -98,6 +134,14 @@ absl::StatusOr<RustVecU8Wrapper> BufferedZipFile::GetExtraData() const {
   ABSL_RETURN_IF_ERROR(CheckNone());
   return RustVecU8Wrapper(zip_.get_extra_data());
 }
+absl::StatusOr<uint64_t> BufferedZipFile::GetHeaderStart() const {
+  ABSL_RETURN_IF_ERROR(CheckNone());
+  return zip_.get_header_start();
+}
+absl::StatusOr<uint64_t> BufferedZipFile::GetDataStart() const {
+  ABSL_RETURN_IF_ERROR(CheckNone());
+  return zip_.get_data_start();
+}
 absl::StatusOr<RustVecU8Wrapper> BufferedZipFile::GetFileData() {
   ABSL_RETURN_IF_ERROR(CheckNone());
   return FromRustResultVecU8(zip_.get_file_data());
@@ -107,6 +151,10 @@ absl::StatusOr<RustVecU8Wrapper> BufferedZipFile::GetFileData(size_t max_size) {
     return status;
   }
   return FromRustResultVecU8(zip_.get_file_data_with_max_size(max_size));
+}
+absl::StatusOr<RustVecU8Wrapper> BufferedZipFile::ReadBytes(size_t max_bytes) {
+  ABSL_RETURN_IF_ERROR(CheckNone());
+  return FromRustResultVecU8(zip_.read_bytes(max_bytes));
 }
 
 absl::Status FsZipFile::CheckNone() const {
@@ -168,6 +216,14 @@ absl::StatusOr<RustVecU8Wrapper> FsZipFile::GetExtraData() const {
   ABSL_RETURN_IF_ERROR(CheckNone());
   return RustVecU8Wrapper(zip_.get_extra_data());
 }
+absl::StatusOr<uint64_t> FsZipFile::GetHeaderStart() const {
+  ABSL_RETURN_IF_ERROR(CheckNone());
+  return zip_.get_header_start();
+}
+absl::StatusOr<uint64_t> FsZipFile::GetDataStart() const {
+  ABSL_RETURN_IF_ERROR(CheckNone());
+  return zip_.get_data_start();
+}
 absl::StatusOr<RustVecU8Wrapper> FsZipFile::GetFileData() {
   ABSL_RETURN_IF_ERROR(CheckNone());
   return FromRustResultVecU8(zip_.get_file_data());
@@ -177,6 +233,10 @@ absl::StatusOr<RustVecU8Wrapper> FsZipFile::GetFileData(size_t max_size) {
     return status;
   }
   return FromRustResultVecU8(zip_.get_file_data_with_max_size(max_size));
+}
+absl::StatusOr<RustVecU8Wrapper> FsZipFile::ReadBytes(size_t max_bytes) {
+  ABSL_RETURN_IF_ERROR(CheckNone());
+  return FromRustResultVecU8(zip_.read_bytes(max_bytes));
 }
 
 absl::StatusOr<bool> ZipFile::IsFile() const {
@@ -223,11 +283,21 @@ absl::StatusOr<uint32_t> ZipFile::GetUnixMode() const {
 absl::StatusOr<RustVecU8Wrapper> ZipFile::GetExtraData() const {
   return std::visit([](const auto& zip) { return zip.GetExtraData(); }, zip_);
 }
+absl::StatusOr<uint64_t> ZipFile::GetHeaderStart() const {
+  return std::visit([](const auto& zip) { return zip.GetHeaderStart(); }, zip_);
+}
+absl::StatusOr<uint64_t> ZipFile::GetDataStart() const {
+  return std::visit([](const auto& zip) { return zip.GetDataStart(); }, zip_);
+}
 absl::StatusOr<RustVecU8Wrapper> ZipFile::GetFileData() {
   return std::visit([](auto& zip) { return zip.GetFileData(); }, zip_);
 }
 absl::StatusOr<RustVecU8Wrapper> ZipFile::GetFileData(size_t max_size) {
   return std::visit([max_size](auto& zip) { return zip.GetFileData(max_size); },
+                    zip_);
+}
+absl::StatusOr<RustVecU8Wrapper> ZipFile::ReadBytes(size_t max_bytes) {
+  return std::visit([max_bytes](auto& zip) { return zip.ReadBytes(max_bytes); },
                     zip_);
 }
 
