@@ -5,6 +5,7 @@ use crate::{BufferedZipFile, FsZipFile, VecU8, ZipError};
 use std::fmt::{Debug, Formatter};
 use std::fs::File;
 use std::io::{Cursor, Read, Seek};
+use zip::read::ZipFile as WrappedZipFile;
 use zip::ZipArchive as WrappedZipArchive;
 
 #[derive(Default)]
@@ -75,7 +76,7 @@ impl BufferedZipArchive {
 
     /// Returns a zip file by its index.
     ///
-    /// Returns an empty zip file if archive is not open.
+    /// Returns an error if the archive is not open (`is_none()`).
     /// Returns an error if `index` is out of bounds.
     pub fn get_file_by_index(&mut self, index: usize) -> Result<BufferedZipFile<'_>, ZipError> {
         match self.reader.as_mut() {
@@ -83,7 +84,7 @@ impl BufferedZipArchive {
                 Ok(file) => Ok(BufferedZipFile::new(file)),
                 Err(e) => Err(ZipError::out_of_range(e.to_string())),
             },
-            None => Ok(BufferedZipFile::default()),
+            None => Err(ZipError::failed_precondition("Zip archive is not open")),
         }
     }
 
@@ -92,7 +93,7 @@ impl BufferedZipArchive {
     /// Warning: Writers in zip-rs do not support writing compressed data as-is.
     /// This data will be compressed again when writing.
     ///
-    /// Returns an empty zip file if archive is not open.
+    /// Returns an error if the archive is not open (`is_none()`).
     /// Returns an error if `index` is out of bounds.
     pub fn get_file_by_index_raw(&mut self, index: usize) -> Result<BufferedZipFile<'_>, ZipError> {
         match self.reader.as_mut() {
@@ -100,7 +101,7 @@ impl BufferedZipArchive {
                 Ok(file) => Ok(BufferedZipFile::new(file)),
                 Err(e) => Err(ZipError::out_of_range(e.to_string())),
             },
-            None => Ok(BufferedZipFile::default()),
+            None => Err(ZipError::failed_precondition("Zip archive is not open")),
         }
     }
 }
@@ -180,7 +181,7 @@ impl FsZipArchive {
 
     /// Returns a zip file by its index.
     ///
-    /// Returns an empty zip file if archive is not open.
+    /// Returns an error if the archive is not open (`is_none()`).
     /// Returns an error if `index` is out of bounds.
     pub fn get_file_by_index(&mut self, index: usize) -> Result<FsZipFile<'_>, ZipError> {
         match self.reader.as_mut() {
@@ -188,7 +189,7 @@ impl FsZipArchive {
                 Ok(file) => Ok(FsZipFile::new(file)),
                 Err(e) => Err(ZipError::out_of_range(e.to_string())),
             },
-            None => Ok(FsZipFile::default()),
+            None => Err(ZipError::failed_precondition("Zip archive is not open")),
         }
     }
 
@@ -197,7 +198,7 @@ impl FsZipArchive {
     /// Warning: Writers in zip-rs do not support writing compressed data as-is.
     /// This data will be compressed again when writing.
     ///
-    /// Returns an empty zip file if archive is not open.
+    /// Returns an error if the archive is not open (`is_none()`).
     /// Returns an error if `index` is out of bounds.
     pub fn get_file_by_index_raw(&mut self, index: usize) -> Result<FsZipFile<'_>, ZipError> {
         match self.reader.as_mut() {
@@ -205,7 +206,7 @@ impl FsZipArchive {
                 Ok(file) => Ok(FsZipFile::new(file)),
                 Err(e) => Err(ZipError::out_of_range(e.to_string())),
             },
-            None => Ok(FsZipFile::default()),
+            None => Err(ZipError::failed_precondition("Zip archive is not open")),
         }
     }
 }
@@ -219,4 +220,299 @@ fn get_length_impl<R: Read + Seek>(reader: &Option<Box<WrappedZipArchive<R>>>) -
 
 fn get_comment_impl<R: Read + Seek>(reader: &Option<Box<WrappedZipArchive<R>>>) -> VecU8 {
     reader.as_ref().map(|r| VecU8::copy_from_slice(r.comment())).unwrap_or_default()
+}
+
+/// Shared body of `read_next_file` / `read_next_file_with_compressed_size` for
+/// both stream readers.
+///
+/// Returns `Ok(None)` if the stream is already finished or once the start of
+/// the central directory is reached (which also sets `finished`). Returns a
+/// `FailedPrecondition` error if `reader` is `None`. When `compressed_size` is
+/// `Some`, it is used for entries whose local header carries no size (general
+/// purpose bit 3 / data descriptor).
+fn read_next_file_impl<'a, R: Read>(
+    reader: &'a mut Option<Box<R>>,
+    finished: &mut bool,
+    compressed_size: Option<u64>,
+) -> Result<Option<WrappedZipFile<'a, R>>, ZipError> {
+    if *finished {
+        return Ok(None);
+    }
+    let reader = match reader.as_deref_mut() {
+        Some(reader) => reader,
+        None => return Err(ZipError::failed_precondition("Zip stream reader is not open")),
+    };
+    let result = match compressed_size {
+        Some(size) => zip::read::read_zipfile_from_stream_with_compressed_size(reader, size),
+        None => zip::read::read_zipfile_from_stream(reader),
+    };
+    match result {
+        Ok(Some(file)) => Ok(Some(file)),
+        Ok(None) => {
+            *finished = true;
+            Ok(None)
+        }
+        Err(e) => Err(ZipError::from_zip_error(e)),
+    }
+}
+
+/// A streaming zip reader that reads from an in-memory buffer without seeking.
+#[derive(Default)]
+pub struct BufferedZipStreamReader {
+    reader: Option<Box<Cursor<Vec<u8>>>>,
+    finished: bool,
+}
+
+impl Debug for BufferedZipStreamReader {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("BufferedZipStreamReader")
+            .field("reader", &if self.reader.is_some() { "Some(Cursor<Vec<u8>>)" } else { "None" })
+            .field("finished", &self.finished)
+            .finish()
+    }
+}
+
+impl BufferedZipStreamReader {
+    /// Initializes an empty `BufferedZipStreamReader`.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Creates a new `BufferedZipStreamReader` from data.
+    pub fn new_from_data(data: VecU8) -> Result<Self, ZipError> {
+        Ok(Self { reader: Some(Box::new(Cursor::new(data.into_vec()))), finished: false })
+    }
+
+    /// Returns whether the stream reader is none (due to being default-constructed
+    /// or moved-from).
+    pub fn is_none(&self) -> bool {
+        self.reader.is_none()
+    }
+
+    /// Returns whether the end of the archive stream has been reached.
+    pub fn is_finished(&self) -> bool {
+        self.finished
+    }
+
+    /// Reads the next zip file from the stream.
+    ///
+    /// When there are no more files in the archive (start of central directory
+    /// is reached), returns a `BufferedZipFile` where `is_none()` returns true.
+    pub fn read_next_file(&mut self) -> Result<BufferedZipFile<'_>, ZipError> {
+        Ok(read_next_file_impl(&mut self.reader, &mut self.finished, None)?
+            .map(BufferedZipFile::new)
+            .unwrap_or_default())
+    }
+
+    /// Reads the next zip file from the stream with an assumed compressed size.
+    ///
+    /// When there are no more files in the archive, returns a `BufferedZipFile`
+    /// where `is_none()` returns true.
+    pub fn read_next_file_with_compressed_size(
+        &mut self,
+        compressed_size: u64,
+    ) -> Result<BufferedZipFile<'_>, ZipError> {
+        Ok(read_next_file_impl(&mut self.reader, &mut self.finished, Some(compressed_size))?
+            .map(BufferedZipFile::new)
+            .unwrap_or_default())
+    }
+}
+
+/// A streaming zip reader that reads sequentially from a file without seeking.
+#[derive(Default)]
+pub struct FsZipStreamReader {
+    reader: Option<Box<File>>,
+    finished: bool,
+}
+
+impl Debug for FsZipStreamReader {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("FsZipStreamReader")
+            .field("reader", &if self.reader.is_some() { "Some(File)" } else { "None" })
+            .field("finished", &self.finished)
+            .finish()
+    }
+}
+
+impl FsZipStreamReader {
+    /// Initializes an empty `FsZipStreamReader`.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Creates a new `FsZipStreamReader` from a path.
+    pub fn new_from_path(path: &[u8]) -> Result<Self, ZipError> {
+        let path_str = std::str::from_utf8(path)
+            .map_err(|e| ZipError::invalid_argument(format!("Failed to open zip stream: {}", e)))?;
+        let file = File::open(path_str)
+            .map_err(|e| ZipError::invalid_argument(format!("Failed to open zip stream: {}", e)))?;
+        Ok(Self { reader: Some(Box::new(file)), finished: false })
+    }
+
+    /// Returns whether the stream reader is none (due to being default-constructed
+    /// or moved-from).
+    pub fn is_none(&self) -> bool {
+        self.reader.is_none()
+    }
+
+    /// Returns whether the end of the archive stream has been reached.
+    pub fn is_finished(&self) -> bool {
+        self.finished
+    }
+
+    /// Reads the next zip file from the stream.
+    ///
+    /// When there are no more files in the archive (start of central directory
+    /// is reached), returns a `FsZipFile` where `is_none()` returns true.
+    pub fn read_next_file(&mut self) -> Result<FsZipFile<'_>, ZipError> {
+        Ok(read_next_file_impl(&mut self.reader, &mut self.finished, None)?
+            .map(FsZipFile::new)
+            .unwrap_or_default())
+    }
+
+    /// Reads the next zip file from the stream with an assumed compressed size.
+    ///
+    /// When there are no more files in the archive, returns a `FsZipFile`
+    /// where `is_none()` returns true.
+    pub fn read_next_file_with_compressed_size(
+        &mut self,
+        compressed_size: u64,
+    ) -> Result<FsZipFile<'_>, ZipError> {
+        Ok(read_next_file_impl(&mut self.reader, &mut self.finished, Some(compressed_size))?
+            .map(FsZipFile::new)
+            .unwrap_or_default())
+    }
+}
+
+/// Reads the next zip file from a buffered stream reader.
+pub fn read_buffered_zipfile_from_stream(
+    reader: &mut BufferedZipStreamReader,
+) -> Result<BufferedZipFile<'_>, ZipError> {
+    reader.read_next_file()
+}
+
+/// Reads the next zip file from a buffered stream reader with an assumed compressed size.
+pub fn read_buffered_zipfile_from_stream_with_compressed_size(
+    reader: &mut BufferedZipStreamReader,
+    compressed_size: u64,
+) -> Result<BufferedZipFile<'_>, ZipError> {
+    reader.read_next_file_with_compressed_size(compressed_size)
+}
+
+/// Reads the next zip file from a filesystem stream reader.
+pub fn read_fs_zipfile_from_stream(
+    reader: &mut FsZipStreamReader,
+) -> Result<FsZipFile<'_>, ZipError> {
+    reader.read_next_file()
+}
+
+/// Reads the next zip file from a filesystem stream reader with an assumed compressed size.
+pub fn read_fs_zipfile_from_stream_with_compressed_size(
+    reader: &mut FsZipStreamReader,
+    compressed_size: u64,
+) -> Result<FsZipFile<'_>, ZipError> {
+    reader.read_next_file_with_compressed_size(compressed_size)
+}
+
+#[cfg(test)]
+mod tests {
+        use super::*;
+    use crate::{BufferedZipWriter, CompressionMethod, ZipErrorCode, ZipWriterFileOptions};
+    use googletest::prelude::*;
+
+    fn create_test_zip() -> VecU8 {
+        let mut writer = BufferedZipWriter::new_from_data(VecU8::default(), false).unwrap();
+        let options = ZipWriterFileOptions::new().compression_method(CompressionMethod::Stored);
+        writer.start_file(b"hello.txt", options).unwrap();
+        writer.write_data(VecU8::from(b"Hello, world!".to_vec())).unwrap();
+        writer.start_file(b"second.txt", options).unwrap();
+        writer.write_data(VecU8::from(b"Second file content".to_vec())).unwrap();
+        writer.finish().unwrap()
+    }
+
+    #[gtest]
+    fn test_buffered_stream_reader_read_all_files() {
+        let zip_data = create_test_zip();
+        let mut reader = BufferedZipStreamReader::new_from_data(zip_data).unwrap();
+        expect_false!(reader.is_none());
+        expect_false!(reader.is_finished());
+
+        {
+            let mut file1 = reader.read_next_file().unwrap();
+            expect_false!(file1.is_none());
+            expect_eq!(file1.get_file_name().as_slice(), b"hello.txt");
+            expect_true!(file1.is_file());
+            expect_false!(file1.is_dir());
+            expect_eq!(file1.get_file_data().unwrap().as_slice(), b"Hello, world!");
+        }
+
+        {
+            let mut file2 = reader.read_next_file().unwrap();
+            expect_false!(file2.is_none());
+            expect_eq!(file2.get_file_name().as_slice(), b"second.txt");
+            expect_eq!(file2.get_file_data().unwrap().as_slice(), b"Second file content");
+        }
+
+        // Third read should return None (end of files)
+        {
+            let file3 = reader.read_next_file().unwrap();
+            expect_true!(file3.is_none());
+        }
+        expect_true!(reader.is_finished());
+
+        // Repeated reads after finish should be idempotent
+        {
+            let file4 = reader.read_next_file().unwrap();
+            expect_true!(file4.is_none());
+        }
+    }
+
+    #[gtest]
+    fn test_buffered_stream_reader_chunked_read() {
+        let zip_data = create_test_zip();
+        let mut reader = BufferedZipStreamReader::new_from_data(zip_data).unwrap();
+        let mut file = reader.read_next_file().unwrap();
+        expect_false!(file.is_none());
+
+        // Read in chunks of 5 bytes
+        let chunk1 = file.read_bytes(5).unwrap();
+        expect_eq!(chunk1.as_slice(), b"Hello");
+        let chunk2 = file.read_bytes(5).unwrap();
+        expect_eq!(chunk2.as_slice(), b", wor");
+        let chunk3 = file.read_bytes(5).unwrap();
+        expect_eq!(chunk3.as_slice(), b"ld!");
+        let chunk4 = file.read_bytes(5).unwrap();
+        expect_true!(chunk4.is_empty());
+    }
+
+    #[gtest]
+    fn test_buffered_stream_reader_free_functions() {
+        let zip_data = create_test_zip();
+        let mut reader = BufferedZipStreamReader::new_from_data(zip_data).unwrap();
+        let mut file = read_buffered_zipfile_from_stream(&mut reader).unwrap();
+        expect_false!(file.is_none());
+        expect_eq!(file.get_file_name().as_slice(), b"hello.txt");
+        expect_eq!(file.get_file_data().unwrap().as_slice(), b"Hello, world!");
+    }
+
+    #[gtest]
+    fn test_buffered_stream_reader_with_compressed_size() {
+        let zip_data = create_test_zip();
+        let mut reader = BufferedZipStreamReader::new_from_data(zip_data).unwrap();
+        // File 1 is uncompressed "Hello, world!" which is 13 bytes stored
+        let mut file = reader.read_next_file_with_compressed_size(13).unwrap();
+        expect_false!(file.is_none());
+        expect_eq!(file.get_file_name().as_slice(), b"hello.txt");
+        expect_eq!(file.get_file_data().unwrap().as_slice(), b"Hello, world!");
+    }
+
+    #[gtest]
+    fn test_buffered_stream_reader_invalid_data() {
+        let mut reader =
+            BufferedZipStreamReader::new_from_data(VecU8::from(b"not a zip".to_vec())).unwrap();
+        let res = reader.read_next_file();
+        // A bad local file header signature maps to InvalidArchive.
+        let code = res.err().map(|e| e.code);
+        expect_eq!(code, Some(ZipErrorCode::InvalidArgument));
+    }
 }
