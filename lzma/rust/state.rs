@@ -54,7 +54,9 @@ fn decoder_result(
             bytes_produced: r.bytes_produced,
             result: Ok(r.status),
         },
-        Err(e) if e.kind() != io::ErrorKind::UnexpectedEof => {
+        Err(e)
+            if !matches!(e.kind(), io::ErrorKind::UnexpectedEof | io::ErrorKind::OutOfMemory) =>
+        {
             CoderResult { bytes_consumed: 0, bytes_produced: 0, result: Err(e) }
         }
         Err(e) => {
@@ -201,7 +203,12 @@ impl InternalState {
     }
 
     pub fn memusage(&self) -> u64 {
-        match &self.coder {
+        // The auto decoder answers for the format it detected.
+        let coder = match &self.coder {
+            CoderInner::AutoDecoder(auto) => auto.inner().unwrap_or(&self.coder),
+            coder => coder,
+        };
+        match coder {
             CoderInner::RawLzma2Decoder(_) => {
                 if let Some(opts) = &self.lzma_options {
                     let dict_size = opts.dict_size.max(lzma_rust2::DICT_SIZE_MIN);
@@ -209,7 +216,7 @@ impl InternalState {
                 }
                 0
             }
-            CoderInner::LzmaDecoder(_) => {
+            CoderInner::LzmaDecoder(lzma) => {
                 if let Some(opts) = &self.lzma_options {
                     let dict_size = opts.dict_size.max(lzma_rust2::DICT_SIZE_MIN);
                     if let Ok(mem_kb) =
@@ -218,10 +225,12 @@ impl InternalState {
                         return (mem_kb as u64) * 1024;
                     }
                 }
-                0
+                lzma.memory_usage().map_or(0, |kb| u64::from(kb) * 1024)
             }
-            // NOTE (b/562586054): Add support for lzma_stream_decoder,
-            // lzma_auto_decoder, lzma_lzip_decoder, and lzma_alone_decoder.
+            CoderInner::XzDecoder(xz) => xz.memory_usage().map_or(0, |kb| u64::from(kb) * 1024),
+            CoderInner::LzipDecoder(lzip) => {
+                lzip.memory_usage().map_or(0, |kb| u64::from(kb) * 1024)
+            }
             _ => 0,
         }
     }
