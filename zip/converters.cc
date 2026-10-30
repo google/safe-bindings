@@ -1,5 +1,6 @@
 #include "converters.h"
 
+#include <cstdint>
 #include <string>
 #include <utility>
 
@@ -51,6 +52,14 @@ absl::Status FromRustResultUnit(
   return absl::OkStatus();
 }
 
+absl::StatusOr<uint64_t> FromRustResultU64(
+    rs_std::Result<uint64_t, rust::ZipError> result_u64) {
+  if (!result_u64.has_value()) {
+    return ZipErrorToStatus(std::move(result_u64).err());
+  }
+  return std::move(result_u64).value();
+}
+
 absl::StatusOr<rust::BufferedZipArchive> FromRustBufferedZipArchive(
     rs_std::Result<rust::BufferedZipArchive, rust::ZipError>
         result_buffered_zip_archive) {
@@ -67,6 +76,15 @@ absl::StatusOr<rust::FsZipArchive> FromRustFsZipArchive(
     return ZipErrorToStatus(std::move(result_fs_zip_archive).err());
   }
   return std::move(result_fs_zip_archive).value();
+}
+
+absl::StatusOr<rust::CallbackZipArchive> FromRustCallbackZipArchive(
+    rs_std::Result<rust::CallbackZipArchive, rust::ZipError>
+        result_callback_zip_archive) {
+  if (!result_callback_zip_archive.has_value()) {
+    return ZipErrorToStatus(std::move(result_callback_zip_archive).err());
+  }
+  return std::move(result_callback_zip_archive).value();
 }
 
 absl::StatusOr<rust::BufferedZipFile> FromRustBufferedZipFile(
@@ -87,6 +105,24 @@ absl::StatusOr<rust::FsZipFile> FromRustFsZipFile(
   return std::move(result_fs_zip_file).value();
 }
 
+absl::StatusOr<rust::CallbackZipFile> FromRustCallbackZipFile(
+    rs_std::Result<rust::CallbackZipFile, rust::ZipError>
+        result_callback_zip_file) {
+  if (!result_callback_zip_file.has_value()) {
+    return ZipErrorToStatus(std::move(result_callback_zip_file).err());
+  }
+  return std::move(result_callback_zip_file).value();
+}
+
+absl::StatusOr<rust::ZipEntryMetadata> FromRustZipEntryMetadata(
+    rs_std::Result<rust::ZipEntryMetadata, rust::ZipError>
+        result_zip_entry_metadata) {
+  if (!result_zip_entry_metadata.has_value()) {
+    return ZipErrorToStatus(std::move(result_zip_entry_metadata).err());
+  }
+  return std::move(result_zip_entry_metadata).value();
+}
+
 absl::StatusOr<rust::BufferedZipWriter> FromRustBufferedZipWriter(
     rs_std::Result<rust::BufferedZipWriter, rust::ZipError>
         result_buffered_zip_writer) {
@@ -103,6 +139,34 @@ absl::StatusOr<rust::FsZipWriter> FromRustFsZipWriter(
     return ZipErrorToStatus(std::move(result_fs_zip_writer).err());
   }
   return std::move(result_fs_zip_writer).value();
+}
+
+absl::StatusOr<rust::BufferedZipStreamReader>
+FromRustBufferedZipStreamReader(
+    rs_std::Result<rust::BufferedZipStreamReader, rust::ZipError>
+        result_buffered_zip_stream_reader) {
+  if (!result_buffered_zip_stream_reader.has_value()) {
+    return ZipErrorToStatus(std::move(result_buffered_zip_stream_reader).err());
+  }
+  return std::move(result_buffered_zip_stream_reader).value();
+}
+
+absl::StatusOr<rust::FsZipStreamReader> FromRustFsZipStreamReader(
+    rs_std::Result<rust::FsZipStreamReader, rust::ZipError>
+        result_fs_zip_stream_reader) {
+  if (!result_fs_zip_stream_reader.has_value()) {
+    return ZipErrorToStatus(std::move(result_fs_zip_stream_reader).err());
+  }
+  return std::move(result_fs_zip_stream_reader).value();
+}
+
+absl::StatusOr<rust::FsZipStreamWriter> FromRustFsZipStreamWriter(
+    rs_std::Result<rust::FsZipStreamWriter, rust::ZipError>
+        result_fs_zip_stream_writer) {
+  if (!result_fs_zip_stream_writer.has_value()) {
+    return ZipErrorToStatus(std::move(result_fs_zip_stream_writer).err());
+  }
+  return std::move(result_fs_zip_stream_writer).value();
 }
 
 }  // namespace security::zip
