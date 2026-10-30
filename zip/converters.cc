@@ -33,6 +33,15 @@ absl::Status ZipErrorToStatus(rust::ZipError err) {
   return absl::InternalError(msg);
 }
 
+template <typename T>
+absl::StatusOr<T> FromRustResult(
+    rs_std::Result<T, rust::ZipError>&& result) {
+  if (!result.has_value()) {
+    return ZipErrorToStatus(std::move(result).err());
+  }
+  return std::move(result).value();
+}
+
 }  // namespace
 
 absl::StatusOr<RustVecU8Wrapper> FromRustResultVecU8(
@@ -103,6 +112,19 @@ absl::StatusOr<rust::FsZipWriter> FromRustFsZipWriter(
     return ZipErrorToStatus(std::move(result_fs_zip_writer).err());
   }
   return std::move(result_fs_zip_writer).value();
+}
+
+absl::StatusOr<rust::BufferedZipStreamReader>
+FromRustBufferedZipStreamReader(
+    rs_std::Result<rust::BufferedZipStreamReader, rust::ZipError>
+        result_buffered_zip_stream_reader) {
+  return FromRustResult(std::move(result_buffered_zip_stream_reader));
+}
+
+absl::StatusOr<rust::FsZipStreamReader> FromRustFsZipStreamReader(
+    rs_std::Result<rust::FsZipStreamReader, rust::ZipError>
+        result_fs_zip_stream_reader) {
+  return FromRustResult(std::move(result_fs_zip_stream_reader));
 }
 
 }  // namespace security::zip

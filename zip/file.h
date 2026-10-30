@@ -32,7 +32,7 @@ class BufferedZipFile final {
       : zip_(std::move(zip)) {}
   absl::StatusOr<bool> IsFile() const;
   absl::StatusOr<bool> IsDir() const;
-  bool IsNone() const;
+  [[nodiscard]] bool IsNone() const;
   // WARNING: Path Traversal ("Zip Slip") Hazard: The returned file name is
   // extracted directly from the archive header without sanitization. If using
   // this path for filesystem operations, callers MUST sanitize and validate
@@ -72,8 +72,17 @@ class BufferedZipFile final {
   // WARNING: Decompression Bomb Hazard: This overload decompresses the entire
   // entry into an unbounded heap buffer. For untrusted zip archives, prefer
   // `GetFileData(size_t max_size)` below to cap memory allocation and defend
-  // against zip bomb memory exhaustion (OOM) attacks.
+  // against zip bomb memory exhaustion (OOM) attacks, or read the entry
+  // incrementally with `ReadBytes()`.
   absl::StatusOr<RustVecU8Wrapper> GetFileData();
+
+  // Reads up to `max_bytes` decompressed bytes from the entry, advancing the
+  // read position. This is the chunked, memory-bounded alternative to
+  // `GetFileData()`: at most `max_bytes` are buffered per call. Callers should
+  // loop until an empty result is returned rather than assuming a short
+  // non-empty read means end of entry. Returns `absl::StatusCode::kInternal` on
+  // a moved-from entry or on decompression/CRC/I/O errors.
+  absl::StatusOr<RustVecU8Wrapper> ReadBytes(size_t max_bytes);
 
   // Decompresses at most `max_size` bytes from the entry, returning
   // `absl::StatusCode::kOutOfRange` if the decompressed size exceeds
@@ -92,7 +101,7 @@ class FsZipFile final {
   explicit FsZipFile(rust::FsZipFile zip) : zip_(std::move(zip)) {}
   absl::StatusOr<bool> IsFile() const;
   absl::StatusOr<bool> IsDir() const;
-  bool IsNone() const;
+  [[nodiscard]] bool IsNone() const;
 
   // WARNING: Path Traversal ("Zip Slip") Hazard: The returned file name is
   // extracted directly from the archive header without sanitization. If using
@@ -133,8 +142,17 @@ class FsZipFile final {
   // WARNING: Decompression Bomb Hazard: This overload decompresses the entire
   // entry into an unbounded heap buffer. For untrusted zip archives, prefer
   // `GetFileData(size_t max_size)` below to cap memory allocation and defend
-  // against zip bomb memory exhaustion (OOM) attacks.
+  // against zip bomb memory exhaustion (OOM) attacks, or read the entry
+  // incrementally with `ReadBytes()`.
   absl::StatusOr<RustVecU8Wrapper> GetFileData();
+
+  // Reads up to `max_bytes` decompressed bytes from the entry, advancing the
+  // read position. This is the chunked, memory-bounded alternative to
+  // `GetFileData()`: at most `max_bytes` are buffered per call. Callers should
+  // loop until an empty result is returned rather than assuming a short
+  // non-empty read means end of entry. Returns `absl::StatusCode::kInternal` on
+  // a moved-from entry or on decompression/CRC/I/O errors.
+  absl::StatusOr<RustVecU8Wrapper> ReadBytes(size_t max_bytes);
 
   // Decompresses at most `max_size` bytes from the entry, returning
   // `absl::StatusCode::kOutOfRange` if the decompressed size exceeds
@@ -160,7 +178,7 @@ class ZipFile final {
 
   absl::StatusOr<bool> IsFile() const;
   absl::StatusOr<bool> IsDir() const;
-  bool IsNone() const;
+  [[nodiscard]] bool IsNone() const;
 
   // WARNING: Path Traversal ("Zip Slip") Hazard: The returned file name is
   // extracted directly from the archive header without sanitization. If using
@@ -201,8 +219,17 @@ class ZipFile final {
   // WARNING: Decompression Bomb Hazard: This overload decompresses the entire
   // entry into an unbounded heap buffer. For untrusted zip archives, prefer
   // `GetFileData(size_t max_size)` below to cap memory allocation and defend
-  // against zip bomb memory exhaustion (OOM) attacks.
+  // against zip bomb memory exhaustion (OOM) attacks, or read the entry
+  // incrementally with `ReadBytes()`.
   absl::StatusOr<RustVecU8Wrapper> GetFileData();
+
+  // Reads up to `max_bytes` decompressed bytes from the entry, advancing the
+  // read position. This is the chunked, memory-bounded alternative to
+  // `GetFileData()`: at most `max_bytes` are buffered per call. Callers should
+  // loop until an empty result is returned rather than assuming a short
+  // non-empty read means end of entry. Returns `absl::StatusCode::kInternal` on
+  // a moved-from entry or on decompression/CRC/I/O errors.
+  absl::StatusOr<RustVecU8Wrapper> ReadBytes(size_t max_bytes);
 
   // Decompresses at most `max_size` bytes from the entry, returning
   // `absl::StatusCode::kOutOfRange` if the decompressed size exceeds

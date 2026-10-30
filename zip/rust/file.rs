@@ -113,16 +113,23 @@ impl<'a> BufferedZipFile<'a> {
     }
 
     /// Returns the data of the file.
-    /// The result is only valid if `is_none()` returns false.
+    /// Returns an error if `is_none()` returns true.
     pub fn get_file_data(&mut self) -> Result<VecU8, ZipError> {
         get_file_data_impl(&mut self.file)
     }
 
     /// Returns the data of the file if its decompressed size does not exceed
     /// `max_size` bytes.
-    /// The result is only valid if `is_none()` returns false.
+    /// Returns an error if `is_none()` returns true.
     pub fn get_file_data_with_max_size(&mut self, max_size: usize) -> Result<VecU8, ZipError> {
         get_file_data_with_max_size_impl(&mut self.file, max_size)
+    }
+
+    /// Reads up to `max_bytes` decompressed data from the file.
+    /// Returns an empty VecU8 on EOF.
+    /// Returns an error if `is_none()` returns true.
+    pub fn read_bytes(&mut self, max_bytes: usize) -> Result<VecU8, ZipError> {
+        read_bytes_impl(&mut self.file, max_bytes)
     }
 }
 
@@ -239,16 +246,23 @@ impl<'a> FsZipFile<'a> {
     }
 
     /// Returns the data of the file.
-    /// The result is only valid if `is_none()` returns false.
+    /// Returns an error if `is_none()` returns true.
     pub fn get_file_data(&mut self) -> Result<VecU8, ZipError> {
         get_file_data_impl(&mut self.file)
     }
 
     /// Returns the data of the file if its decompressed size does not exceed
     /// `max_size` bytes.
-    /// The result is only valid if `is_none()` returns false.
+    /// Returns an error if `is_none()` returns true.
     pub fn get_file_data_with_max_size(&mut self, max_size: usize) -> Result<VecU8, ZipError> {
         get_file_data_with_max_size_impl(&mut self.file, max_size)
+    }
+
+    /// Reads up to `max_bytes` decompressed data from the file.
+    /// Returns an empty VecU8 on EOF.
+    /// Returns an error if `is_none()` returns true.
+    pub fn read_bytes(&mut self, max_bytes: usize) -> Result<VecU8, ZipError> {
+        read_bytes_impl(&mut self.file, max_bytes)
     }
 }
 
@@ -345,7 +359,7 @@ fn get_file_data_impl<'a, R: Read>(
                 Err(e) => Err(ZipError::internal(e.to_string())),
             }
         }
-        None => Ok(VecU8::default()),
+        None => Err(ZipError::internal("ZipFile is not available")),
     }
 }
 
@@ -371,6 +385,24 @@ fn get_file_data_with_max_size_impl<'a, R: Read>(
                 Err(e) => Err(ZipError::internal(e.to_string())),
             }
         }
-        None => Ok(VecU8::default()),
+        None => Err(ZipError::internal("ZipFile is not available")),
+    }
+}
+
+fn read_bytes_impl<'a, R: Read>(
+    file: &mut Option<Box<WrappedZipFile<'a, R>>>,
+    max_bytes: usize,
+) -> Result<VecU8, ZipError> {
+    match file.as_mut() {
+        Some(file) => {
+            // Grow the buffer only as data arrives instead of eagerly
+            // allocating `max_bytes` (which is caller-chosen and may be huge).
+            let mut buffer = Vec::new();
+            match (&mut **file).take(max_bytes as u64).read_to_end(&mut buffer) {
+                Ok(_) => Ok(buffer.into()),
+                Err(e) => Err(ZipError::internal(e.to_string())),
+            }
+        }
+        None => Err(ZipError::internal("ZipFile is not available")),
     }
 }
