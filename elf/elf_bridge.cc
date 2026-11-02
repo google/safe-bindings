@@ -14,8 +14,18 @@
 #include "absl/strings/str_cat.h"
 #include "absl/strings/string_view.h"
 #include "support/rs_std/result.h"
+#include "support/rs_std/str_ref.h"
 
 namespace elf_bridge {
+namespace {
+
+// When ABSL_OPTION_USE_STD_STRING_VIEW == 0, absl::string_view is not an alias
+// for std::string_view and cannot be constructed from std::string_view.
+constexpr absl::string_view StringViewFromStrRef(rs_std::StrRef str) noexcept {
+  return absl::string_view(str.data(), str.size());
+}
+
+}  // namespace
 
 template <typename To, typename From>
 std::optional<To> MapOption(const From& o) {
@@ -43,7 +53,8 @@ std::optional<To> MapOption(From&& o) {
 template <typename To, typename From>
 absl::StatusOr<To> MapResult(const From& r) {
   if (r.is_err()) {
-    return absl::InternalError(r.unwrap_err_ref().as_str());
+    return absl::InternalError(
+        StringViewFromStrRef(r.unwrap_err_ref().as_str()));
   }
   return To(r.unwrap_as_ref());
 }
@@ -51,7 +62,8 @@ absl::StatusOr<To> MapResult(const From& r) {
 template <typename To, typename From>
 absl::StatusOr<To> MapResult(From&& r) {
   if (r.is_err()) {
-    return absl::InternalError(r.unwrap_err_ref().as_str());
+    return absl::InternalError(
+        StringViewFromStrRef(r.unwrap_err_ref().as_str()));
   }
   if constexpr (std::is_same_v<decltype(r),
                                typename std::remove_reference_t<From>&&>) {
@@ -80,7 +92,8 @@ absl::StatusOr<std::string> MapResult(Wrapper<rs_std::Result<T, E>>&& r) {
 template <typename To, typename From, typename F>
 absl::StatusOr<To> MapResult(const From& r, F func) {
   if (r.is_err()) {
-    return absl::InternalError(r.unwrap_err_ref().as_str());
+    return absl::InternalError(
+        StringViewFromStrRef(r.unwrap_err_ref().as_str()));
   }
   return func(r.unwrap_as_ref());
 }
@@ -88,7 +101,8 @@ absl::StatusOr<To> MapResult(const From& r, F func) {
 template <typename To, typename From, typename F>
 absl::StatusOr<To> MapResult(From&& r, F func) {
   if (r.is_err()) {
-    return absl::InternalError(r.unwrap_err_ref().as_str());
+    return absl::InternalError(
+        StringViewFromStrRef(r.unwrap_err_ref().as_str()));
   }
   if constexpr (std::is_same_v<decltype(r),
                                typename std::remove_reference_t<From>&&>) {
@@ -103,7 +117,7 @@ absl::StatusOr<To> MapResult(From&& r, F func) {
 template <typename To, typename From, typename F, typename E>
 absl::StatusOr<To> MapResult(const From& r, F func, E err_func) {
   if (r.is_err()) {
-    return err_func(r.unwrap_err_ref().as_str());
+    return err_func(StringViewFromStrRef(r.unwrap_err_ref().as_str()));
   }
   return func(r.unwrap_as_ref());
 }
@@ -111,7 +125,7 @@ absl::StatusOr<To> MapResult(const From& r, F func, E err_func) {
 template <typename To, typename From, typename F, typename E>
 absl::StatusOr<To> MapResult(From&& r, F func, E err_func) {
   if (r.is_err()) {
-    return err_func(r.unwrap_err_ref().as_str());
+    return err_func(StringViewFromStrRef(r.unwrap_err_ref().as_str()));
   }
   if constexpr (std::is_same_v<decltype(r),
                                typename std::remove_reference_t<From>&&>) {
@@ -257,7 +271,8 @@ ElfBytes::GetSymbolVersionTable() const {
 absl::StatusOr<CommonElfData> ElfBytes::GetCommonData() const {
   auto result = inner_.find_common_data();
   if (result.is_err()) {
-    return absl::InternalError(result.unwrap_err_ref().as_str());
+    return absl::InternalError(
+        StringViewFromStrRef(result.unwrap_err_ref().as_str()));
   }
   auto common_data = std::move(result).unwrap();
   return CommonElfData(
@@ -287,10 +302,7 @@ absl::StatusOr<ElfStream> ElfStream::Open(std::string_view file_path) {
 
 absl::StatusOr<FileHeader> ElfStream::GetFileHeader() const {
   auto result = stream_.file_header();
-  if (result.is_err()) {
-    return absl::InternalError(result.unwrap_err_ref().as_str());
-  }
-  return FileHeader(result.unwrap_as_ref());
+  return MapResult<FileHeader>(result);
 }
 
 absl::StatusOr<SegmentTable> ElfStream::GetSegments() const {
