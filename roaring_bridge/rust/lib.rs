@@ -570,6 +570,27 @@ impl RoaringBitmap64 {
         self.inner.iter().collect()
     }
 
+    /// Copies the smallest values that are >= `start`, in ascending order, into `buffer`.
+    ///
+    /// Returns the number of values copied, which is the smaller of `buffer.len()` and the
+    /// number of values >= `start`. Elements of `buffer` past the returned count are left
+    /// untouched, and a count smaller than `buffer.len()` means that no values remain.
+    ///
+    /// To read the bitmap in batches, call this again with `start` set to one past the last
+    /// value copied, stopping once that value is `u64::MAX`. Each call locates `start` by
+    /// seeking directly to its bucket and container without scanning earlier values, so
+    /// larger buffers spread that cost over more values.
+    pub fn CopyValuesFrom(&self, start: u64, buffer: &mut [u64]) -> usize {
+        let mut iter = self.inner.iter();
+        iter.advance_to(start);
+        let mut count = 0;
+        for (slot, value) in buffer.iter_mut().zip(iter) {
+            *slot = value;
+            count += 1;
+        }
+        count
+    }
+
     /// Returns the serialized size in bytes.
     pub fn serialized_size(&self) -> usize {
         self.inner.serialized_size()
