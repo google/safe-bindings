@@ -474,6 +474,86 @@ impl Value {
     }
 }
 
+// Add convenience methods modeled after JsonCpp (`get(key, default).asXxx()` / `findXxx(key)`).
+//
+// Unlike JsonCpp's `get(key, default).asXxx()`, which aborts on non-object receivers, type
+// mismatches, or integer overflows and returns `0`/`false`/`""` on `"key": null`, `find_*_or`
+// safely returns `default_value` whenever this `Value` is not an object, `key` is missing or
+// `null`, the entry has a different JSON type, or an integer does not fit in the target width.
+//
+// Methods are provided for `bool`, `i32`, `u32`, `i64`, `u64`, `f64`, and strings, matching
+// JsonCpp's `Bool`/`Int`/`UInt`/`Int64`/`UInt64`/`Double`/`String` surface:
+// - `i32` and `u32` provide 32-bit range checking matching JsonCpp's `asInt()` / `asUInt()` (and
+//   avoid overload ambiguity if overloaded under a single C++ name in the future).
+// - Narrower C++ types (`int8_t`, `int16_t`, `uint8_t`, `uint16_t`, `float`) promote to `int32_t`
+//   or `double`.
+impl Value {
+    fn lookup_key(&self, key: &[u8]) -> Option<&serde_json::Value> {
+        self.value.as_object()?.get(String::from_utf8_lossy(key).as_ref())
+    }
+
+    /// Returns the bool associated with `key` if this [Value] is an object and the entry is a
+    /// bool, or `default_value` otherwise.
+    #[must_use]
+    pub fn find_bool_or(&self, key: &[u8], default_value: bool) -> bool {
+        self.lookup_key(key).and_then(serde_json::Value::as_bool).unwrap_or(default_value)
+    }
+
+    /// Returns the `i32` associated with `key` if this [Value] is an object and the entry is an
+    /// integer in `i32` range, or `default_value` otherwise.
+    #[must_use]
+    pub fn find_i32_or(&self, key: &[u8], default_value: i32) -> i32 {
+        self.lookup_key(key)
+            .and_then(serde_json::Value::as_i64)
+            .and_then(|v| i32::try_from(v).ok())
+            .unwrap_or(default_value)
+    }
+
+    /// Returns the `i64` associated with `key` if this [Value] is an object and the entry is an
+    /// `i64`, or `default_value` otherwise.
+    #[must_use]
+    pub fn find_i64_or(&self, key: &[u8], default_value: i64) -> i64 {
+        self.lookup_key(key).and_then(serde_json::Value::as_i64).unwrap_or(default_value)
+    }
+
+    /// Returns the `u32` associated with `key` if this [Value] is an object and the entry is an
+    /// integer in `u32` range, or `default_value` otherwise.
+    #[must_use]
+    pub fn find_u32_or(&self, key: &[u8], default_value: u32) -> u32 {
+        self.lookup_key(key)
+            .and_then(serde_json::Value::as_u64)
+            .and_then(|v| u32::try_from(v).ok())
+            .unwrap_or(default_value)
+    }
+
+    /// Returns the `u64` associated with `key` if this [Value] is an object and the entry is a
+    /// `u64`, or `default_value` otherwise.
+    #[must_use]
+    pub fn find_u64_or(&self, key: &[u8], default_value: u64) -> u64 {
+        self.lookup_key(key).and_then(serde_json::Value::as_u64).unwrap_or(default_value)
+    }
+
+    /// Returns the `f64` associated with `key` if this [Value] is an object and the entry is a
+    /// finite number, or `default_value` otherwise.
+    #[must_use]
+    pub fn find_f64_or(&self, key: &[u8], default_value: f64) -> f64 {
+        self.lookup_key(key).and_then(serde_json::Value::as_f64).unwrap_or(default_value)
+    }
+
+    /// Returns the string associated with `key` if this [Value] is an object and the entry is a
+    /// string, or `default_value` (lossily converted to UTF-8) otherwise.
+    #[must_use]
+    pub fn find_str_or(&self, key: &[u8], default_value: &[u8]) -> ToStringResult {
+        match self.lookup_key(key).and_then(serde_json::Value::as_str) {
+            Some(s) => ToStringResult::from(s),
+            None => match String::from_utf8_lossy(default_value) {
+                std::borrow::Cow::Borrowed(s) => ToStringResult::from(s),
+                std::borrow::Cow::Owned(s) => ToStringResult::from(s),
+            },
+        }
+    }
+}
+
 macro_rules! impl_from {
     ($t:ty) => {
         impl From<$t> for Value {

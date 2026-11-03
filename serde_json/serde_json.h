@@ -4,7 +4,7 @@
 // Single-include header for serde_json C++ bindings.
 //
 // Includes the Crubit-generated header plus additional C++ templates for
-// structured binding support of .items() and .items_mut().
+// structured binding support of .items() and .items_mut(), and ArrayOf.
 
 #include <cstddef>
 #include <tuple>
@@ -70,6 +70,7 @@ Value ArrayOf(const Range& range) {
   }
   return array;
 }
+
 }  // namespace rust
 
 #endif  // SECURITY_JSON_SERDE_JSON_SERDE_JSON_H_
