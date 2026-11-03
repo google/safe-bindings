@@ -54,7 +54,9 @@ fn decoder_result(
             bytes_produced: r.bytes_produced,
             result: Ok(r.status),
         },
-        Err(e) if e.kind() != io::ErrorKind::UnexpectedEof => {
+        Err(e)
+            if !matches!(e.kind(), io::ErrorKind::UnexpectedEof | io::ErrorKind::OutOfMemory) =>
+        {
             CoderResult { bytes_consumed: 0, bytes_produced: 0, result: Err(e) }
         }
         Err(e) => {
