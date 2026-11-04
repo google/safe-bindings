@@ -49,4 +49,4 @@ pub use types::{
     lzma_internal_s, lzma_mt, lzma_options_bcj, lzma_options_delta, lzma_options_lzma,
     lzma_reserved_enum, lzma_ret, lzma_stream,
 };
-pub use util::{lzma_cputhreads, lzma_memusage, lzma_version_string};
+pub use util::{lzma_cputhreads, lzma_memlimit_set, lzma_memusage, lzma_version_string};

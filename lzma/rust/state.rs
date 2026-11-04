@@ -4,7 +4,8 @@ use std::sync::{Arc, Mutex};
 use crate::helpers::{self, FfiAction};
 use crate::types::{
     self, lzma_filter, lzma_options_lzma, lzma_ret, LZMA_CONCATENATED, LZMA_LCLP_MAX,
-    LZMA_OPTIONS_ERROR, LZMA_PB_MAX, LZMA_PROG_ERROR, LZMA_TELL_ANY_CHECK, LZMA_TELL_NO_CHECK,
+    LZMA_MEMLIMIT_ERROR, LZMA_OK, LZMA_OPTIONS_ERROR, LZMA_PB_MAX, LZMA_PROG_ERROR,
+    LZMA_TELL_ANY_CHECK, LZMA_TELL_NO_CHECK,
 };
 use lzma_rust2::{
     CheckType, LzipStream, LzipWriter, Lzma2Stream, Lzma2Writer, LzmaOptions, LzmaStream,
@@ -188,6 +189,20 @@ impl CoderInner {
             _ => 0,
         }
     }
+
+    /// Hands a new memory limit, in bytes, to a decoder that takes one. Returns `false` for
+    /// the others.
+    fn set_memlimit(&mut self, memlimit: u64) -> bool {
+        let memlimit_kb = helpers::memlimit_to_kb(memlimit);
+        match self {
+            CoderInner::XzDecoder(xz) => xz.set_mem_limit(memlimit_kb),
+            CoderInner::LzmaDecoder(lzma) => lzma.set_mem_limit(memlimit_kb),
+            CoderInner::LzipDecoder(lzip) => lzip.set_mem_limit(memlimit_kb),
+            CoderInner::AutoDecoder(auto) => auto.set_memlimit(memlimit),
+            _ => return false,
+        }
+        true
+    }
 }
 
 impl InternalState {
@@ -202,17 +217,34 @@ impl InternalState {
         }
     }
 
+    /// Returns `LZMA_PROG_ERROR` for coders without a memory limit, which includes the raw decoders
+    /// (the ones built from `lzma_options`).
+    pub fn set_memlimit(&mut self, new_memlimit: u64) -> lzma_ret {
+        if self.lzma_options.is_some() {
+            return LZMA_PROG_ERROR;
+        }
+        let new_memlimit = new_memlimit.max(1);
+        if new_memlimit < self.memusage() {
+            return LZMA_MEMLIMIT_ERROR;
+        }
+        if !self.coder.set_memlimit(new_memlimit) {
+            return LZMA_PROG_ERROR;
+        }
+        LZMA_OK
+    }
+
     pub fn memusage(&self) -> u64 {
         // The auto decoder answers for the format it detected.
         let coder = match &self.coder {
             CoderInner::AutoDecoder(auto) => auto.inner().unwrap_or(&self.coder),
             coder => coder,
         };
+        let base = helpers::LZMA_MEMUSAGE_BASE;
         match coder {
             CoderInner::RawLzma2Decoder(_) => {
                 if let Some(opts) = &self.lzma_options {
                     let dict_size = opts.dict_size.max(lzma_rust2::DICT_SIZE_MIN);
-                    return (lzma_rust2::lzma2_get_memory_usage(dict_size) as u64) * 1024;
+                    return (lzma_rust2::lzma2_get_memory_usage(dict_size) as u64) * 1024 + base;
                 }
                 0
             }
@@ -222,15 +254,19 @@ impl InternalState {
                     if let Ok(mem_kb) =
                         lzma_rust2::lzma_get_memory_usage(dict_size, opts.lc, opts.lp)
                     {
-                        return (mem_kb as u64) * 1024;
+                        return (mem_kb as u64) * 1024 + base;
                     }
                 }
-                lzma.memory_usage().map_or(0, |kb| u64::from(kb) * 1024)
+                lzma.memory_usage().map_or(0, |kb| u64::from(kb) * 1024) + base
             }
-            CoderInner::XzDecoder(xz) => xz.memory_usage().map_or(0, |kb| u64::from(kb) * 1024),
+            CoderInner::XzDecoder(xz) => {
+                xz.memory_usage().map_or(0, |kb| u64::from(kb) * 1024) + base
+            }
             CoderInner::LzipDecoder(lzip) => {
-                lzip.memory_usage().map_or(0, |kb| u64::from(kb) * 1024)
+                lzip.memory_usage().map_or(0, |kb| u64::from(kb) * 1024) + base
             }
+            // Nothing detected yet: liblzma reports the base until it has a filter chain.
+            CoderInner::AutoDecoder(_) => base,
             _ => 0,
         }
     }
@@ -757,6 +793,14 @@ impl AutoDecoder {
         self.coder.as_deref()
     }
 
+    /// Sets the limit the detected coder gets, or has.
+    fn set_memlimit(&mut self, memlimit: u64) {
+        self.memlimit = memlimit;
+        if let Some(coder) = self.coder.as_deref_mut() {
+            coder.set_memlimit(memlimit);
+        }
+    }
+
     #[inline(never)]
     fn new_xz_coder(
         allow_multiple: bool,
@@ -785,11 +829,7 @@ impl AutoDecoder {
 
     #[inline(never)]
     fn init_coder(&mut self, first_byte: u8) -> io::Result<()> {
-        let memlimit_kb = if self.memlimit == u64::MAX {
-            u32::MAX
-        } else {
-            (self.memlimit / 1024).clamp(0, u32::MAX as u64) as u32
-        };
+        let memlimit_kb = helpers::memlimit_to_kb(self.memlimit);
 
         // Detect the file format. .xz files start with 0xFD which
         // cannot be the first byte of .lzma (LZMA_Alone) format.

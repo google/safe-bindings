@@ -15,6 +15,12 @@ use std::io::{self, ErrorKind};
 pub(crate) const LZMA_VLI_UNKNOWN: u64 = u64::MAX;
 pub(crate) const FILTERS_MAX: usize = 4;
 
+pub(crate) const LZMA_MEMUSAGE_BASE: u64 = 1 << 15;
+
+pub(crate) fn memlimit_to_kb(memlimit: u64) -> u32 {
+    (memlimit.saturating_sub(LZMA_MEMUSAGE_BASE) / 1024).try_into().unwrap_or(u32::MAX)
+}
+
 /// Safely extracts a slice of `lzma_filter` up to `LZMA_VLI_UNKNOWN` terminator
 /// or a defined maximum size.
 ///

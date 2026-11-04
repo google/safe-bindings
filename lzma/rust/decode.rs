@@ -39,11 +39,7 @@ pub unsafe extern "C" fn lzma_stream_decoder(
     }
 
     let allow_multiple = (flags & LZMA_CONCATENATED) != 0;
-    let memlimit_kb = if memlimit == u64::MAX {
-        u32::MAX
-    } else {
-        (memlimit / 1024).clamp(0, u32::MAX as u64) as u32
-    };
+    let memlimit_kb = helpers::memlimit_to_kb(memlimit);
 
     let mut decoder = XzStream::new_mem_limit(allow_multiple, memlimit_kb);
     if flags & (LZMA_TELL_NO_CHECK | LZMA_TELL_ANY_CHECK) != 0
@@ -75,14 +71,7 @@ pub unsafe extern "C" fn lzma_alone_decoder(strm: *mut lzma_stream, memlimit: u6
         return LZMA_PROG_ERROR;
     }
 
-    let memlimit_kb = if memlimit == u64::MAX {
-        // lzma_rust2 receives memlimit in KiB, not bytes. We convert it here.
-        // u64::MAX is a special value indicating no limit in liblzma
-        // In lzma_rust2, that special value is u32::MAX.
-        u32::MAX
-    } else {
-        (memlimit / 1024).clamp(0, u32::MAX as u64) as u32
-    };
+    let memlimit_kb = helpers::memlimit_to_kb(memlimit);
 
     let state = InternalState::new(CoderInner::LzmaDecoder(Box::new(LzmaStream::new_mem_limit(
         memlimit_kb,
@@ -246,11 +235,7 @@ pub unsafe extern "C" fn lzma_lzip_decoder(
     if flags & !(LZMA_SUPPORTED_FLAGS as u32) != 0 {
         return LZMA_OPTIONS_ERROR;
     }
-    let memlimit_kb = if memlimit == u64::MAX {
-        u32::MAX
-    } else {
-        (memlimit / 1024).clamp(0, u32::MAX as u64) as u32
-    };
+    let memlimit_kb = helpers::memlimit_to_kb(memlimit);
 
     let allow_multiple = (flags & LZMA_CONCATENATED) != 0;
     let state = InternalState::new(CoderInner::LzipDecoder(Box::new(LzipStream::new_mem_limit(
