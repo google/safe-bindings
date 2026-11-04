@@ -2,15 +2,20 @@
 // a zip archive can be built on needs its own set of wrapper types. This module
 // provides the reader that delegates to caller-supplied C callbacks, which is
 // what lets C++ open an archive over storage this crate knows nothing about
-// (for example a remote object read in ranges). The archive and file types
-// built on it are added in a follow-up change.
+// (for example a remote object read in ranges). `CallbackZipArchive` and
+// `CallbackZipFile` are the archive and file types built on it.
 
+use crate::read::CloneSlot;
 use crate::ZipError;
 use std::cell::RefCell;
-use std::fmt::{Debug, Formatter};
+use std::fmt::{Debug, Display, Formatter};
 use std::io::{Error, ErrorKind, Read, Result as IoResult, Seek, SeekFrom};
 use std::sync::Arc;
 
+// NOTE(b/553659636): Evaluate replacing these callbacks, the `usize` context
+// token and the thread-local staging buffer with a Crubit callable (`rs::Fn`),
+// once that is confirmed to work with a `&mut [u8]` argument and with the OSS
+// Corrosion build in `safe_bindings`.
 pub(crate) type ReadAtCallback = extern "C" fn(usize, u64, usize) -> i64;
 pub(crate) type SizeCallback = extern "C" fn(usize) -> i64;
 pub(crate) type ReleaseCallback = extern "C" fn(usize);
@@ -48,7 +53,7 @@ fn clear_staged_read_bytes() {
 /// Stages the bytes read by the active `read_at` callback on the current thread
 /// so `CallbackReader::read` can copy them into its destination slice without
 /// passing raw pointers across FFI.
-pub(crate) fn stage_callback_chunk(data: &[u8]) {
+pub fn stage_callback_chunk(data: &[u8]) {
     STAGED_READ_BYTES.with(|cell| {
         let mut staged = cell.borrow_mut();
         staged.clear();
@@ -78,19 +83,49 @@ impl Drop for CallbackContext {
     }
 }
 
+/// The payload of the `io::Error` that `CallbackReader::read` returns when
+/// `read_at` reports a failure, so that `ZipError::from_io_error` can tell a
+/// failed callback apart from any other I/O error the `zip` crate reports.
+///
+/// The distinction matters to the C++ side: a failed callback has left the
+/// reader's own status behind for the caller to pick up, whereas an error the
+/// archive raised on its own must be reported as is, even if a callback
+/// failed earlier in the same operation and the archive recovered from it.
+#[derive(Debug)]
+pub(crate) struct CallbackFailed;
+
+/// The `Display` text of `CallbackFailed`. `ZipError::from_io_error` also
+/// recognises it by this text, because some code between `CallbackReader` and
+/// `from_io_error` rebuilds `io::Error`s from their `Display` output and so
+/// drops the `CallbackFailed` payload: `lzma_rust2`'s `StickyError` (every
+/// LZMA entry read past the decoder's first buffer fill) and
+/// `zip::result::ZipError::clone()`.
+pub(crate) const CALLBACK_FAILED_MESSAGE: &str = "The zip archive read callback failed";
+
+impl Display for CallbackFailed {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.write_str(CALLBACK_FAILED_MESSAGE)
+    }
+}
+
+impl std::error::Error for CallbackFailed {}
+
 /// A seekable reader whose bytes come from caller-supplied callbacks.
 ///
 /// Cloning is cheap and performs no I/O: clones share one context and one
 /// cached length, and only the read position is per-clone. That is what lets
-/// the archive type built on it in a follow-up change offer a free
-/// `try_clone`, which in turn lets a caller hold one archive handle per
-/// concurrently open entry.
+/// `CallbackZipArchive::try_clone` be free, which in turn lets a caller hold
+/// one archive handle per concurrently open entry. A clone adopts whatever
+/// `CallbackReader` is staged in its `CloneSlot` instead, which is how
+/// `CallbackZipArchive::try_clone_with_callbacks` moves the parsed central
+/// directory onto a different set of callbacks.
 ///
 /// `pub(crate)` rather than `pub`: Crubit cannot bind the `Read`/`Seek` traits,
 /// so C++ only ever sees the archive wrappers built on top of this reader.
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub(crate) struct CallbackReader {
     context: Arc<CallbackContext>,
+    clone_slot: Arc<CloneSlot<CallbackReader>>,
     /// Total number of bytes available.
     ///
     /// Queried once at construction rather than per seek. The input is
@@ -102,6 +137,20 @@ pub(crate) struct CallbackReader {
     /// Offset the next `read` starts at. May exceed `len`, in which case reads
     /// report end of input.
     pos: u64,
+}
+
+impl Clone for CallbackReader {
+    fn clone(&self) -> Self {
+        if let Some(replacement) = self.clone_slot.take_staged() {
+            return replacement;
+        }
+        Self {
+            context: Arc::clone(&self.context),
+            clone_slot: Arc::clone(&self.clone_slot),
+            len: self.len,
+            pos: self.pos,
+        }
+    }
 }
 
 impl CallbackReader {
@@ -136,9 +185,16 @@ impl CallbackReader {
         // `size` is only ever called here, so it is not kept.
         let len = size(context.context);
         if len < 0 {
-            return Err(ZipError::internal("Failed to determine the size of the zip archive"));
+            return Err(ZipError::internal("Failed to determine the size of the zip archive")
+                .caused_by_reader_callback());
         }
-        Ok(Self { context, len: len as u64, pos: 0 })
+        Ok(Self { context, clone_slot: Arc::new(CloneSlot::default()), len: len as u64, pos: 0 })
+    }
+
+    /// The slot a replacement reader is staged in for `clone` to adopt.
+    #[must_use]
+    pub(crate) fn clone_slot(&self) -> Arc<CloneSlot<CallbackReader>> {
+        Arc::clone(&self.clone_slot)
     }
 
     /// Returns the total number of bytes available, as reported by `size` when
@@ -173,7 +229,7 @@ impl Read for CallbackReader {
         let read = (self.context.read_at)(self.context.context, self.pos, len);
         if read < 0 {
             clear_staged_read_bytes();
-            return Err(Error::other("The zip archive read callback failed"));
+            return Err(Error::other(CallbackFailed));
         }
         let read = read as u64;
         if read > len as u64 {
@@ -601,8 +657,39 @@ mod tests {
         context.fail_reads = true;
         let (mut reader, _) = make_reader(context);
         let mut buf = [0u8; 4];
-        expect_eq!(reader.read(&mut buf).unwrap_err().kind(), ErrorKind::Other);
+        let err = reader.read(&mut buf).unwrap_err();
+        expect_eq!(err.kind(), ErrorKind::Other);
         expect_eq!(reader.stream_position().unwrap(), 0, "a failed read must not advance");
+
+        // The error identifies itself as a failed callback all the way into a
+        // `ZipError`, which is what lets the C++ side substitute the reader's
+        // own status for it and only for it.
+        expect_true!(err.get_ref().is_some_and(|inner| inner.is::<CallbackFailed>()));
+        let zip_error = ZipError::from_io_error(err);
+        expect_eq!(zip_error.code, ZipErrorCode::Internal);
+        expect_true!(zip_error.is_reader_callback_failure());
+        expect_true!(zip_error.with_context("context").is_reader_callback_failure());
+    }
+
+    #[gtest]
+    fn test_other_io_errors_are_not_reader_callback_failures() {
+        let eof = ZipError::from_io_error(Error::new(ErrorKind::UnexpectedEof, "truncated"));
+        expect_eq!(eof.code, ZipErrorCode::Internal);
+        expect_false!(eof.is_reader_callback_failure());
+        let other = ZipError::from_io_error(Error::other("some other failure"));
+        expect_eq!(other.code, ZipErrorCode::Internal);
+        expect_false!(other.is_reader_callback_failure());
+        expect_false!(ZipError::internal("archive error").is_reader_callback_failure());
+    }
+
+    #[gtest]
+    fn test_failing_size_is_a_reader_callback_failure() {
+        let context = context_for(b"0123456789".to_vec());
+        let (token, _) = register_context(context);
+        let err = CallbackReader::try_new(test_read_at, test_size_fails, test_release, token)
+            .unwrap_err();
+        expect_eq!(err.code, ZipErrorCode::Internal);
+        expect_true!(err.is_reader_callback_failure());
     }
 
     #[gtest]
