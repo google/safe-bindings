@@ -35,6 +35,8 @@ add_library(fft INTERFACE)
 target_include_directories(fft INTERFACE "${CMAKE_CURRENT_SOURCE_DIR}/..")
 target_link_libraries(fft INTERFACE
   rust
+  absl::check
+  absl::core_headers
   absl::status
   absl::status_macros
   absl::span
