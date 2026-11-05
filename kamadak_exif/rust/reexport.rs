@@ -38,12 +38,21 @@ impl UIntValue {
         Self(v)
     }
 
-    /// SAFETY:
-    /// UIntValue is a #[repr(transparent)] wrapper of Value, so the casting is safe here.
+    /// Reinterprets a shared reference to an unsigned-integer [`Value`] (`Byte`, `Short`, or
+    /// `Long`) as a shared reference to [`UIntValue`].
     #[inline]
     pub(crate) fn ref_from(v: &Value) -> Result<&Self, Error> {
         match *v {
             Value::Byte(_) | Value::Short(_) | Value::Long(_) => {
+                // SAFETY: Creating the shared reference `&*(v as *const Value as *const Self)`
+                // requires the target pointer to be non-null, properly aligned for `UIntValue`,
+                // dereferenceable for `size_of::<UIntValue>()` bytes, pointing to an initialized
+                // valid `UIntValue`, and obeying shared-reference aliasing for the lifetime of `v`
+                // per the Rust Reference. Because `v: &Value` is a live shared reference with no
+                // intervening mutation and `UIntValue` is a single-field `#[repr(transparent)]`
+                // wrapper around `Value` with identical size, alignment, layout, and validity
+                // invariants, all obligations hold, and the returned `&UIntValue` borrows `*v`
+                // immutably for the lifetime of `v`.
                 Ok(unsafe { &*(v as *const Value as *const Self) })
             }
             _ => Err(Error::from(KamadakError::UnexpectedValue("Not unsigned integer"))),
