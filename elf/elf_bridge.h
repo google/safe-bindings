@@ -48,6 +48,40 @@
 //     }
 //     LOG(INFO) << "Machine: " << *machine;
 //   }
+//
+// Lifetime, and what the compiler does and does not catch
+// -------------------------------------------------------
+// Every accessor in this header that hands out a view or a reference into an
+// object is `const&`-qualified, carries ABSL_ATTRIBUTE_LIFETIME_BOUND, and has
+// its `const&&` overload deleted. Clang then rejects (-Werror,-Wdangling) an
+// initialization taken off a temporary, including one reached through
+// `absl::StatusOr::operator->`, which absl does annotate:
+//
+//     absl::string_view v = elf.GetSectionData(i)->GetData();   // error
+//
+// Three patterns are NOT diagnosed anywhere in this header and remain the
+// caller's responsibility:
+//   1. Assignment into an already-declared variable rather than
+//      initialization.
+//   2. A view or reference escaping the scope of the named object it came
+//      from.
+//   3. Laundering a view through an intervening unannotated function call.
+//
+// There is a fourth gap that matters here specifically, because several entry
+// points have the shape `absl::StatusOr<std::optional<T>>`.
+// `std::optional::operator->` is the one optional accessor that is neither
+// ref-qualified nor ABSL_ATTRIBUTE_LIFETIME_BOUND, so it breaks the chain.
+// Verified against the compiler; each of these compiles silently and dangles:
+//
+//     const StringTable& st =
+//         (*elf.GetSymbolTable())->GetStringTable();
+//     std::string_view file =
+//         (*version_table.GetRequirement(i))->GetFile();
+//     const Symbol& sym = (*hash_table.Find(name))->GetSymbol();
+//
+// Spelling the same thing with a full dereference does reach the deleted `&&`
+// overload and is rejected, but the readable fix is to bind the optional to a
+// named local before touching the object inside it.
 
 #include <cstddef>
 #include <cstdint>
@@ -55,6 +89,7 @@
 #include <string>
 
 #include "crubit/elf_cpp_bindings.h"
+#include "absl/base/attributes.h"
 #include "absl/status/statusor.h"
 #include "absl/strings/string_view.h"
 
@@ -251,6 +286,9 @@ class ElfBytes final {
   //  * OK
   //  * INTERNAL - If symbol table cannot be accessed or parsed, which
   //               should not happen for an ElfBytes object created via Parse.
+  //
+  // Lifetime: see the note at the top of this file. Reaching into the
+  // returned std::optional with `operator->` is NOT guarded.
   absl::StatusOr<std::optional<SymbolTableWithStrings>> GetSymbolTable() const;
 
   // Returns dynamic symbol table section (.dynsym) along with its associated
@@ -261,6 +299,9 @@ class ElfBytes final {
   //  * OK
   //  * INTERNAL - If dynamic symbol table cannot be accessed or parsed, which
   //               should not happen for an ElfBytes object created via Parse.
+  //
+  // Lifetime: see the note at the top of this file. Reaching into the
+  // returned std::optional with `operator->` is NOT guarded.
   absl::StatusOr<std::optional<SymbolTableWithStrings>> GetDynamicSymbolTable()
       const;
 
@@ -457,6 +498,9 @@ class ElfStream final {
   // Typical return codes:
   //  * OK
   //  * INTERNAL - If symbol table cannot be accessed or parsed from stream.
+  //
+  // Lifetime: see the note at the top of this file. Reaching into the
+  // returned std::optional with `operator->` is NOT guarded.
   absl::StatusOr<std::optional<SymbolTableWithStrings>> GetSymbolTable();
 
   // Returns dynamic symbol table section (.dynsym) along with its associated
@@ -467,6 +511,9 @@ class ElfStream final {
   //  * OK
   //  * INTERNAL - If dynamic symbol table cannot be accessed or parsed from
   //  stream.
+  //
+  // Lifetime: see the note at the top of this file. Reaching into the
+  // returned std::optional with `operator->` is NOT guarded.
   absl::StatusOr<std::optional<SymbolTableWithStrings>> GetDynamicSymbolTable();
 
   // Returns the dynamic section table (.dynamic).
@@ -837,9 +884,14 @@ class SectionHeaderTable final {
 class SectionHeaderTableWithStrings final {
  public:
   // Returns the section header table, if present.
-  const std::optional<SectionHeaderTable>& GetSectionHeaderTable() const;
+  const std::optional<SectionHeaderTable>& GetSectionHeaderTable()
+      const& ABSL_ATTRIBUTE_LIFETIME_BOUND;
+  const std::optional<SectionHeaderTable>& GetSectionHeaderTable() const&& =
+      delete;
   // Returns the section name string table, if present.
-  const std::optional<StringTable>& GetStringTable() const;
+  const std::optional<StringTable>& GetStringTable()
+      const& ABSL_ATTRIBUTE_LIFETIME_BOUND;
+  const std::optional<StringTable>& GetStringTable() const&& = delete;
 
  private:
   friend class ElfBytes;
@@ -862,10 +914,36 @@ class SectionData final {
  public:
   // Returns the raw data of the section. If compressed, this is the
   // compressed data, starting after the compression header.
-  absl::string_view GetData() const;
+  //
+  // WARNING: The returned string_view represents raw section bytes and is NOT
+  // null-terminated. Do NOT pass `.data()` to C-style APIs expecting
+  // null-terminated strings.
+  // Lifetime: bound to this SectionData instance.
+  //
+  // The `const&&` overload is deleted and the accessor is
+  // ABSL_ATTRIBUTE_LIFETIME_BOUND, so Clang rejects (-Werror,-Wdangling)
+  // dangling *initializations*, including ones reached through
+  // `StatusOr::operator->`:
+  //     absl::string_view v = elf.GetSectionData(i)->GetData();   // error
+  //
+  // Three cases are NOT diagnosed and remain the caller's responsibility:
+  //     absl::string_view v;
+  //     v = elf.GetSectionData(i)->GetData();      // assignment: dangles
+  //     { auto s = *elf.GetSectionData(i); v = s.GetData(); }     // scope exit
+  //     v = Normalize(elf.GetSectionData(i)->GetData());  // laundered: dangles
+  //
+  // Consuming inside the full-expression is safe:
+  //     std::string owned(elf.GetSectionData(i)->GetData());      // OK
+  absl::string_view GetData() const& ABSL_ATTRIBUTE_LIFETIME_BOUND;
+  absl::string_view GetData() const&& = delete;
+
   // Returns the compression header if the section is compressed, otherwise
   // std::nullopt.
-  const std::optional<CompressionHeader>& GetCompression() const;
+  // Lifetime: bound to this SectionData instance. See GetData() above for
+  // exactly what the compiler does and does not catch.
+  const std::optional<CompressionHeader>& GetCompression()
+      const& ABSL_ATTRIBUTE_LIFETIME_BOUND;
+  const std::optional<CompressionHeader>& GetCompression() const&& = delete;
 
  private:
   friend class ElfBytes;
@@ -986,9 +1064,11 @@ class SymbolTable final {
 class SymbolTableWithStrings final {
  public:
   // Returns the symbol table.
-  const SymbolTable& GetSymbolTable() const;
+  const SymbolTable& GetSymbolTable() const& ABSL_ATTRIBUTE_LIFETIME_BOUND;
+  const SymbolTable& GetSymbolTable() const&& = delete;
   // Returns the string table associated with the symbol table.
-  const StringTable& GetStringTable() const;
+  const StringTable& GetStringTable() const& ABSL_ATTRIBUTE_LIFETIME_BOUND;
+  const StringTable& GetStringTable() const&& = delete;
 
  private:
   friend class ElfBytes;
@@ -1167,9 +1247,17 @@ class NoteAny final {
   // Returns note type.
   Elf_Xword GetType() const;
   // Returns note vendor/name.
-  std::string_view GetName() const;
-  // Returns note descriptor.
-  std::string_view GetDesc() const;
+  //
+  // Zero-copy: the view points into this note's own buffer and is valid while
+  // this NoteAny is alive. It is NOT NUL-terminated and may contain embedded
+  // NUL bytes -- never hand `.data()` to a C string API. Write
+  // `std::string(note.GetName())` at the one call site that needs a C string.
+  std::string_view GetName() const& ABSL_ATTRIBUTE_LIFETIME_BOUND;
+  std::string_view GetName() const&& = delete;
+  // Returns note descriptor. Same zero-copy and NUL-termination caveats as
+  // GetName(); descriptors are arbitrary binary payloads.
+  std::string_view GetDesc() const& ABSL_ATTRIBUTE_LIFETIME_BOUND;
+  std::string_view GetDesc() const&& = delete;
 
  private:
   friend class Note;
@@ -1295,7 +1383,12 @@ class NoteGnuAbiTag final {
 class NoteGnuBuildId final {
  public:
   // Returns build ID bytes.
-  std::string_view GetBuildId() const;
+  //
+  // Zero-copy: the view points into this note's own buffer and is valid while
+  // this NoteGnuBuildId is alive. Build IDs are raw binary, NOT NUL-terminated
+  // -- never hand `.data()` to a C string API.
+  std::string_view GetBuildId() const& ABSL_ATTRIBUTE_LIFETIME_BOUND;
+  std::string_view GetBuildId() const&& = delete;
 
  private:
   friend class Note;
@@ -1319,7 +1412,8 @@ class SymbolFindResult final {
   // Returns symbol index in symbol table.
   size_t GetIndex() const;
   // Returns symbol.
-  const Symbol& GetSymbol() const;
+  const Symbol& GetSymbol() const& ABSL_ATTRIBUTE_LIFETIME_BOUND;
+  const Symbol& GetSymbol() const&& = delete;
 
  private:
   friend class GnuHashTable;
@@ -1342,6 +1436,9 @@ class SysVHashTable final {
   // Typical return codes:
   //  * OK
   //  * INTERNAL - If hash table, symbol table, or string table are malformed.
+  //
+  // Lifetime: see the note at the top of this file. Reaching into the
+  // returned std::optional with `operator->` is NOT guarded.
   absl::StatusOr<std::optional<SymbolFindResult>> Find(
       std::string_view name, const SymbolTable& symbol_table,
       const StringTable& string_table) const;
@@ -1378,6 +1475,9 @@ class GnuHashTable final {
   // Typical return codes:
   //  * OK
   //  * INTERNAL - If hash table, symbol table, or string table are malformed.
+  //
+  // Lifetime: see the note at the top of this file. Reaching into the
+  // returned std::optional with `operator->` is NOT guarded.
   absl::StatusOr<std::optional<SymbolFindResult>> Find(
       std::string_view name, const SymbolTable& symbol_table,
       const StringTable& string_table) const;
@@ -1413,6 +1513,9 @@ class SymbolVersionTable final {
   // Typical return codes:
   //  * OK
   //  * INTERNAL - If symbol version requirement table is malformed.
+  //
+  // Lifetime: see the note at the top of this file. Reaching into the
+  // returned std::optional with `operator->` is NOT guarded.
   absl::StatusOr<std::optional<SymbolRequirement>> GetRequirement(
       size_t sym_idx) const;
   // Returns symbol version definition for symbol at `sym_idx`, if one exists.
@@ -1450,9 +1553,17 @@ class SymbolVersionTable final {
 class SymbolRequirement final {
  public:
   // Returns name of file containing symbol definition.
-  std::string_view GetFile() const;
-  // Returns name of symbol.
-  std::string_view GetName() const;
+  //
+  // Zero-copy: the view points into this requirement's own buffer and is valid
+  // while this SymbolRequirement is alive. It is NOT NUL-terminated -- never
+  // hand `.data()` to a C string API; construct a `std::string` if you need
+  // one.
+  std::string_view GetFile() const& ABSL_ATTRIBUTE_LIFETIME_BOUND;
+  std::string_view GetFile() const&& = delete;
+  // Returns name of symbol. Same zero-copy and NUL-termination caveats as
+  // GetFile().
+  std::string_view GetName() const& ABSL_ATTRIBUTE_LIFETIME_BOUND;
+  std::string_view GetName() const&& = delete;
   // Returns GNU hash of symbol name.
   Elf_Word GetHash() const;
   // Returns symbol flags.
@@ -1473,6 +1584,7 @@ class SymbolRequirement final {
   friend absl::StatusOr<To> MapResult(From&& r);
 
   explicit SymbolRequirement(elf_cpp_bindings::gnu_symver::SymbolRequirement&& req);
+
   elf_cpp_bindings::gnu_symver::SymbolRequirement req_;
 };
 
@@ -1520,19 +1632,34 @@ class SymbolDefinition final {
 class CommonElfData final {
  public:
   // Returns symbol table section (.symtab), if present.
-  const std::optional<SymbolTable>& GetSymbolTable() const;
+  const std::optional<SymbolTable>& GetSymbolTable()
+      const& ABSL_ATTRIBUTE_LIFETIME_BOUND;
+  const std::optional<SymbolTable>& GetSymbolTable() const&& = delete;
   // Returns string table section (.strtab), if present.
-  const std::optional<StringTable>& GetSymbolTableStrings() const;
+  const std::optional<StringTable>& GetSymbolTableStrings()
+      const& ABSL_ATTRIBUTE_LIFETIME_BOUND;
+  const std::optional<StringTable>& GetSymbolTableStrings() const&& = delete;
   // Returns dynamic symbol table section (.dynsym), if present.
-  const std::optional<SymbolTable>& GetDynamicSymbolTable() const;
+  const std::optional<SymbolTable>& GetDynamicSymbolTable()
+      const& ABSL_ATTRIBUTE_LIFETIME_BOUND;
+  const std::optional<SymbolTable>& GetDynamicSymbolTable() const&& = delete;
   // Returns dynamic string table section (.dynstr), if present.
-  const std::optional<StringTable>& GetDynamicSymbolTableStrings() const;
+  const std::optional<StringTable>& GetDynamicSymbolTableStrings()
+      const& ABSL_ATTRIBUTE_LIFETIME_BOUND;
+  const std::optional<StringTable>& GetDynamicSymbolTableStrings() const&& =
+      delete;
   // Returns dynamic section table (.dynamic), if present.
-  const std::optional<DynTable>& GetDynamicTable() const;
+  const std::optional<DynTable>& GetDynamicTable()
+      const& ABSL_ATTRIBUTE_LIFETIME_BOUND;
+  const std::optional<DynTable>& GetDynamicTable() const&& = delete;
   // Returns SysV hash table section (.hash), if present.
-  const std::optional<SysVHashTable>& GetSysVHashTable() const;
+  const std::optional<SysVHashTable>& GetSysVHashTable()
+      const& ABSL_ATTRIBUTE_LIFETIME_BOUND;
+  const std::optional<SysVHashTable>& GetSysVHashTable() const&& = delete;
   // Returns GNU hash table section (.gnu.hash), if present.
-  const std::optional<GnuHashTable>& GetGnuHashTable() const;
+  const std::optional<GnuHashTable>& GetGnuHashTable()
+      const& ABSL_ATTRIBUTE_LIFETIME_BOUND;
+  const std::optional<GnuHashTable>& GetGnuHashTable() const&& = delete;
 
  private:
   friend class ElfBytes;
