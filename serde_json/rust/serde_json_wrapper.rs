@@ -230,9 +230,42 @@ impl Value {
             .is_some_and(|obj| obj.contains_key(String::from_utf8_lossy(key).as_ref()))
     }
 
+    /// Returns a pointer to the [Value] associated with the given key, or null if this [Value] is
+    /// not an object or the key does not exist.
+    ///
+    /// NOTE(b/581343769): Rename `find_ptr` to `find` once existing callers are migrated.
+    pub fn find_ptr(&self, key: &[u8]) -> *const Value {
+        self.value
+            .as_object()
+            .and_then(|obj| obj.get(String::from_utf8_lossy(key).as_ref()))
+            .map(RefCast::ref_cast)
+            .map_or(std::ptr::null(), std::ptr::from_ref)
+    }
+
+    /// Returns a mutable pointer to the [Value] associated with the given key, or null if this
+    /// [Value] is not an object or the key does not exist.
+    ///
+    /// NOTE(b/581343769): Rename `find_mut_ptr` to `find_mut` once existing callers are migrated.
+    pub fn find_mut_ptr(&mut self, key: &[u8]) -> *mut Value {
+        self.value
+            .as_object_mut()
+            .and_then(|obj| obj.get_mut(String::from_utf8_lossy(key).as_ref()))
+            .map(RefCast::ref_cast_mut)
+            .map_or(std::ptr::null_mut(), std::ptr::from_mut)
+    }
+
     /// Returns a reference to the [Value] associated with the given key, if this [Value] is an
     /// object and the key exists.
-    pub fn find(&self, key: &[u8]) -> Option<&Value> {
+    ///
+    /// Temporary alias for the legacy `Option<&Value>`-returning `find`. Existing `find` callers
+    /// are temporarily renamed to `find_ref` so that `find` can change its return type to
+    /// `*const Value` without breaking all callers at once. Marked `#[deprecated]` from the start
+    /// (pointing to `find_ptr` and the upcoming pointer-returning `find`) so that no new callers
+    /// adopt `find_ref`.
+    ///
+    /// NOTE(b/581343769): Remove `find_ref` once callers are migrated to pointer-returning `find`.
+    #[deprecated(note = "Use `find_ptr` instead. `find` will soon return a raw pointer.")]
+    pub fn find_ref(&self, key: &[u8]) -> Option<&Value> {
         self.value
             .as_object()
             .and_then(|obj| obj.get(String::from_utf8_lossy(key).as_ref()))
@@ -241,11 +274,37 @@ impl Value {
 
     /// Returns a mutable reference to the [Value] associated with the given key, if this [Value]
     /// is an object and the key exists.
-    pub fn find_mut(&mut self, key: &[u8]) -> Option<&mut Value> {
+    ///
+    /// Temporary alias for the legacy `Option<&mut Value>`-returning `find_mut`. Existing
+    /// `find_mut` callers are temporarily renamed to `find_mut_ref` so that `find_mut` can change
+    /// its return type to `*mut Value` without breaking all callers at once. Marked
+    /// `#[deprecated]` from the start (pointing to `find_mut_ptr` and the upcoming
+    /// pointer-returning `find_mut`) so that no new callers adopt `find_mut_ref`.
+    ///
+    /// NOTE(b/581343769): Remove `find_mut_ref` once callers are migrated to pointer-returning
+    /// `find_mut`.
+    #[deprecated(note = "Use `find_mut_ptr` instead. `find_mut` will soon return a raw pointer.")]
+    pub fn find_mut_ref(&mut self, key: &[u8]) -> Option<&mut Value> {
         self.value
             .as_object_mut()
             .and_then(|obj| obj.get_mut(String::from_utf8_lossy(key).as_ref()))
             .map(RefCast::ref_cast_mut)
+    }
+
+    /// Returns a reference to the [Value] associated with the given key, if this [Value] is an
+    /// object and the key exists.
+    #[deprecated(note = "Use `find_ptr` instead. `find` will soon return a raw pointer.")]
+    #[allow(deprecated)]
+    pub fn find(&self, key: &[u8]) -> Option<&Value> {
+        self.find_ref(key)
+    }
+
+    /// Returns a mutable reference to the [Value] associated with the given key, if this [Value]
+    /// is an object and the key exists.
+    #[deprecated(note = "Use `find_mut_ptr` instead. `find_mut` will soon return a raw pointer.")]
+    #[allow(deprecated)]
+    pub fn find_mut(&mut self, key: &[u8]) -> Option<&mut Value> {
+        self.find_mut_ref(key)
     }
 
     /// Removes the element at the given index from this [Value] if it is an array.
