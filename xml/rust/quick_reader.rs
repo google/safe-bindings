@@ -11,7 +11,7 @@ use quick_xml::{
     Error as QuickXmlError,
 };
 use std::{io, ops::Deref, str};
-use xmlparser::XmlCharExt;
+use crate::xml_util::is_valid_ncname;
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -62,33 +62,6 @@ fn check_name_len(input: &[u8]) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Checks if a given slice is a valid XML NCName in UTF-8.
-/// https://www.w3.org/TR/xml-names/#ns-qualnames describes NCNames and their usage. Both a
-/// namespace prefix and the local name must be valid NCNames.
-/// https://www.w3.org/TR/xml-names/#ns-decl explains that NCNames are valid Names that don't
-/// contain a colon. A valid Name is a non-empty string where the first character satisfies
-/// `is_xml_name_start_char` and all subsequent characters satisfy `is_xml_name_char`.
-fn is_valid_ncname(input: &[u8]) -> bool {
-    let Ok(s) = str::from_utf8(input) else {
-        return false;
-    };
-    let mut chars = s.chars();
-
-    let Some(first_char) = chars.next() else {
-        return false;
-    };
-    if !first_char.is_xml_name_start() {
-        return false;
-    }
-    for c in chars {
-        if !c.is_xml_name() {
-            return false;
-        }
-    }
-
-    !s.contains(':')
-}
-
 /// Normalizes the line endings in the given byte slice.
 ///
 /// XML parsers are expected to turn all line-breaking sequences CRLF or CR into LF.
@@ -130,9 +103,10 @@ fn normalize_whitespace(input: &[u8]) -> Vec<u8> {
 /// Computes (local name is valid, prefix is valid) for a given `QName`.
 fn compute_validity(name: &QName) -> (bool, bool) {
     (
-        is_valid_ncname(name.local_name().into_inner()),
+        str::from_utf8(name.local_name().into_inner()).is_ok_and(is_valid_ncname),
         // A None prefix is considered valid.
-        name.prefix().is_none_or(|pref| is_valid_ncname(pref.into_inner())),
+        name.prefix()
+            .is_none_or(|pref| str::from_utf8(pref.into_inner()).is_ok_and(is_valid_ncname)),
     )
 }
 

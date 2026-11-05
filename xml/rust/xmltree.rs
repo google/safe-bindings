@@ -3,6 +3,7 @@
 use std::sync::atomic::{AtomicU64, Ordering};
 use xml::namespace::Namespace;
 use xml::writer::{EmitterConfig, XmlEvent};
+use crate::xml_util::is_valid_ncname;
 use xmltree::{Element, XMLNode};
 
 /// The doc_id value that will be assigned to the next XmlDocument instance.
@@ -989,6 +990,54 @@ fn parser_config() -> xmltree::ParserConfig {
     xmltree::ParserConfig::new().ignore_comments(false).whitespace_to_characters(true)
 }
 
+/// Validates that `local_name` and (if present) `prefix` are valid W3C XML `NCName`s.
+///
+/// Note: When parsing via `xml-rs`, unprefixed names (`prefix == None`) and element/attribute
+/// prefixes before `':'` are already validated by `PullParser::read_qualified_name`. This helper
+/// defensively checks both parts so that `validate_qname` upholds the full `QName` contract.
+fn validate_qname(prefix: Option<&str>, local_name: &str) -> Result<(), ParseError> {
+    if !is_valid_ncname(local_name) || prefix.is_some_and(|p| !is_valid_ncname(p)) {
+        let qname = match prefix {
+            Some(p) => format!("{p}:{local_name}"),
+            None => local_name.to_string(),
+        };
+        return Err(ParseError { message: format!("Qualified name is invalid: {qname}") });
+    }
+    Ok(())
+}
+
+/// Recursively validates that all element names, attribute names, and declared namespace prefixes
+/// in the parsed `Element` tree conform to the W3C XML Namespaces `QName` / `NCName` grammar.
+///
+/// `xml-rs` (`PullParser::read_qualified_name`) checks `is_name_start_char` only when
+/// `qualified_name_buf` is empty, which allows the `LocalPart` after `':'` to start with a
+/// non-`NameStartChar` such as a digit, `'-'`, or `'.'` (e.g., `w:8right` or `xml:9ii`).
+fn validate_element_qnames(elem: &Element) -> Result<(), ParseError> {
+    validate_qname(elem.prefix.as_deref(), &elem.name)?;
+
+    if let Some(ref namespaces) = elem.namespaces {
+        for prefix in namespaces.0.keys() {
+            if !prefix.is_empty() && !is_valid_ncname(prefix) {
+                return Err(ParseError {
+                    message: format!("Qualified name is invalid: xmlns:{prefix}"),
+                });
+            }
+        }
+    }
+
+    for attr_name in elem.attributes.keys() {
+        validate_qname(attr_name.prefix.as_deref(), &attr_name.local_name)?;
+    }
+
+    for child in &elem.children {
+        if let XMLNode::Element(child_elem) = child {
+            validate_element_qnames(child_elem)?;
+        }
+    }
+
+    Ok(())
+}
+
 fn parse_element(
     data: &[u8],
     scanner_max_depth: usize,
@@ -1008,6 +1057,8 @@ fn parse_element(
     if depth_check.is_err() {
         return Err(ParseError { message: "XML failed to parse".to_string() });
     }
+
+    validate_element_qnames(&parsed_root)?;
 
     Ok(parsed_root)
 }
