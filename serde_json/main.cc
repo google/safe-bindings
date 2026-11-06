@@ -31,9 +31,15 @@ int main(int argc, char** argv) {
     std::cout << "Name: " << std::string_view(*name) << std::endl;
   }
 
+  std::cout << "Name (find_str_or): " << json.find_str_or("name", "Unknown")
+            << std::endl;
+
   if (auto age = json["age"].as_int64(); age.has_value()) {
     std::cout << "Age: " << *age << std::endl;
   }
+
+  std::cout << "Age (find_i32_or): " << json.find_i32_or("age", -1)
+            << std::endl;
 
   if (auto is_student = json["is_student"].as_bool(); is_student.has_value()) {
     std::cout << "Is student: " << (*is_student ? "yes" : "no") << std::endl;
