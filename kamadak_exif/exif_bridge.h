@@ -4,13 +4,13 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
-#include <deque>
 #include <optional>
 #include <string>
 #include <vector>
 
 #include "crubit/rust.h"
 #include "absl/base/attributes.h"
+#include "absl/container/chunked_queue.h"
 #include "absl/status/statusor.h"
 #include "absl/types/span.h"
 #include "support/rs_std/slice_ref.h"
@@ -717,7 +717,7 @@ class Writer final {
  private:
   // `std::deque` is used because pointer stability is needed for constructing
   // Rust side data structures that might reference memory in this deque.
-  std::deque<Field> fields_storage_;
+  absl::chunked_queue<Field> fields_storage_;
 
   /**
    * Storage for JPEG data corresponding to the IFD. There are only 2 IFDs, so
