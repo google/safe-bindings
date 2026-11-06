@@ -175,17 +175,26 @@ bool QuickReader::Name::PrefixValid() const { return event_.prefix_valid; }
 absl::StatusOr<QuickReader> QuickReader::Create(
     absl::string_view xml ABSL_ATTRIBUTE_LIFETIME_BOUND) {
   ASSIGN_OR_RETURN(rs_std::StrRef str_ref, ToStrRef(xml));
-  return QuickReader(
-      xml, std::make_unique<rust::QuickReader>(
-               rust::QuickReader::create(std::move(str_ref))));
+  rs_std::Result<rust::QuickReader, rust::XmlError> reader =
+      rust::QuickReader::create(std::move(str_ref));
+  if (!reader.has_value()) {
+    return XmlErrorToStatus(std::move(reader).err());
+  }
+  return QuickReader(xml, std::make_unique<rust::QuickReader>(
+                              std::move(reader).value()));
 }
 
 absl::StatusOr<QuickReader> QuickReader::CreateWithConfig(
     absl::string_view xml ABSL_ATTRIBUTE_LIFETIME_BOUND, Config config) {
   ASSIGN_OR_RETURN(rs_std::StrRef str_ref, ToStrRef(xml));
+  rs_std::Result<rust::QuickReader, rust::XmlError> reader =
+      rust::QuickReader::create_with_config(std::move(str_ref),
+                                                    ToRustConfig(config));
+  if (!reader.has_value()) {
+    return XmlErrorToStatus(std::move(reader).err());
+  }
   return QuickReader(xml, std::make_unique<rust::QuickReader>(
-                              rust::QuickReader::create_with_config(
-                                  std::move(str_ref), ToRustConfig(config))));
+                              std::move(reader).value()));
 }
 
 absl::StatusOr<QuickReader::Event> QuickReader::NextEvent()

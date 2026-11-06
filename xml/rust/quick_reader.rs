@@ -10,7 +10,7 @@ use quick_xml::{
     reader::{NsReader, Reader as PlainReader},
     Error as QuickXmlError,
 };
-use std::{io, ops::Deref, str};
+use std::{borrow::Cow, io, ops::Deref, str};
 use xmlparser::XmlCharExt;
 
 #[repr(C)]
@@ -160,11 +160,14 @@ impl Attribute {
     }
 }
 
-fn expand(entity: &[u8]) -> Vec<u8> {
-    if entity.len() < 2 {
-        return Vec::new();
+fn expand(entity: &[u8]) -> anyhow::Result<Vec<u8>> {
+    if entity.is_empty() {
+        return Err(anyhow::anyhow!("Empty entity reference"));
     }
     if entity[0] == b'#' {
+        if entity.len() < 2 {
+            return Err(anyhow::anyhow!("Invalid character reference"));
+        }
         // See https://www.w3.org/TR/REC-xml/#sec-references for valid characters in numeric
         // entities.
         let (radix, number_bytes, valid_chars_check): (u32, &[u8], fn(&u8) -> bool) =
@@ -173,27 +176,31 @@ fn expand(entity: &[u8]) -> Vec<u8> {
             } else {
                 (10, &entity[1..], |b| b.is_ascii_digit())
             };
-        if !number_bytes.iter().all(valid_chars_check) {
-            return Vec::new();
+        if number_bytes.is_empty() || !number_bytes.iter().all(valid_chars_check) {
+            return Err(anyhow::anyhow!("Invalid character reference"));
         }
-        // Safe to unwrap, because above we checked that all chars are ASCII and hence valid UTF-8.
-        let number_str = std::str::from_utf8(number_bytes).unwrap();
+        let Ok(number_str) = std::str::from_utf8(number_bytes) else {
+            return Err(anyhow::anyhow!("Invalid character reference"));
+        };
         let Ok(codepoint) = u32::from_str_radix(number_str, radix) else {
-            return Vec::new();
+            return Err(anyhow::anyhow!("Invalid character reference"));
         };
         let Some(c) = std::char::from_u32(codepoint) else {
-            return Vec::new();
+            return Err(anyhow::anyhow!("Invalid character reference"));
         };
+        if !c.is_xml_char() {
+            return Err(anyhow::anyhow!("Illegal XML character reference"));
+        }
         let mut buf = [0u8; 4];
-        c.encode_utf8(&mut buf).as_bytes().to_vec()
+        Ok(c.encode_utf8(&mut buf).as_bytes().to_vec())
     } else {
         match entity {
-            b"amp" => b"&".to_vec(),
-            b"lt" => b"<".to_vec(),
-            b"gt" => b">".to_vec(),
-            b"quot" => b"\"".to_vec(),
-            b"apos" => b"'".to_vec(),
-            _ => Vec::new(),
+            b"amp" => Ok(b"&".to_vec()),
+            b"lt" => Ok(b"<".to_vec()),
+            b"gt" => Ok(b">".to_vec()),
+            b"quot" => Ok(b"\"".to_vec()),
+            b"apos" => Ok(b"'".to_vec()),
+            _ => Ok(Vec::new()),
         }
     }
 }
@@ -201,11 +208,11 @@ fn expand(entity: &[u8]) -> Vec<u8> {
 // Replaces all entity references in `attribute_value` using `expand` (above). If finding entities
 // fails, returns the original attribute value. If the attribute value contains a '<' (signalling an
 // invalid attribute value), returns an error.
-fn expand_entities_in_attribute_value(attribute_value: &[u8]) -> anyhow::Result<Vec<u8>> {
+fn expand_entities_in_attribute_value(attribute_value: &[u8]) -> anyhow::Result<Cow<'_, [u8]>> {
     // Check for early exit to avoid running a nested parser. If there is no `&` in the attribute
     // value, then there are no entities to expand.
     if !attribute_value.contains(&b'&') {
-        return Ok(attribute_value.to_vec());
+        return Ok(Cow::Borrowed(attribute_value));
     }
     // Attribute values must not contain '<' (see https://www.w3.org/TR/xml/#NT-AttValue), so
     // parsing them as XML yields a sequence of Text and GeneralRef events only. This is exactly
@@ -225,7 +232,7 @@ fn expand_entities_in_attribute_value(attribute_value: &[u8]) -> anyhow::Result<
                 }
                 Event::GeneralRef(bytes_ref) => {
                     let entity_name = bytes_ref.deref();
-                    let expanded = expand(entity_name);
+                    let expanded = expand(entity_name)?;
                     if expanded.is_empty() {
                         result.push(b'&');
                         result.extend_from_slice(entity_name);
@@ -237,11 +244,11 @@ fn expand_entities_in_attribute_value(attribute_value: &[u8]) -> anyhow::Result<
                 Event::Eof => break,
                 _ => {}
             },
-            Err(_) => return Ok(attribute_value.to_vec()),
+            Err(_) => return Ok(Cow::Borrowed(attribute_value)),
         }
         buf.clear();
     }
-    Ok(result)
+    Ok(Cow::Owned(result))
 }
 
 /// [Attributes] wraps `QuickAttributes` to allow bridging into C++.
@@ -272,6 +279,10 @@ impl<'a> Iterator for Attributes<'a> {
             let attr_result = inner.next()?;
             match attr_result {
                 Ok(attr) => {
+                    let expanded = match expand_entities_in_attribute_value(attr.value.as_ref()) {
+                        Ok(expanded) => expanded,
+                        Err(err) => return Some(Err(err.to_string().into())),
+                    };
                     let (local_name_valid, prefix_valid) = compute_validity(&attr.key);
                     if local_name_valid && self.resolving_namespaces && !self.yield_xmlns_attributes
                     {
@@ -286,18 +297,13 @@ impl<'a> Iterator for Attributes<'a> {
                             continue;
                         }
                     }
-                    match expand_entities_in_attribute_value(attr.value.as_ref()) {
-                        Ok(ref expanded) => {
-                            return Some(Ok(Attribute {
-                                key: attr.key.into_inner().into(),
-                                // https://www.w3.org/TR/xml/#AVNormalize says to expand entities before normalizing whitespace.
-                                value: normalize_whitespace(expanded),
-                                local_name_valid,
-                                prefix_valid,
-                            }));
-                        }
-                        Err(err) => return Some(Err(err.to_string().into())),
-                    };
+                    return Some(Ok(Attribute {
+                        key: attr.key.into_inner().into(),
+                        // https://www.w3.org/TR/xml/#AVNormalize says to expand entities before normalizing whitespace.
+                        value: normalize_whitespace(&expanded),
+                        local_name_valid,
+                        prefix_valid,
+                    }));
                 }
                 Err(err) => return Some(Err(err.to_string().into())),
             }
@@ -598,7 +604,10 @@ impl<'a> QuickReader<'a> {
     }
 
     /// Creates a new, explicitly configured, reader, reading from the given string.
-    pub fn create_with_config(source: &'a str, config: ReaderConfig) -> Self {
+    pub fn create_with_config(source: &'a str, config: ReaderConfig) -> Result<Self, XmlError> {
+        if !source.chars().all(|c| c.is_xml_char()) {
+            return Err(XmlError::invalid_argument("Illegal XML character"));
+        }
         let ranges = if config.xml_substrings { Some(Self::collect_ranges(source)) } else { None };
         let reader = if config.ignore_namespaces {
             let mut plain_reader = PlainReader::from_str(source);
@@ -609,16 +618,16 @@ impl<'a> QuickReader<'a> {
             ns_reader.config_mut().expand_empty_elements = config.expand_empty_elements;
             Reader::Ns(ns_reader)
         };
-        Self {
+        Ok(Self {
             reader,
             ranges,
             start_event_count: 0,
             yield_xmlns_attributes: config.yield_xmlns_attributes,
-        }
+        })
     }
 
     /// Creates a new reader, reading from the given string.
-    pub fn create(source: &'a str) -> Self {
+    pub fn create(source: &'a str) -> Result<Self, XmlError> {
         Self::create_with_config(source, ReaderConfig::default())
     }
 
@@ -647,21 +656,20 @@ impl<'a> QuickReader<'a> {
                 };
                 match &result.event {
                     Event::Start(bytes_start) | Event::Empty(bytes_start) => {
-                        if let Err(e) = check_name_len(bytes_start.name().as_ref()) {
-                            return Err(XmlError::invalid_argument(e.to_string()));
-                        }
-                        (result.local_name_valid, result.prefix_valid) =
-                            compute_validity(&bytes_start.name());
+                        let name = bytes_start.name();
+                        check_name_len(name.as_ref())
+                            .map_err(|e| XmlError::invalid_argument(e.to_string()))?;
+                        (result.local_name_valid, result.prefix_valid) = compute_validity(&name);
                     }
                     Event::End(bytes_end) => {
-                        if let Err(e) = check_name_len(bytes_end.name().as_ref()) {
-                            return Err(XmlError::invalid_argument(e.to_string()));
-                        }
-                        (result.local_name_valid, result.prefix_valid) =
-                            compute_validity(&bytes_end.name());
+                        let name = bytes_end.name();
+                        check_name_len(name.as_ref())
+                            .map_err(|e| XmlError::invalid_argument(e.to_string()))?;
+                        (result.local_name_valid, result.prefix_valid) = compute_validity(&name);
                     }
                     Event::GeneralRef(bytes_ref) => {
-                        result.expanded_entity = expand(bytes_ref.deref());
+                        result.expanded_entity = expand(bytes_ref.deref())
+                            .map_err(|e| XmlError::invalid_argument(e.to_string()))?;
                     }
                     _ => {}
                 };

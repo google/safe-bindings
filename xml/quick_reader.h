@@ -123,9 +123,8 @@ class QuickReader::Data {
   // `rs_std::Vec<uint8_t>`. Turning that into a `std::string` on the C++ side
   // would be the second copy.
   //
-  // WARNING: The returned string_view is NOT null-terminated and may contain
-  // embedded null characters (`\0`) if present in the XML text or CDATA. Do NOT
-  // pass `.data()` to C APIs expecting null-terminated strings (`printf("%s")`,
+  // WARNING: The returned string_view is NOT null-terminated. Do NOT pass
+  // `.data()` to C APIs expecting null-terminated strings (`printf("%s")`,
   // `strcmp`). Construct a `std::string` first.
   absl::string_view Content() & ABSL_ATTRIBUTE_LIFETIME_BOUND;
   absl::string_view Content() && = delete;
@@ -149,9 +148,8 @@ class QuickReader::Name {
   // copies, because inside Rust one cannot construct a `std::string` so it's
   // always input -> `rs_std::Vec<uint8_t>` -> `std::string`.
   //
-  // WARNING: The returned string_views are NOT null-terminated and may contain
-  // embedded null characters (`\0`). Do NOT pass `.data()` to C-style APIs
-  // expecting null-terminated strings.
+  // WARNING: The returned string_views are NOT null-terminated. Do NOT pass
+  // `.data()` to C-style APIs expecting null-terminated strings.
   absl::string_view QualifiedName() & ABSL_ATTRIBUTE_LIFETIME_BOUND;
   absl::string_view QualifiedName() && = delete;
 
@@ -194,8 +192,8 @@ class QuickReader::Name {
 class QuickReader::Attribute {
  public:
   // WARNING: The returned string_views from Attribute methods are NOT
-  // null-terminated and may contain embedded null characters (`\0`). Do NOT
-  // pass `.data()` to C-style APIs expecting null-terminated strings.
+  // null-terminated. Do NOT pass `.data()` to C-style APIs expecting
+  // null-terminated strings.
   absl::string_view QualifiedName() & ABSL_ATTRIBUTE_LIFETIME_BOUND;
   absl::string_view QualifiedName() && = delete;
 
@@ -325,12 +323,14 @@ struct QuickReader::DocType {
   QuickReader::Data data;
 };
 
-// Represents an XML entity reference (e.g. "&lt;").
+// Represents an XML entity reference (e.g. "&lt;"). Invalid or illegal
+// character references cause NextEvent() to return an error instead of a
+// GeneralRef.
 struct QuickReader::GeneralRef {
   QuickReader::Data data;
   // The string expanded from the entity reference (e.g. "<"). Works also for
-  // numeric entities ("&#...;"), but does not work for user-defined ones, to
-  // prevent XXE attacks. Empty if the entity could not be parsed.
+  // numeric entities ("&#...;"), but is empty for user-defined named entities,
+  // to prevent XXE attacks.
   std::string expanded;
 };
 
