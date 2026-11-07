@@ -4,11 +4,13 @@
 //!
 //! WARNING: This crate should never be used from Rust, instead use zip directly.
 
+#![forbid(unsafe_code)]
+
 mod file;
 pub use file::{BufferedZipFile, FsZipFile};
 
 mod read;
-pub use read::{BufferedZipArchive, FsZipArchive};
+pub use read::{BufferedZipArchive, BufferedZipStreamReader, FsZipArchive, FsZipStreamReader};
 
 mod write;
 pub use write::{BufferedZipWriter, CompressionMethod, FsZipWriter, ZipWriterFileOptions};
