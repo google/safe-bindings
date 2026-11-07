@@ -8,7 +8,7 @@ use regex_syntax::ast::{
 
 /// An error that occurred during regex rewriting.
 ///
-/// We can't directly use a `cc_std::std::string` as the error type in a
+/// We can't directly use a `cpp_std::string` as the error type in a
 /// `Result<Rewriter, E>` because Crubit doesn't support using a bridged type
 /// there. Instead, we wrap the error string in an opaque type, and offer a
 /// method to get the C++ string.
