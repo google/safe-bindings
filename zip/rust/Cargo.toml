@@ -10,3 +10,7 @@ doctest = false
 
 [dependencies]
 zip = { version = "9.0", features = ["deflate", "bzip2", "time", "zstd", "lzma", "xz"] }
+
+# Used only by the `#[cfg(test)]` modules (`cargo test`).
+[dev-dependencies]
+googletest = "0.14"
