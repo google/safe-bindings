@@ -1,13 +1,12 @@
 // Crubit does not support generic type parameters, so we need to implement
 // BufferedZipFile and FsZipFile manually.
 
+use crate::read::FsReader;
 use crate::{write::CompressionMethod, VecU8, ZipError};
 use std::fmt::{Debug, Formatter};
-use std::fs::File;
 use std::io::{Cursor, Error, ErrorKind, Read};
 use std::vec::Vec;
 use zip::read::ZipFile as WrappedZipFile;
-use zip::CompressionMethod as ZipCrateCompressionMethod;
 
 #[derive(Default)]
 pub struct BufferedZipFile<'a> {
@@ -112,17 +111,93 @@ impl<'a> BufferedZipFile<'a> {
         get_extra_data_impl(&self.file)
     }
 
-    /// Returns the data of the file.
+    /// Returns the offset of this entry's local file header within the archive.
+    ///
+    /// Only meaningful for entries opened from a `*ZipArchive`: entries
+    /// obtained from a `*ZipStreamReader` do not know their offset and always
+    /// report 0, which is indistinguishable from the genuine offset of an
+    /// archive's first entry.
+    ///
     /// The result is only valid if `is_none()` returns false.
+    #[must_use]
+    pub fn get_header_start(&self) -> u64 {
+        get_header_start_impl(&self.file)
+    }
+
+    /// Returns the offset of this entry's data within the archive, or 0 if it
+    /// is unknown. Together with `get_compressed_size()` this delimits the
+    /// entry's raw bytes, so a caller that only needs a `Stored` entry can read
+    /// that byte range directly instead of going through this archive.
+    ///
+    /// The offset is only known once the local file header has been parsed,
+    /// which archive-based readers do when the entry is opened. It is never
+    /// known for entries obtained from a `*ZipStreamReader`, which report 0.
+    ///
+    /// The result is only valid if `is_none()` returns false.
+    #[must_use]
+    pub fn get_data_start(&self) -> u64 {
+        get_data_start_impl(&self.file)
+    }
+
+    /// Returns the data of the file.
+    /// Returns an error if `is_none()` returns true.
     pub fn get_file_data(&mut self) -> Result<VecU8, ZipError> {
         get_file_data_impl(&mut self.file)
     }
 
     /// Returns the data of the file if its decompressed size does not exceed
     /// `max_size` bytes.
-    /// The result is only valid if `is_none()` returns false.
+    /// Returns an error if `is_none()` returns true.
     pub fn get_file_data_with_max_size(&mut self, max_size: usize) -> Result<VecU8, ZipError> {
         get_file_data_with_max_size_impl(&mut self.file, max_size)
+    }
+
+    /// Reads up to `max_bytes` decompressed bytes from the file.
+    /// With `max_bytes > 0`, returns an empty `VecU8` only at EOF
+    /// (`read_bytes(0)` returns an empty `VecU8` without advancing the file).
+    /// Returns an error if `is_none()` returns true.
+    pub fn read_bytes(&mut self, max_bytes: usize) -> Result<VecU8, ZipError> {
+        read_bytes_impl(&mut self.file, max_bytes)
+    }
+
+    /// Reads into `buf` (decompressing unless the entry was opened raw) and
+    /// returns how many bytes were written, which is less than `buf.len()`
+    /// only at end of entry.
+    ///
+    /// Unlike `read_bytes`, nothing is allocated and the bytes are not copied
+    /// again on the way out, so this is what a caller reading an entry of any
+    /// size should use.
+    ///
+    /// zip-rs verifies the CRC only on the read that reaches the end of the
+    /// entry, so reading exactly the uncompressed size never checks it; read
+    /// until a short count (or 0) to have the entry validated. Entries opened
+    /// raw (`get_file_by_index_raw`) are never CRC-checked.
+    ///
+    /// Returns an error if `is_none()` returns true,
+    /// `ZipErrorCode::Internal` on decompression or CRC errors, or propagates
+    /// underlying I/O error codes. On error, the contents of `buf` and the
+    /// position within the entry are unspecified.
+    pub fn read_into(&mut self, buf: &mut [u8]) -> Result<u64, ZipError> {
+        read_into_impl(&mut self.file, buf)
+    }
+
+    /// Discards up to `max_bytes` and returns how many were discarded, which
+    /// is less than `max_bytes` only at end of entry.
+    ///
+    /// A zip entry is a forward-only stream, so this is how a caller seeks
+    /// within one. Nothing is allocated, whatever the distance.
+    ///
+    /// As with `read_into`, the CRC is checked only by the read or skip that
+    /// reaches the end of the entry, so skipping exactly the uncompressed size
+    /// never checks it, and entries opened raw (`get_file_by_index_raw`) are
+    /// never CRC-checked.
+    ///
+    /// Returns an error if `is_none()` returns true,
+    /// `ZipErrorCode::Internal` on decompression or CRC errors, or propagates
+    /// underlying I/O error codes. On error, the position within the entry is
+    /// unspecified.
+    pub fn skip(&mut self, max_bytes: u64) -> Result<u64, ZipError> {
+        skip_impl(&mut self.file, max_bytes)
     }
 }
 
@@ -141,7 +216,7 @@ pub struct FsZipFile<'a> {
     /// used by Crubit to generate movable types.
     /// In C++, whenever a method of *ZipFile is called, the file must be
     /// checked to be not None first.
-    file: Option<Box<WrappedZipFile<'a, File>>>,
+    file: Option<Box<WrappedZipFile<'a, FsReader>>>,
 }
 
 impl<'a> Debug for FsZipFile<'a> {
@@ -156,7 +231,7 @@ impl<'a> FsZipFile<'a> {
     /// Creates a new FsZipFile.
     /// This function won't be generated by Crubit and is only called from rust.
     /// (b/259749095)
-    pub fn new(file: WrappedZipFile<'a, File>) -> Self {
+    pub(crate) fn new(file: WrappedZipFile<'a, FsReader>) -> Self {
         Self { file: Some(Box::new(file)) }
     }
 
@@ -238,17 +313,93 @@ impl<'a> FsZipFile<'a> {
         get_extra_data_impl(&self.file)
     }
 
-    /// Returns the data of the file.
+    /// Returns the offset of this entry's local file header within the archive.
+    ///
+    /// Only meaningful for entries opened from a `*ZipArchive`: entries
+    /// obtained from a `*ZipStreamReader` do not know their offset and always
+    /// report 0, which is indistinguishable from the genuine offset of an
+    /// archive's first entry.
+    ///
     /// The result is only valid if `is_none()` returns false.
+    #[must_use]
+    pub fn get_header_start(&self) -> u64 {
+        get_header_start_impl(&self.file)
+    }
+
+    /// Returns the offset of this entry's data within the archive, or 0 if it
+    /// is unknown. Together with `get_compressed_size()` this delimits the
+    /// entry's raw bytes, so a caller that only needs a `Stored` entry can read
+    /// that byte range directly instead of going through this archive.
+    ///
+    /// The offset is only known once the local file header has been parsed,
+    /// which archive-based readers do when the entry is opened. It is never
+    /// known for entries obtained from a `*ZipStreamReader`, which report 0.
+    ///
+    /// The result is only valid if `is_none()` returns false.
+    #[must_use]
+    pub fn get_data_start(&self) -> u64 {
+        get_data_start_impl(&self.file)
+    }
+
+    /// Returns the data of the file.
+    /// Returns an error if `is_none()` returns true.
     pub fn get_file_data(&mut self) -> Result<VecU8, ZipError> {
         get_file_data_impl(&mut self.file)
     }
 
     /// Returns the data of the file if its decompressed size does not exceed
     /// `max_size` bytes.
-    /// The result is only valid if `is_none()` returns false.
+    /// Returns an error if `is_none()` returns true.
     pub fn get_file_data_with_max_size(&mut self, max_size: usize) -> Result<VecU8, ZipError> {
         get_file_data_with_max_size_impl(&mut self.file, max_size)
+    }
+
+    /// Reads up to `max_bytes` decompressed bytes from the file.
+    /// With `max_bytes > 0`, returns an empty `VecU8` only at EOF
+    /// (`read_bytes(0)` returns an empty `VecU8` without advancing the file).
+    /// Returns an error if `is_none()` returns true.
+    pub fn read_bytes(&mut self, max_bytes: usize) -> Result<VecU8, ZipError> {
+        read_bytes_impl(&mut self.file, max_bytes)
+    }
+
+    /// Reads into `buf` (decompressing unless the entry was opened raw) and
+    /// returns how many bytes were written, which is less than `buf.len()`
+    /// only at end of entry.
+    ///
+    /// Unlike `read_bytes`, nothing is allocated and the bytes are not copied
+    /// again on the way out, so this is what a caller reading an entry of any
+    /// size should use.
+    ///
+    /// zip-rs verifies the CRC only on the read that reaches the end of the
+    /// entry, so reading exactly the uncompressed size never checks it; read
+    /// until a short count (or 0) to have the entry validated. Entries opened
+    /// raw (`get_file_by_index_raw`) are never CRC-checked.
+    ///
+    /// Returns an error if `is_none()` returns true,
+    /// `ZipErrorCode::Internal` on decompression or CRC errors, or propagates
+    /// underlying I/O error codes. On error, the contents of `buf` and the
+    /// position within the entry are unspecified.
+    pub fn read_into(&mut self, buf: &mut [u8]) -> Result<u64, ZipError> {
+        read_into_impl(&mut self.file, buf)
+    }
+
+    /// Discards up to `max_bytes` and returns how many were discarded, which
+    /// is less than `max_bytes` only at end of entry.
+    ///
+    /// A zip entry is a forward-only stream, so this is how a caller seeks
+    /// within one. Nothing is allocated, whatever the distance.
+    ///
+    /// As with `read_into`, the CRC is checked only by the read or skip that
+    /// reaches the end of the entry, so skipping exactly the uncompressed size
+    /// never checks it, and entries opened raw (`get_file_by_index_raw`) are
+    /// never CRC-checked.
+    ///
+    /// Returns an error if `is_none()` returns true,
+    /// `ZipErrorCode::Internal` on decompression or CRC errors, or propagates
+    /// underlying I/O error codes. On error, the position within the entry is
+    /// unspecified.
+    pub fn skip(&mut self, max_bytes: u64) -> Result<u64, ZipError> {
+        skip_impl(&mut self.file, max_bytes)
     }
 }
 
@@ -317,19 +468,28 @@ fn get_extra_data_impl<'a, R: Read>(file: &Option<Box<WrappedZipFile<'a, R>>>) -
     file.as_ref().and_then(|f| f.extra_data()).map(VecU8::from).unwrap_or_default()
 }
 
+fn get_header_start_impl<'a, R: Read>(file: &Option<Box<WrappedZipFile<'a, R>>>) -> u64 {
+    match file.as_ref() {
+        Some(file) => file.header_start(),
+        None => 0,
+    }
+}
+
+fn get_data_start_impl<'a, R: Read>(file: &Option<Box<WrappedZipFile<'a, R>>>) -> u64 {
+    match file.as_ref() {
+        // `data_start` is `None` until the local file header has been parsed,
+        // and a real entry can never start at offset 0 because the header
+        // itself occupies at least 30 bytes, so 0 is unambiguously "unknown".
+        Some(file) => file.data_start().unwrap_or(0),
+        None => 0,
+    }
+}
+
 fn get_compression_method_impl<'a, R: Read>(
     file: &Option<Box<WrappedZipFile<'a, R>>>,
 ) -> CompressionMethod {
     match file.as_ref() {
-        Some(file) => match file.compression() {
-            ZipCrateCompressionMethod::Stored => CompressionMethod::Stored,
-            ZipCrateCompressionMethod::Deflated => CompressionMethod::Deflated,
-            ZipCrateCompressionMethod::Bzip2 => CompressionMethod::Bzip2,
-            ZipCrateCompressionMethod::Zstd => CompressionMethod::Zstd,
-            ZipCrateCompressionMethod::Lzma => CompressionMethod::Lzma,
-            ZipCrateCompressionMethod::Xz => CompressionMethod::Xz,
-            _ => CompressionMethod::Unsupported,
-        },
+        Some(file) => CompressionMethod::from_zip_crate(file.compression()),
         None => CompressionMethod::Unsupported,
     }
 }
@@ -342,10 +502,10 @@ fn get_file_data_impl<'a, R: Read>(
             let mut buffer = Vec::new();
             match file.read_to_end(&mut buffer) {
                 Ok(_) => Ok(buffer.into()),
-                Err(e) => Err(ZipError::internal(e.to_string())),
+                Err(e) => Err(ZipError::from_io_error(e)),
             }
         }
-        None => Ok(VecU8::default()),
+        None => Err(ZipError::internal("ZipFile is not available")),
     }
 }
 
@@ -368,9 +528,63 @@ fn get_file_data_with_max_size_impl<'a, R: Read>(
                         Ok(buffer.into())
                     }
                 }
-                Err(e) => Err(ZipError::internal(e.to_string())),
+                Err(e) => Err(ZipError::from_io_error(e)),
             }
         }
-        None => Ok(VecU8::default()),
+        None => Err(ZipError::internal("ZipFile is not available")),
     }
+}
+
+fn read_bytes_impl<'a, R: Read>(
+    file: &mut Option<Box<WrappedZipFile<'a, R>>>,
+    max_bytes: usize,
+) -> Result<VecU8, ZipError> {
+    match file.as_mut() {
+        Some(file) => {
+            // Grow the buffer only as data arrives instead of eagerly
+            // allocating `max_bytes` (which is caller-chosen and may be huge).
+            let mut buffer = Vec::new();
+            match (&mut **file).take(max_bytes as u64).read_to_end(&mut buffer) {
+                Ok(_) => Ok(buffer.into()),
+                Err(e) => Err(ZipError::from_io_error(e)),
+            }
+        }
+        None => Err(ZipError::internal("ZipFile is not available")),
+    }
+}
+
+fn read_into_impl<'a, R: Read>(
+    file: &mut Option<Box<WrappedZipFile<'a, R>>>,
+    buf: &mut [u8],
+) -> Result<u64, ZipError> {
+    let Some(file) = file.as_mut() else {
+        return Err(ZipError::internal("ZipFile is not available"));
+    };
+    // A decompressor returns what the current block happens to yield, which is
+    // routinely less than was asked for, so fill the buffer here rather than
+    // making the caller loop -- across a language boundary, in C++'s case.
+    let mut filled = 0usize;
+    while filled < buf.len() {
+        match file.read(&mut buf[filled..]) {
+            Ok(0) => break,
+            Ok(bytes_read) => filled += bytes_read,
+            // Read contracts allow this and it means nothing was consumed.
+            Err(e) if e.kind() == ErrorKind::Interrupted => {}
+            Err(e) => return Err(ZipError::from_io_error(e)),
+        }
+    }
+    Ok(filled as u64)
+}
+
+fn skip_impl<'a, R: Read>(
+    file: &mut Option<Box<WrappedZipFile<'a, R>>>,
+    max_bytes: u64,
+) -> Result<u64, ZipError> {
+    let Some(file) = file.as_mut() else {
+        return Err(ZipError::internal("ZipFile is not available"));
+    };
+    // `io::copy` drives this with a reused stack buffer, so a long skip costs
+    // no allocation however far it goes.
+    std::io::copy(&mut (&mut **file).take(max_bytes), &mut std::io::sink())
+        .map_err(ZipError::from_io_error)
 }
