@@ -94,6 +94,7 @@
 #include <utility>
 #include <vector>
 
+#include "absl/base/attributes.h"
 #include "absl/log/absl_check.h"
 #include "absl/status/statusor.h"
 #include "absl/strings/match.h"
@@ -123,7 +124,18 @@ class RegexFlagWithOptions {
     return get();
   }
   const Regex* get() const { return re_.get(); }
-  absl::string_view pattern() const {
+
+  // Returns the compiled pattern, or "" if the flag has no value.
+  //
+  // Lifetime: bound to this flag object. Copies of a flag share the Regex,
+  // but any copy can end up as its last owner (for example after the flag is
+  // set again), so the view must not outlive the object it came from.
+  // ABSL_ATTRIBUTE_LIFETIME_BOUND lets Clang reject (-Werror,-Wdangling)
+  //     absl::string_view p = absl::GetFlag(FLAGS_re).pattern();   // error
+  // The `const&&` overload is deliberately NOT deleted, so consuming the view
+  // inside the full-expression keeps working:
+  //     LOG(INFO) << absl::GetFlag(FLAGS_re).pattern();            // OK
+  absl::string_view pattern() const ABSL_ATTRIBUTE_LIFETIME_BOUND {
     if (re_ == nullptr) return "";
     return re_->AsStr();
   }

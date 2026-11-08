@@ -159,6 +159,7 @@
 #include <utility>
 #include <vector>
 
+#include "absl/base/attributes.h"
 #include "absl/status/statusor.h"
 #include "absl/strings/str_cat.h"
 #include "absl/strings/string_view.h"
@@ -198,7 +199,16 @@ class Match {
   }
 
   // Access to the inner wrapper. Required by Arg to perform numeric parsing.
-  const ::regex_cpp_bindings::Match& Inner() const { return match_; }
+  //
+  // Lifetime: bound to this Match instance, which owns the wrapper. As with
+  // `Regex::AsStr()`, the `const&&` overload is deleted and
+  // ABSL_ATTRIBUTE_LIFETIME_BOUND lets Clang reject (-Werror,-Wdangling) a
+  // reference initialized from a temporary Match.
+  const ::regex_cpp_bindings::Match& Inner() const&
+      ABSL_ATTRIBUTE_LIFETIME_BOUND {
+    return match_;
+  }
+  const ::regex_cpp_bindings::Match& Inner() const&& = delete;
 
  private:
   friend class Captures;
@@ -343,7 +353,26 @@ class Regex {
   // Returns the compiled pattern string. This might be different from the
   // input pattern due to rewrites for compatibility with RE2 (see
   // `regex_rewrite.rs`).
-  absl::string_view AsStr() const { return regex_.as_str(); }
+  //
+  // Lifetime: bound to this Regex instance, which owns the pattern.
+  //
+  // Two compile-time guards apply. The `const&&` overload is deleted, and
+  // ABSL_ATTRIBUTE_LIFETIME_BOUND lets Clang reject (-Werror,-Wdangling)
+  // dangling *initializations*, including ones reached through
+  // `absl::StatusOr::operator->`, which absl annotates:
+  //     absl::string_view p = Regex::Compile(pattern)->AsStr();   // error
+  //
+  // Three cases are NOT diagnosed and remain the caller's responsibility:
+  // assignment into an already-declared variable, escape from an inner scope,
+  // and passing the view through a function that is not itself
+  // lifetime-annotated.
+  //
+  // Consuming inside the full-expression is safe:
+  //     std::string owned(Regex::Compile(pattern)->AsStr());       // OK
+  absl::string_view AsStr() const& ABSL_ATTRIBUTE_LIFETIME_BOUND {
+    return regex_.as_str();
+  }
+  absl::string_view AsStr() const&& = delete;
 
   // Searches for the first match of the regex in `text`, returns an object
   // containing the matches of all captures specified in the regex pattern.
