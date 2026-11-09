@@ -3,6 +3,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <memory>
 #include <string>
 #include <utility>
 #include <variant>
@@ -17,6 +18,64 @@ namespace security::zip {
 class BufferedZipWriter;
 class FsZipWriter;
 
+namespace internal {
+
+// Internal to security/zip; not part of the public API.
+//
+// Move-only RAII token recording that an entry borrowed from an archive or
+// stream-reader handle is alive. Each handle owns a `std::shared_ptr<bool>`
+// flag; constructing a guard from it sets the flag to true and destroying the
+// guard (or move-assigning over an engaged one) resets it to false. Moved-from
+// guards do nothing. The handle refuses to open another entry while its flag
+// is set, which keeps the Rust `&mut` borrow held by the entry exclusive even
+// though Crubit cannot express that borrow in C++.
+class ActiveEntryGuard final {
+ public:
+  ActiveEntryGuard() = default;
+  explicit ActiveEntryGuard(std::shared_ptr<bool> flag)
+      : flag_(std::move(flag)) {
+    if (flag_ != nullptr) *flag_ = true;
+  }
+  ActiveEntryGuard(ActiveEntryGuard&& other) noexcept = default;
+  ActiveEntryGuard& operator=(ActiveEntryGuard&& other) noexcept {
+    if (this != &other) {
+      Release();
+      flag_ = std::move(other.flag_);
+    }
+    return *this;
+  }
+  ActiveEntryGuard(const ActiveEntryGuard&) = delete;
+  ActiveEntryGuard& operator=(const ActiveEntryGuard&) = delete;
+  ~ActiveEntryGuard() { Release(); }
+
+ private:
+  void Release() {
+    if (flag_ != nullptr) {
+      *flag_ = false;
+      flag_.reset();
+    }
+  }
+
+  std::shared_ptr<bool> flag_;
+};
+
+// Move-assigns a Crubit-generated Rust handle (`rust::*`).
+//
+// Crubit's generated `T& operator=(T&&)` for these types byte-swaps `*this`
+// and `other` (go/crubit `MemSwap`) instead of dropping the previous value of
+// `*this`: after `a = std::move(b)`, `b` would still hold `a`'s old Rust value
+// (and any `&mut` borrow it carries) rather than being empty. Routing the move
+// through a temporary drops `dst`'s old value immediately and leaves `src`
+// empty (`is_none()`), which is what every C++ wrapper in security/zip relies
+// on.
+template <typename T>
+void MoveAssignRustHandle(T& dst, T&& src) {
+  T moved(std::move(src));  // `src` is now empty.
+  dst = std::move(moved);   // `moved` now holds `dst`'s old value ...
+}  // ... and drops it here.
+
+}  // namespace internal
+
 enum class CompressionMethod : int32_t {
   kStored,
   kDeflated,
@@ -30,9 +89,18 @@ class BufferedZipFile final {
  public:
   explicit BufferedZipFile(rust::BufferedZipFile zip)
       : zip_(std::move(zip)) {}
+  BufferedZipFile(BufferedZipFile&&) noexcept = default;
+  // Drops the previous entry (draining its stream) and leaves `other` empty;
+  // see internal::MoveAssignRustHandle.
+  BufferedZipFile& operator=(BufferedZipFile&& other) noexcept {
+    if (this != &other) {
+      internal::MoveAssignRustHandle(zip_, std::move(other.zip_));
+    }
+    return *this;
+  }
   absl::StatusOr<bool> IsFile() const;
   absl::StatusOr<bool> IsDir() const;
-  bool IsNone() const;
+  [[nodiscard]] bool IsNone() const;
   // WARNING: Path Traversal ("Zip Slip") Hazard: The returned file name is
   // extracted directly from the archive header without sanitization. If using
   // this path for filesystem operations, callers MUST sanitize and validate
@@ -72,8 +140,26 @@ class BufferedZipFile final {
   // WARNING: Decompression Bomb Hazard: This overload decompresses the entire
   // entry into an unbounded heap buffer. For untrusted zip archives, prefer
   // `GetFileData(size_t max_size)` below to cap memory allocation and defend
-  // against zip bomb memory exhaustion (OOM) attacks.
+  // against zip bomb memory exhaustion (OOM) attacks, or read the entry
+  // incrementally with `ReadBytes()`.
   absl::StatusOr<RustVecU8Wrapper> GetFileData();
+
+  // Reads up to `max_bytes` decompressed bytes from the entry, advancing the
+  // read position. This is the chunked, memory-bounded alternative to
+  // `GetFileData()`: at most `max_bytes` are buffered per call. With
+  // `max_bytes > 0`, callers should loop until an empty result is returned
+  // rather than assuming a short non-empty read means end of entry
+  // (`ReadBytes(0)` returns an empty buffer immediately without advancing the
+  // entry). Returns `absl::StatusCode::kInternal` on a moved-from entry or
+  // decompression/CRC errors, or propagates underlying I/O error codes.
+  //
+  // WARNING: Chunks returned before the terminating empty read are not yet
+  // verified against the entry's CRC-32: zip-rs checks it only on the read that
+  // observes end of entry. In particular, when the uncompressed size is an
+  // exact multiple of `max_bytes`, the chunk carrying the last byte is still
+  // unverified; always read until an empty result (or an error) before acting
+  // on the data.
+  absl::StatusOr<RustVecU8Wrapper> ReadBytes(size_t max_bytes);
 
   // Decompresses at most `max_size` bytes from the entry, returning
   // `absl::StatusCode::kOutOfRange` if the decompressed size exceeds
@@ -90,9 +176,18 @@ class BufferedZipFile final {
 class FsZipFile final {
  public:
   explicit FsZipFile(rust::FsZipFile zip) : zip_(std::move(zip)) {}
+  FsZipFile(FsZipFile&&) noexcept = default;
+  // Drops the previous entry (draining its stream) and leaves `other` empty;
+  // see internal::MoveAssignRustHandle.
+  FsZipFile& operator=(FsZipFile&& other) noexcept {
+    if (this != &other) {
+      internal::MoveAssignRustHandle(zip_, std::move(other.zip_));
+    }
+    return *this;
+  }
   absl::StatusOr<bool> IsFile() const;
   absl::StatusOr<bool> IsDir() const;
-  bool IsNone() const;
+  [[nodiscard]] bool IsNone() const;
 
   // WARNING: Path Traversal ("Zip Slip") Hazard: The returned file name is
   // extracted directly from the archive header without sanitization. If using
@@ -133,8 +228,26 @@ class FsZipFile final {
   // WARNING: Decompression Bomb Hazard: This overload decompresses the entire
   // entry into an unbounded heap buffer. For untrusted zip archives, prefer
   // `GetFileData(size_t max_size)` below to cap memory allocation and defend
-  // against zip bomb memory exhaustion (OOM) attacks.
+  // against zip bomb memory exhaustion (OOM) attacks, or read the entry
+  // incrementally with `ReadBytes()`.
   absl::StatusOr<RustVecU8Wrapper> GetFileData();
+
+  // Reads up to `max_bytes` decompressed bytes from the entry, advancing the
+  // read position. This is the chunked, memory-bounded alternative to
+  // `GetFileData()`: at most `max_bytes` are buffered per call. With
+  // `max_bytes > 0`, callers should loop until an empty result is returned
+  // rather than assuming a short non-empty read means end of entry
+  // (`ReadBytes(0)` returns an empty buffer immediately without advancing the
+  // entry). Returns `absl::StatusCode::kInternal` on a moved-from entry or
+  // decompression/CRC errors, or propagates underlying I/O error codes.
+  //
+  // WARNING: Chunks returned before the terminating empty read are not yet
+  // verified against the entry's CRC-32: zip-rs checks it only on the read that
+  // observes end of entry. In particular, when the uncompressed size is an
+  // exact multiple of `max_bytes`, the chunk carrying the last byte is still
+  // unverified; always read until an empty result (or an error) before acting
+  // on the data.
+  absl::StatusOr<RustVecU8Wrapper> ReadBytes(size_t max_bytes);
 
   // Decompresses at most `max_size` bytes from the entry, returning
   // `absl::StatusCode::kOutOfRange` if the decompressed size exceeds
@@ -150,17 +263,35 @@ class FsZipFile final {
 
 class ZipFile final {
  public:
-  static ZipFile FromFile(rust::FsZipFile zip) {
-    return ZipFile(FsZipFile(std::move(zip)));
+  // `guard` is internal to security/zip: it is the token that marks the
+  // originating archive or stream reader as having an entry open and is
+  // released when this ZipFile is destroyed (see internal::ActiveEntryGuard).
+  static ZipFile FromFile(rust::FsZipFile zip,
+                          internal::ActiveEntryGuard guard) {
+    return ZipFile(FsZipFile(std::move(zip)), std::move(guard));
   }
 
-  static ZipFile FromBuffer(rust::BufferedZipFile zip) {
-    return ZipFile(BufferedZipFile(std::move(zip)));
+  ZipFile(ZipFile&&) noexcept = default;
+  // Assigns `zip_` before `guard_` (the reverse of the defaulted member-wise
+  // order) so that the previous Rust entry is dropped, draining its stream,
+  // before its originating handle is marked free again, and so that `other`
+  // is left empty (`IsNone()`); see internal::MoveAssignRustHandle.
+  ZipFile& operator=(ZipFile&& other) noexcept {
+    if (this != &other) {
+      zip_ = std::move(other.zip_);
+      guard_ = std::move(other.guard_);
+    }
+    return *this;
+  }
+
+  static ZipFile FromBuffer(rust::BufferedZipFile zip,
+                            internal::ActiveEntryGuard guard) {
+    return ZipFile(BufferedZipFile(std::move(zip)), std::move(guard));
   }
 
   absl::StatusOr<bool> IsFile() const;
   absl::StatusOr<bool> IsDir() const;
-  bool IsNone() const;
+  [[nodiscard]] bool IsNone() const;
 
   // WARNING: Path Traversal ("Zip Slip") Hazard: The returned file name is
   // extracted directly from the archive header without sanitization. If using
@@ -201,8 +332,26 @@ class ZipFile final {
   // WARNING: Decompression Bomb Hazard: This overload decompresses the entire
   // entry into an unbounded heap buffer. For untrusted zip archives, prefer
   // `GetFileData(size_t max_size)` below to cap memory allocation and defend
-  // against zip bomb memory exhaustion (OOM) attacks.
+  // against zip bomb memory exhaustion (OOM) attacks, or read the entry
+  // incrementally with `ReadBytes()`.
   absl::StatusOr<RustVecU8Wrapper> GetFileData();
+
+  // Reads up to `max_bytes` decompressed bytes from the entry, advancing the
+  // read position. This is the chunked, memory-bounded alternative to
+  // `GetFileData()`: at most `max_bytes` are buffered per call. With
+  // `max_bytes > 0`, callers should loop until an empty result is returned
+  // rather than assuming a short non-empty read means end of entry
+  // (`ReadBytes(0)` returns an empty buffer immediately without advancing the
+  // entry). Returns `absl::StatusCode::kInternal` on a moved-from entry or
+  // decompression/CRC errors, or propagates underlying I/O error codes.
+  //
+  // WARNING: Chunks returned before the terminating empty read are not yet
+  // verified against the entry's CRC-32: zip-rs checks it only on the read that
+  // observes end of entry. In particular, when the uncompressed size is an
+  // exact multiple of `max_bytes`, the chunk carrying the last byte is still
+  // unverified; always read until an empty result (or an error) before acting
+  // on the data.
+  absl::StatusOr<RustVecU8Wrapper> ReadBytes(size_t max_bytes);
 
   // Decompresses at most `max_size` bytes from the entry, returning
   // `absl::StatusCode::kOutOfRange` if the decompressed size exceeds
@@ -211,8 +360,13 @@ class ZipFile final {
 
  private:
   using BackendType = std::variant<BufferedZipFile, FsZipFile>;
+  ZipFile(BackendType b, internal::ActiveEntryGuard guard)
+      : guard_(std::move(guard)), zip_(std::move(b)) {}
+  // `guard_` is declared before `zip_` so that the Rust entry (which drains
+  // the stream on destruction) is destroyed before the originating handle is
+  // marked free again.
+  internal::ActiveEntryGuard guard_;
   BackendType zip_;
-  explicit ZipFile(BackendType b) : zip_(std::move(b)) {}
   friend class BufferedZipWriter;
   friend class FsZipWriter;
 };
