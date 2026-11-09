@@ -74,6 +74,7 @@ add_library(regex regex.cc regex.h regex_internal.h)
 target_link_libraries(regex PRIVATE
   regex_cpp_bindings
   absl::check
+  absl::core_headers
   absl::status
   absl::statusor
   absl::strings
