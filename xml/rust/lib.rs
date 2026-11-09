@@ -1,4 +1,5 @@
 mod nesting_depth;
+mod xml_util;
 
 mod quick_reader;
 pub use quick_reader::*;
