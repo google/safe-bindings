@@ -7,6 +7,8 @@
 //!   which is needed to give out references and use the copy constructor.
 //! - Mimic the `serde_json::Value` API. We don't want to introduce much custom logic here. We're
 //!   not JSON experts and want to expose serde_json mostly as-is.
+//! - Follow consistent type naming across accessors (`as_*`) and lookup helpers (`find_*_or`) based
+//!   on the bridged C++ types: `bool`, `double`, `int64`, `uint64`, and `str`.
 //!
 //! Memory safety: While parsing is memory-safe, usage from C++ cannot guarantee memory safety.
 //! Mutating or dropping/deconstructing a `Value` invalidates references to it and its nested
@@ -471,6 +473,64 @@ impl Value {
     /// reference iteration.
     pub fn iter_by_ptr<'a>(&'a self) -> PtrIter<'a> {
         PtrIter { iter: self.into_iter() }
+    }
+}
+
+// Add convenience lookup methods modeled after JsonCpp (`get(key, default).asXxx()`).
+//
+// Unlike JsonCpp's `get(key, default).asXxx()`, which aborts on non-null non-object receivers
+// (arrays, strings, numbers, booleans) or non-convertible types, coerces scalars (e.g.
+// truncating fractional numbers), and returns `0`/`false`/`""` on `"key": null`, `find_*_or`
+// safely returns `default_value` whenever this `Value` is not an object, `key` is missing or
+// `null`, or the entry cannot be represented as the target type (e.g. type mismatches,
+// fractional numbers for integer lookups, or out-of-range values).
+//
+// Methods follow the same type naming as the `as_*` accessors: `bool`, `double`, `int64`,
+// `uint64`, and `str`.
+impl Value {
+    fn lookup_key(&self, key: &[u8]) -> Option<&serde_json::Value> {
+        self.value.as_object()?.get(String::from_utf8_lossy(key).as_ref())
+    }
+
+    /// Returns the bool associated with `key` if this [Value] is an object and the entry is a
+    /// bool, or `default_value` otherwise.
+    #[must_use]
+    pub fn find_bool_or(&self, key: &[u8], default_value: bool) -> bool {
+        self.lookup_key(key).and_then(serde_json::Value::as_bool).unwrap_or(default_value)
+    }
+
+    /// Returns the double associated with `key` if this [Value] is an object and the entry is a
+    /// finite number, or `default_value` otherwise.
+    #[must_use]
+    pub fn find_double_or(&self, key: &[u8], default_value: f64) -> f64 {
+        self.lookup_key(key).and_then(serde_json::Value::as_f64).unwrap_or(default_value)
+    }
+
+    /// Returns the int64 associated with `key` if this [Value] is an object and the entry is an
+    /// int64, or `default_value` otherwise.
+    #[must_use]
+    pub fn find_int64_or(&self, key: &[u8], default_value: i64) -> i64 {
+        self.lookup_key(key).and_then(serde_json::Value::as_i64).unwrap_or(default_value)
+    }
+
+    /// Returns the uint64 associated with `key` if this [Value] is an object and the entry is a
+    /// uint64, or `default_value` otherwise.
+    #[must_use]
+    pub fn find_uint64_or(&self, key: &[u8], default_value: u64) -> u64 {
+        self.lookup_key(key).and_then(serde_json::Value::as_u64).unwrap_or(default_value)
+    }
+
+    /// Returns the string associated with `key` if this [Value] is an object and the entry is a
+    /// string, or `default_value` (lossily converted to UTF-8) otherwise.
+    #[must_use]
+    pub fn find_str_or(&self, key: &[u8], default_value: &[u8]) -> ToStringResult {
+        match self.lookup_key(key).and_then(serde_json::Value::as_str) {
+            Some(s) => ToStringResult::from(s),
+            None => match String::from_utf8_lossy(default_value) {
+                std::borrow::Cow::Borrowed(s) => ToStringResult::from(s),
+                std::borrow::Cow::Owned(s) => ToStringResult::from(s),
+            },
+        }
     }
 }
 
