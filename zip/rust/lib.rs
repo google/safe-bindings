@@ -13,7 +13,10 @@ mod read;
 pub use read::{BufferedZipArchive, BufferedZipStreamReader, FsZipArchive, FsZipStreamReader};
 
 mod write;
-pub use write::{BufferedZipWriter, CompressionMethod, FsZipWriter, ZipWriterFileOptions};
+pub use write::{
+    BufferedZipStreamWriter, BufferedZipWriter, CompressionMethod, FsZipStreamWriter, FsZipWriter,
+    ZipWriterFileOptions,
+};
 
 mod vec_u8;
 pub use vec_u8::VecU8;

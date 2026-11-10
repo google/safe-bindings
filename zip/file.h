@@ -14,11 +14,10 @@
 #include "absl/status/statusor.h"
 
 namespace security::zip {
-
-class BufferedZipWriter;
-class FsZipWriter;
-
 namespace internal {
+
+// Gives the writers in write.cc access to the entry types' Rust handles.
+struct ZipFileWriterPeer;
 
 // Internal to security/zip; not part of the public API.
 //
@@ -167,10 +166,10 @@ class BufferedZipFile final {
   absl::StatusOr<RustVecU8Wrapper> GetFileData(size_t max_size);
 
  private:
+  friend struct internal::ZipFileWriterPeer;
+
   absl::Status CheckNone() const;
   rust::BufferedZipFile zip_;
-  friend class BufferedZipWriter;
-  friend class FsZipWriter;
 };
 
 class FsZipFile final {
@@ -255,10 +254,10 @@ class FsZipFile final {
   absl::StatusOr<RustVecU8Wrapper> GetFileData(size_t max_size);
 
  private:
+  friend struct internal::ZipFileWriterPeer;
+
   absl::Status CheckNone() const;
   rust::FsZipFile zip_;
-  friend class BufferedZipWriter;
-  friend class FsZipWriter;
 };
 
 class ZipFile final {
@@ -360,15 +359,16 @@ class ZipFile final {
 
  private:
   using BackendType = std::variant<BufferedZipFile, FsZipFile>;
+  friend struct internal::ZipFileWriterPeer;
+
   ZipFile(BackendType b, internal::ActiveEntryGuard guard)
       : guard_(std::move(guard)), zip_(std::move(b)) {}
+
   // `guard_` is declared before `zip_` so that the Rust entry (which drains
   // the stream on destruction) is destroyed before the originating handle is
   // marked free again.
   internal::ActiveEntryGuard guard_;
   BackendType zip_;
-  friend class BufferedZipWriter;
-  friend class FsZipWriter;
 };
 
 }  // namespace security::zip

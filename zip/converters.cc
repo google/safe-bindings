@@ -119,4 +119,10 @@ absl::StatusOr<rust::FsZipStreamReader> FromRustFsZipStreamReader(
   return FromRustResult(std::move(result_fs_zip_stream_reader));
 }
 
+absl::StatusOr<rust::FsZipStreamWriter> FromRustFsZipStreamWriter(
+    rs_std::Result<rust::FsZipStreamWriter, rust::ZipError>
+        result_fs_zip_stream_writer) {
+  return FromRustResult(std::move(result_fs_zip_stream_writer));
+}
+
 }  // namespace security::zip

@@ -44,7 +44,7 @@ add_library(zip_read read.cc read.h)
 target_link_libraries(zip_read PUBLIC zip_converters zip_file rust absl::core_headers absl::status absl::statusor absl::strings PRIVATE absl::status_macros)
 
 add_library(zip_write write.cc write.h)
-target_link_libraries(zip_write PRIVATE zip_converters zip_file rust absl::status absl::status_macros absl::statusor absl::strings absl::span)
+target_link_libraries(zip_write PUBLIC zip_converters zip_file rust absl::status absl::statusor absl::strings PRIVATE absl::overload absl::status_macros)
 
 add_executable(zip_example main.cc)
 target_link_libraries(zip_example PRIVATE rust zip_converters zip_file zip_read zip_write absl::statusor absl::strings)

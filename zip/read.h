@@ -203,10 +203,10 @@ class ZipArchive final {
 //     call on this reader failed (see "Errors are sticky" below), the entry is
 //     encrypted, or the entry was written with general purpose bit 3 (sizes in
 //     a trailing data descriptor rather than the local header). Standard
-//     streaming-writer output, which also zeroes the local-header CRC-32 and
-//     appends a data descriptor, must be read with seekable `ZipArchive`; see
-//     `ReadNextFileWithCompressedSize()` for the narrow bit-3 case that can
-//     still be streamed.
+//     streaming-writer output (including `ZipStreamWriter`), which also zeroes
+//     the local-header CRC-32 and appends a data descriptor, must be read with
+//     seekable `ZipArchive`; see `ReadNextFileWithCompressedSize()` for the
+//     narrow bit-3 case that can still be streamed.
 //   - kUnimplemented: the entry uses an unsupported compression method.
 //   - kInvalidArgument: corrupt local file header.
 //   - kInternal (or propagated OS canonical codes such as kPermissionDenied):
@@ -228,9 +228,9 @@ class ZipArchive final {
 // `compressed_size` bytes when the returned `ZipFile` is destroyed (without
 // consuming a trailing data descriptor), this only works when the local header
 // already carries the real CRC-32 and either no data descriptor follows or no
-// further entries are read from the stream. Standard streaming-writer output,
-// which also zeroes the local-header CRC-32 and appends a data descriptor,
-// must be read with seekable `ZipArchive`. A wrong
+// further entries are read from the stream. Standard streaming-writer output
+// (including `ZipStreamWriter`), which also zeroes the local-header CRC-32 and
+// appends a data descriptor, must be read with seekable `ZipArchive`. A wrong
 // `compressed_size` truncates or over-reads the entry and surfaces as a CRC or
 // decoding error (kInternal) when the data is read, after which the stream
 // position is undefined.

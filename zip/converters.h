@@ -129,6 +129,10 @@ absl::StatusOr<rust::FsZipStreamReader> FromRustFsZipStreamReader(
     rs_std::Result<rust::FsZipStreamReader, rust::ZipError>
         result_fs_zip_stream_reader);
 
+absl::StatusOr<rust::FsZipStreamWriter> FromRustFsZipStreamWriter(
+    rs_std::Result<rust::FsZipStreamWriter, rust::ZipError>
+        result_fs_zip_stream_writer);
+
 }  // namespace security::zip
 
 #endif  // SECURITY_ZIP_CONVERTERS_H_
