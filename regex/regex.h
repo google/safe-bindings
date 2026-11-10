@@ -432,9 +432,11 @@ class Regex {
   // string:
   //     std::optional<Match> m = re.Find(absl::StrCat(a, b));        // error
   // Passing a string_view, including one returned by value, is fine, and so
-  // is using the result within the full-expression. Reaching the Match
-  // through `std::optional::operator->`, which is not annotated, is NOT
-  // diagnosed:
+  // is using the result within the full-expression. Taking `AsStr()` from
+  // the Match in the same expression is NOT diagnosed, however the optional
+  // is unwrapped (`->`, `*` or `.value()`). Match is itself a view of `text`,
+  // so `Match::AsStr()` is deliberately neither ABSL_ATTRIBUTE_LIFETIME_BOUND
+  // nor deleted for rvalues: `re.Find(text)->AsStr()` must keep working.
   //     absl::string_view s = re.Find(absl::StrCat(a, b))->AsStr();  // dangles
   std::optional<Match> Find(
       absl::string_view text ABSL_ATTRIBUTE_LIFETIME_BOUND) const;
