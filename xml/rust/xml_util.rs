@@ -1,5 +1,16 @@
 use xml::common::{is_name_char, is_name_start_char};
 
+/// Checks whether `name` is a valid W3C XML `Name` (https://www.w3.org/TR/xml/#NT-Name), meaning it
+/// is non-empty, starts with a `NameStartChar`, and all subsequent characters are `NameChar`.
+/// Unlike an `NCName`, it may contain any number of ':' anywhere.
+pub fn is_valid_name(name: &str) -> bool {
+    let mut chars = name.chars();
+    let Some(first) = chars.next() else {
+        return false;
+    };
+    is_name_start_char(first) && chars.all(is_name_char)
+}
+
 /// Checks whether `name` is a valid W3C XML `NCName` (`Name - (Char* ':' Char*)`), meaning it is
 /// non-empty, starts with a `NameStartChar` (other than `':'`), and all subsequent characters are
 /// `NameChar` (other than `':'`).
@@ -17,6 +28,27 @@ pub fn is_valid_ncname(name: &str) -> bool {
 mod tests {
         use super::*;
     use googletest::prelude::*;
+
+    #[gtest]
+    fn test_is_valid_name() {
+        expect_true!(is_valid_name("foo"));
+        expect_true!(is_valid_name("_bar"));
+        expect_true!(is_valid_name("a1-b.c"));
+        expect_true!(is_valid_name("dům"));
+        expect_true!(is_valid_name("你好"));
+        expect_true!(is_valid_name("foo:bar"));
+        expect_true!(is_valid_name(":"));
+        expect_true!(is_valid_name(":foo"));
+        expect_true!(is_valid_name("foo:"));
+        expect_true!(is_valid_name("a::b:c"));
+
+        expect_false!(is_valid_name(""));
+        expect_false!(is_valid_name("1foo"));
+        expect_false!(is_valid_name("-bar"));
+        expect_false!(is_valid_name(".baz"));
+        expect_false!(is_valid_name("a b"));
+        expect_false!(is_valid_name("#10"));
+    }
 
     #[gtest]
     fn test_is_valid_ncname() {
