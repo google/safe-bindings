@@ -151,7 +151,7 @@ class QuickReader::Data {
  private:
   friend class QuickReader;
 
-  explicit Data(rust::XmlEvent event) : event_(std::move(event)) {}
+  explicit Data(rust::XmlEvent&& event) : event_(std::move(event)) {}
 
   rust::XmlEvent event_;
   // `content_` is lazily initialized to avoid copying the content if it is not
@@ -190,7 +190,7 @@ class QuickReader::Name {
   friend class QuickReader;
 
   // `reader` is not owned by the constructed object and must outlive it.
-  Name(rust::XmlEvent event,
+  Name(rust::XmlEvent&& event,
        rust::QuickReader* absl_nonnull reader
            ABSL_ATTRIBUTE_LIFETIME_BOUND)
       : reader_(ABSL_DIE_IF_NULL(reader)), event_(std::move(event)) {}
@@ -237,7 +237,7 @@ class QuickReader::Attribute {
  private:
   friend class Attributes;
 
-  Attribute(rust::Attribute attribute,
+  Attribute(rust::Attribute&& attribute,
             rust::QuickReader* absl_nonnull reader
                 ABSL_ATTRIBUTE_LIFETIME_BOUND)
       : reader_(ABSL_DIE_IF_NULL(reader)), attribute_(std::move(attribute)) {}
@@ -287,7 +287,7 @@ class QuickReader::Attributes {
   friend class QuickReader;
 
   // `reader` is not owned by the constructed object and must outlive it.
-  Attributes(rust::Attributes attributes,
+  Attributes(rust::Attributes&& attributes,
              rust::QuickReader* absl_nonnull reader
                  ABSL_ATTRIBUTE_LIFETIME_BOUND)
       : reader_(ABSL_DIE_IF_NULL(reader)), attributes_(std::move(attributes)) {}
