@@ -1,6 +1,7 @@
 #ifndef SECURITY_XML_QUICK_READER_H_
 #define SECURITY_XML_QUICK_READER_H_
 
+#include <cstddef>
 #include <cstdint>
 #include <memory>
 #include <optional>
@@ -102,6 +103,24 @@ class QuickReader {
   // Bind the Event to a named local variable and copy anything that must
   // outlive the Event or the next NextEvent() call.
   absl::StatusOr<Event> NextEvent() ABSL_ATTRIBUTE_LIFETIME_BOUND;
+
+  // Byte offsets [begin, end) into the `xml` passed to Create().
+  struct Span {
+    size_t begin;
+    size_t end;
+  };
+
+  // Where the event last returned by NextEvent() is in the input. Before the
+  // first event, {0, 0}.
+  Span LastEventSpan() const;
+
+  // Where the last error returned by NextEvent() was found in the input, e.g.
+  // the `<` of a malformed tag. 0 if there was no error. Errors from
+  // Attributes::NextAttribute() do not change it; they are within the
+  // LastEventSpan() of their start tag. Requires Config::xml_substrings =
+  // false; otherwise NextEvent() fails on the first start tag when the document
+  // has any syntax error, leaving this at 0.
+  size_t LastErrorPosition() const;
 
  private:
   explicit QuickReader(absl::string_view xml,
@@ -224,17 +243,17 @@ class QuickReader::Attribute {
       : reader_(ABSL_DIE_IF_NULL(reader)), attribute_(std::move(attribute)) {}
 
   rust::QuickReader* reader_;  // Not owned.
+  // Owns the key and value, which are returned as views into it.
   rust::Attribute attribute_;
-  // The following 5 fields are lazily initialized to avoid copying the content
-  // if not needed, which might frequently be the case.
-  std::optional<rs_std::Vec<uint8_t>> qualified_key_;
+  // The following 3 fields are computed by Rust on demand, so they are lazily
+  // initialized to avoid the work if not needed, which might frequently be
+  // the case.
   std::optional<rs_std::Vec<uint8_t>> local_name_;
   // The double-optional is on purpose: the outer one is for the lazy retrieval.
   // The inner one matches the Rust API, which can signal that there was no
   // prefix (no ":" in the qualified name) as opposed to an empty prefix.
   std::optional<std::optional<rs_std::Vec<uint8_t>>> namespace_prefix_;
   std::optional<rs_std::Vec<uint8_t>> resolved_namespace_;
-  std::optional<rs_std::Vec<uint8_t>> value_;
 };
 
 class QuickReader::Attributes {

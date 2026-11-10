@@ -1,5 +1,6 @@
 #include "quick_reader.h"
 
+#include <cstddef>
 #include <cstdint>
 #include <memory>
 #include <optional>
@@ -267,10 +268,19 @@ absl::StatusOr<QuickReader::Event> QuickReader::NextEvent()
              << static_cast<int>(event.event_type().tag);
 }
 
+QuickReader::Span QuickReader::LastEventSpan() const {
+  rust::Span span = reader_->last_event_span();
+  return {.begin = span.begin, .end = span.end};
+}
+
+size_t QuickReader::LastErrorPosition() const {
+  return reader_->last_error_position();
+}
+
 absl::string_view QuickReader::Attribute::QualifiedName() &
     ABSL_ATTRIBUTE_LIFETIME_BOUND {
-  return StringViewFromVecU8(
-      ReturnCached(qualified_key_, [this]() { return attribute_.key; }));
+  // `attribute_` already owns the key and value, so view them without copying.
+  return StringViewFromVecU8(attribute_.key);
 }
 
 absl::string_view QuickReader::Attribute::LocalName() &
@@ -287,17 +297,15 @@ std::optional<absl::string_view> QuickReader::Attribute::NamespacePrefix() &
 
 absl::StatusOr<absl::string_view> QuickReader::Attribute::ResolvedNamespace() &
     ABSL_ATTRIBUTE_LIFETIME_BOUND {
-  return ResolveNamespace(
-      ReturnCached(qualified_key_, [this]() { return attribute_.key; }),
-      resolved_namespace_, [this](const rs_std::Vec<uint8_t>& qualified_key) {
-        return reader_->resolve_attribute(qualified_key);
-      });
+  return ResolveNamespace(attribute_.key, resolved_namespace_,
+                          [this](const rs_std::Vec<uint8_t>& qualified_key) {
+                            return reader_->resolve_attribute(qualified_key);
+                          });
 }
 
 absl::string_view QuickReader::Attribute::Value() &
     ABSL_ATTRIBUTE_LIFETIME_BOUND {
-  return StringViewFromVecU8(
-      ReturnCached(value_, [this]() { return attribute_.value; }));
+  return StringViewFromVecU8(attribute_.value);
 }
 
 bool QuickReader::Attribute::LocalNameValid() const {

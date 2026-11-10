@@ -472,6 +472,13 @@ pub struct Range {
     pub outer_end: usize,
 }
 
+/// Byte offsets `[begin, end)` into the input.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub struct Span {
+    pub begin: usize,
+    pub end: usize,
+}
+
 // A `ResultRange` that represents a Crubit-understandable `Result<Range>`.
 // NOTE: b/367916605 - Change once Result is supported by Crubit.
 
@@ -493,6 +500,20 @@ impl<'a> Reader<'a> {
             Reader::Ns(reader) => reader.read_event(),
         }
     }
+
+    fn buffer_position(&self) -> u64 {
+        match self {
+            Reader::Plain(reader) => reader.buffer_position(),
+            Reader::Ns(reader) => reader.buffer_position(),
+        }
+    }
+
+    fn error_position(&self) -> u64 {
+        match self {
+            Reader::Plain(reader) => reader.error_position(),
+            Reader::Ns(reader) => reader.error_position(),
+        }
+    }
 }
 
 /// A Crubit-understandable wrapper around the two readers from
@@ -504,6 +525,11 @@ pub struct QuickReader<'a> {
     start_event_count: usize,                   /* how many start and empty events have been
                                                  * parsed so far */
     yield_xmlns_attributes: bool,
+    // quick-xml skips a leading byte order mark without counting it in its positions, so this is
+    // added to them to get offsets into the input.
+    bom_len: usize,
+    last_event_span: Span,
+    last_error_position: usize,
 }
 
 /// A dummy-default implementation that should not be used from the Rust side.
@@ -516,6 +542,9 @@ impl<'a> Default for QuickReader<'a> {
             ranges: None,
             start_event_count: 0,
             yield_xmlns_attributes: false,
+            bom_len: 0,
+            last_event_span: Span::default(),
+            last_error_position: 0,
         }
     }
 }
@@ -598,6 +627,9 @@ impl<'a> QuickReader<'a> {
             ranges,
             start_event_count: 0,
             yield_xmlns_attributes: config.yield_xmlns_attributes,
+            bom_len: if source.starts_with('\u{FEFF}') { '\u{FEFF}'.len_utf8() } else { 0 },
+            last_event_span: Span::default(),
+            last_error_position: 0,
         })
     }
 
@@ -615,10 +647,18 @@ impl<'a> QuickReader<'a> {
         }
     }
 
+    /// Converts a quick-xml position into an offset into the input.
+    fn input_offset(&self, position: u64) -> usize {
+        position as usize + self.bom_len
+    }
+
     /// Parses and returns the next event.
     pub fn next_event(&mut self) -> Result<XmlEvent<'a>, XmlError> {
+        let begin = self.input_offset(self.reader.buffer_position());
         match self.reader.read_event() {
             Ok(event) => {
+                self.last_event_span =
+                    Span { begin, end: self.input_offset(self.reader.buffer_position()) };
                 self.update_start_event_count(&event);
                 let mut result = XmlEvent {
                     event,
@@ -632,25 +672,36 @@ impl<'a> QuickReader<'a> {
                 match &result.event {
                     Event::Start(bytes_start) | Event::Empty(bytes_start) => {
                         let name = bytes_start.name();
-                        check_name_len(name.as_ref())
-                            .map_err(|e| XmlError::invalid_argument(e.to_string()))?;
+                        if let Err(e) = check_name_len(name.as_ref()) {
+                            self.last_error_position = begin;
+                            return Err(XmlError::invalid_argument(e.to_string()));
+                        }
                         (result.local_name_valid, result.prefix_valid) = compute_validity(&name);
                     }
                     Event::End(bytes_end) => {
                         let name = bytes_end.name();
-                        check_name_len(name.as_ref())
-                            .map_err(|e| XmlError::invalid_argument(e.to_string()))?;
+                        if let Err(e) = check_name_len(name.as_ref()) {
+                            self.last_error_position = begin;
+                            return Err(XmlError::invalid_argument(e.to_string()));
+                        }
                         (result.local_name_valid, result.prefix_valid) = compute_validity(&name);
                     }
-                    Event::GeneralRef(bytes_ref) => {
-                        result.expanded_entity = expand(bytes_ref.deref())
-                            .map_err(|e| XmlError::invalid_argument(e.to_string()))?;
-                    }
+                    Event::GeneralRef(bytes_ref) => match expand(bytes_ref.deref()) {
+                        Ok(expanded) => result.expanded_entity = expanded,
+                        Err(e) => {
+                            self.last_error_position = begin;
+                            return Err(XmlError::invalid_argument(e.to_string()));
+                        }
+                    },
                     _ => {}
                 };
                 Ok(result)
             }
             Err(err) => {
+                self.last_error_position = match err {
+                    QuickXmlError::Namespace(_) => begin,
+                    _ => self.input_offset(self.reader.error_position()),
+                };
                 let code = match err {
                     QuickXmlError::Io(_) => XmlErrorCode::Internal,
                     _ => XmlErrorCode::InvalidArgument,
@@ -658,6 +709,17 @@ impl<'a> QuickReader<'a> {
                 Err(XmlError::new(err.to_string(), code))
             }
         }
+    }
+
+    /// Returns where the event last returned by `next_event` is in the input.
+    pub fn last_event_span(&self) -> Span {
+        self.last_event_span
+    }
+
+    /// Returns the offset into the input where the last error returned by `next_event` was found,
+    /// e.g. the `<` of a malformed tag. 0 if there was no error.
+    pub fn last_error_position(&self) -> usize {
+        self.last_error_position
     }
 
     /// Returns the range of the subtree rooted at the last current event that was a start tag.
