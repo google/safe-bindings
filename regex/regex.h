@@ -114,7 +114,14 @@
 //   }
 //
 // Note: These ranges use an underlying Rust iterator and can only be
-// iterated once.
+// iterated once. They also borrow the Regex and the text, so both must stay
+// alive until you are done iterating. Before C++23, a range-based for loop
+// does not keep temporaries in its range expression alive:
+//
+//   for (Match m : Regex::Compile(R"(\d+)")->FindAll(text)) {  // BAD!
+//
+// destroys the Regex before the loop body runs. Clang rejects this
+// (-Werror,-Wdangling); see Regex::FindAll() for what it does not catch.
 //
 // -----------------------------------------------------------------------
 // REPLACEMENT AND EXPANSION:
@@ -159,6 +166,7 @@
 #include <utility>
 #include <vector>
 
+#include "absl/base/attributes.h"
 #include "absl/status/statusor.h"
 #include "absl/strings/str_cat.h"
 #include "absl/strings/string_view.h"
@@ -198,7 +206,16 @@ class Match {
   }
 
   // Access to the inner wrapper. Required by Arg to perform numeric parsing.
-  const ::regex_cpp_bindings::Match& Inner() const { return match_; }
+  //
+  // Lifetime: bound to this Match instance, which owns the wrapper. As with
+  // `Regex::AsStr()`, the `const&&` overload is deleted and
+  // ABSL_ATTRIBUTE_LIFETIME_BOUND lets Clang reject (-Werror,-Wdangling) a
+  // reference initialized from a temporary Match.
+  const ::regex_cpp_bindings::Match& Inner() const&
+      ABSL_ATTRIBUTE_LIFETIME_BOUND {
+    return match_;
+  }
+  const ::regex_cpp_bindings::Match& Inner() const&& = delete;
 
  private:
   friend class Captures;
@@ -253,9 +270,16 @@ class Captures {
 
   // Returns a range over all capture groups. The first element is always the
   // overall match.
-  SubCaptureMatches GetAll() const {
+  //
+  // Lifetime: the range borrows this Captures object, with the same guards as
+  // `Regex::FindAll()`. One spelling is NOT diagnosed: reaching a temporary
+  // through `std::optional::operator->`, which is not annotated, as in
+  //     for (auto m : re.FindCaptures(text)->GetAll()) {}  // dangles, no error
+  // Bind the optional to a named local first.
+  SubCaptureMatches GetAll() const& ABSL_ATTRIBUTE_LIFETIME_BOUND {
     return SubCaptureMatches(captures_.iter());
   }
+  SubCaptureMatches GetAll() const&& = delete;
 
  private:
   friend class Regex;
@@ -343,7 +367,26 @@ class Regex {
   // Returns the compiled pattern string. This might be different from the
   // input pattern due to rewrites for compatibility with RE2 (see
   // `regex_rewrite.rs`).
-  absl::string_view AsStr() const { return regex_.as_str(); }
+  //
+  // Lifetime: bound to this Regex instance, which owns the pattern.
+  //
+  // Two compile-time guards apply. The `const&&` overload is deleted, and
+  // ABSL_ATTRIBUTE_LIFETIME_BOUND lets Clang reject (-Werror,-Wdangling)
+  // dangling *initializations*, including ones reached through
+  // `absl::StatusOr::operator->`, which absl annotates:
+  //     absl::string_view p = Regex::Compile(pattern)->AsStr();   // error
+  //
+  // Three cases are NOT diagnosed and remain the caller's responsibility:
+  // assignment into an already-declared variable, escape from an inner scope,
+  // and passing the view through a function that is not itself
+  // lifetime-annotated.
+  //
+  // Consuming inside the full-expression is safe:
+  //     std::string owned(Regex::Compile(pattern)->AsStr());       // OK
+  absl::string_view AsStr() const& ABSL_ATTRIBUTE_LIFETIME_BOUND {
+    return regex_.as_str();
+  }
+  absl::string_view AsStr() const&& = delete;
 
   // Searches for the first match of the regex in `text`, returns an object
   // containing the matches of all captures specified in the regex pattern.
@@ -361,7 +404,10 @@ class Regex {
   // overall match is always the first element. Unnamed groups are represented
   // by std::nullopt. The string_view values are valid until the Regex is
   // deleted.
-  CaptureNamesResult CaptureNames() const;
+  //
+  // Lifetime: the range borrows this Regex; see `FindAll()`.
+  CaptureNamesResult CaptureNames() const& ABSL_ATTRIBUTE_LIFETIME_BOUND;
+  CaptureNamesResult CaptureNames() const&& = delete;
 
   // Returns a map from names to capture indices. The map records the index of
   // the leftmost group with the given name.
@@ -382,7 +428,25 @@ class Regex {
       internal::RustIteratorRange<regex_cpp_bindings::Matches, Match>;
 
   // Returns a range with all matches of the regex in `text`.
-  FindAllResult FindAll(absl::string_view text) const;
+  //
+  // Lifetime: the range borrows this Regex and `text`, so both must outlive
+  // it. The ranges returned by `CaptureNames()`, `FindAllCaptures()`,
+  // `Split()` and `Captures::GetAll()` have the same guards.
+  //
+  // For the Regex, the `const&&` overload is deleted and
+  // ABSL_ATTRIBUTE_LIFETIME_BOUND lets Clang reject (-Werror,-Wdangling)
+  // keeping a range that came from a temporary Regex, including through
+  // `absl::StatusOr::operator->` and in the range expression of a
+  // range-based for loop before C++23:
+  //     auto all = Regex::Compile(pattern)->FindAll(text);          // error
+  //     for (Match m : Regex::Compile(pattern)->FindAll(text)) {}   // error
+  //
+  // The borrow of `text` is not annotated, and the cases listed on `AsStr()`
+  // are not diagnosed either. Passing the range to a function within the
+  // full-expression is safe.
+  FindAllResult FindAll(absl::string_view text) const&
+      ABSL_ATTRIBUTE_LIFETIME_BOUND;
+  FindAllResult FindAll(absl::string_view text) const&& = delete;
 
   // A range over all capture matches of a regex. These ranges can only be
   // iterated once.
@@ -390,7 +454,12 @@ class Regex {
       internal::RustIteratorRange<regex_cpp_bindings::CaptureMatches, Captures>;
 
   // Returns a range with all matches of the regex in `text`.
-  FindAllCapturesResult FindAllCaptures(absl::string_view text) const;
+  //
+  // Lifetime: the range borrows this Regex and `text`; see `FindAll()`.
+  FindAllCapturesResult FindAllCaptures(absl::string_view text) const&
+      ABSL_ATTRIBUTE_LIFETIME_BOUND;
+  FindAllCapturesResult FindAllCaptures(
+      absl::string_view text) const&& = delete;
 
   // A range over substrings separated by regex matches. These ranges can only
   // be iterated once.
@@ -399,7 +468,11 @@ class Regex {
 
   // Splits `text` using the regex as a delimiter, and returns a range of
   // string_views with the parts that DON'T match the regex.
-  SplitResult Split(absl::string_view text) const;
+  //
+  // Lifetime: the range borrows this Regex and `text`; see `FindAll()`.
+  SplitResult Split(absl::string_view text) const&
+      ABSL_ATTRIBUTE_LIFETIME_BOUND;
+  SplitResult Split(absl::string_view text) const&& = delete;
 
   // A range over at most N substrings separated by regex matches. These ranges
   // can only be iterated once.
@@ -409,7 +482,11 @@ class Regex {
   // Splits `text` using the regex as a delimiter, and returns a range of
   // string_views with the parts that DON'T match the regex. It always
   // returns at most `limit` pieces.
-  SplitNResult Split(absl::string_view text, size_t limit) const;
+  //
+  // Lifetime: the range borrows this Regex and `text`; see `FindAll()`.
+  SplitNResult Split(absl::string_view text, size_t limit) const&
+      ABSL_ATTRIBUTE_LIFETIME_BOUND;
+  SplitNResult Split(absl::string_view text, size_t limit) const&& = delete;
 
   // Replaces the first match of the regex in `text` with `rewrite`.
   // NOTE: The `rewrite` string uses `$1` syntax for capture groups, NOT `\1`.

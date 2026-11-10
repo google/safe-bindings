@@ -33,7 +33,9 @@
 //
 //   const auto& regex = *absl::GetFlag(result_filter_regex);  // BAD!
 //
-// will immediately leave you with a dangling reference.
+// will immediately leave you with a dangling reference. Clang rejects this
+// (-Werror,-Wdangling), because operator*(), operator->() and get() are
+// ABSL_ATTRIBUTE_LIFETIME_BOUND.
 //
 // A RegexFlag defined in one file can be declared and used in another file.
 // You might do this during process initialisation or in test code. For example:
@@ -94,6 +96,7 @@
 #include <utility>
 #include <vector>
 
+#include "absl/base/attributes.h"
 #include "absl/log/absl_check.h"
 #include "absl/status/statusor.h"
 #include "absl/strings/match.h"
@@ -108,22 +111,44 @@ namespace security::regex {
 template <typename Options>
 class RegexFlagWithOptions {
  public:
-  const Regex& operator*() const {
+  // Smart-pointer access to the compiled Regex.
+  //
+  // Lifetime: bound to this flag object, which can be the last owner of the
+  // Regex (see `pattern()`). ABSL_ATTRIBUTE_LIFETIME_BOUND lets Clang reject
+  // (-Werror,-Wdangling) keeping a reference, pointer or view that came from
+  // a temporary flag, such as the copy returned by absl::GetFlag():
+  //     const Regex& re = *absl::GetFlag(FLAGS_re);                 // error
+  //     absl::string_view p = absl::GetFlag(FLAGS_re)->AsStr();     // error
+  // As with `pattern()`, the `const&&` overloads are deliberately NOT
+  // deleted, so using the Regex inside the full-expression keeps working:
+  //     if (absl::GetFlag(FLAGS_re)->IsMatch(text)) { ... }         // OK
+  const Regex& operator*() const ABSL_ATTRIBUTE_LIFETIME_BOUND {
     ABSL_CHECK(re_ != nullptr)
         << "Dereferencing a RegexFlagWithOptions that has not been "
            "initialized. Ensure the flag has a default value set using "
            "RegexFlagWithOptions::OrDie.";
     return *get();
   }
-  const Regex* operator->() const {
+  const Regex* operator->() const ABSL_ATTRIBUTE_LIFETIME_BOUND {
     ABSL_CHECK(re_ != nullptr)
         << "Dereferencing a RegexFlagWithOptions that has not been "
            "initialized. Ensure the flag has a default value set using "
            "RegexFlagWithOptions::OrDie.";
     return get();
   }
-  const Regex* get() const { return re_.get(); }
-  absl::string_view pattern() const {
+  const Regex* get() const ABSL_ATTRIBUTE_LIFETIME_BOUND { return re_.get(); }
+
+  // Returns the compiled pattern, or "" if the flag has no value.
+  //
+  // Lifetime: bound to this flag object. Copies of a flag share the Regex,
+  // but any copy can end up as its last owner (for example after the flag is
+  // set again), so the view must not outlive the object it came from.
+  // ABSL_ATTRIBUTE_LIFETIME_BOUND lets Clang reject (-Werror,-Wdangling)
+  //     absl::string_view p = absl::GetFlag(FLAGS_re).pattern();   // error
+  // The `const&&` overload is deliberately NOT deleted, so consuming the view
+  // inside the full-expression keeps working:
+  //     LOG(INFO) << absl::GetFlag(FLAGS_re).pattern();            // OK
+  absl::string_view pattern() const ABSL_ATTRIBUTE_LIFETIME_BOUND {
     if (re_ == nullptr) return "";
     return re_->AsStr();
   }
@@ -176,8 +201,13 @@ class RegexListFlagWithOptions {
     return flag;
   }
 
-  auto begin() const { return regexes_.begin(); }
-  auto end() const { return regexes_.end(); }
+  // Lifetime: the iterators are bound to this flag object.
+  // ABSL_ATTRIBUTE_LIFETIME_BOUND lets Clang reject (-Werror,-Wdangling)
+  //     auto it = absl::GetFlag(FLAGS_list).begin();                // error
+  // A range-based for loop keeps the flag alive, so this is fine:
+  //     for (const auto& re : absl::GetFlag(FLAGS_list)) { ... }    // OK
+  auto begin() const ABSL_ATTRIBUTE_LIFETIME_BOUND { return regexes_.begin(); }
+  auto end() const ABSL_ATTRIBUTE_LIFETIME_BOUND { return regexes_.end(); }
   size_t size() const { return regexes_.size(); }
   bool empty() const { return regexes_.empty(); }
 

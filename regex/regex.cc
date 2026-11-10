@@ -153,7 +153,7 @@ std::optional<Captures> Regex::FindCaptures(absl::string_view text) const {
       regex_.captures(internal::AsSlice(text)));
 }
 
-Regex::CaptureNamesResult Regex::CaptureNames() const {
+Regex::CaptureNamesResult Regex::CaptureNames() const& {
   return CaptureNamesResult(regex_.capture_names());
 }
 
@@ -161,20 +161,20 @@ std::optional<Match> Regex::Find(absl::string_view text) const {
   return internal::MapOptional<Match>(regex_.find(internal::AsSlice(text)));
 }
 
-Regex::FindAllResult Regex::FindAll(absl::string_view text) const {
+Regex::FindAllResult Regex::FindAll(absl::string_view text) const& {
   return FindAllResult(regex_.find_iter(internal::AsSlice(text)));
 }
 
 Regex::FindAllCapturesResult Regex::FindAllCaptures(
-    absl::string_view text) const {
+    absl::string_view text) const& {
   return FindAllCapturesResult(regex_.captures_iter(internal::AsSlice(text)));
 }
 
-Regex::SplitResult Regex::Split(absl::string_view text) const {
+Regex::SplitResult Regex::Split(absl::string_view text) const& {
   return SplitResult(regex_.split(internal::AsSlice(text)));
 }
 
-Regex::SplitNResult Regex::Split(absl::string_view text, size_t limit) const {
+Regex::SplitNResult Regex::Split(absl::string_view text, size_t limit) const& {
   return SplitNResult(regex_.splitn(internal::AsSlice(text), limit));
 }
 
