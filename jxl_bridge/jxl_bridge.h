@@ -83,6 +83,29 @@ inline uint32_t BytesPerSample(DataType data_type) {
 // images.
 absl::StatusOr<ChannelLayout> ChannelLayoutForImage(const BasicInfo& info);
 
+// Computes `width * height * NumChannels(channel_layout) *
+// BytesPerSample(data_type)` using checked `size_t` arithmetic.
+//
+// Returns InvalidArgument if `width` or `height` is zero, if `channel_layout`
+// or `data_type` is not a valid enumerator, or if the byte count overflows
+// `size_t` or `ptrdiff_t`.
+absl::StatusOr<size_t> RequiredOutputSize(uint32_t width, uint32_t height,
+                                          ChannelLayout channel_layout,
+                                          DataType data_type = DataType::U8);
+
+inline absl::StatusOr<size_t> RequiredOutputSize(
+    const BasicInfo& info, ChannelLayout channel_layout,
+    DataType data_type = DataType::U8) {
+  return RequiredOutputSize(info.width, info.height, channel_layout, data_type);
+}
+
+inline absl::StatusOr<size_t> RequiredOutputSize(
+    const FrameHeader& frame_header, ChannelLayout channel_layout,
+    DataType data_type = DataType::U8) {
+  return RequiredOutputSize(frame_header.width, frame_header.height,
+                            channel_layout, data_type);
+}
+
 // JxlDecoder provides a C++ API for decoding JPEG XL images using the jxl-rs
 // Rust decoder. This replaces the functionality of third_party/jpegxl decoding
 // with a safer Rust implementation.
@@ -106,8 +129,8 @@ absl::StatusOr<ChannelLayout> ChannelLayoutForImage(const BasicInfo& info);
 //   // Or hardcode a layout, e.g. ChannelLayout::Rgba, to always get 4
 //   // channels regardless of what the image itself contains.
 //   ABSL_ASSIGN_OR_RETURN(ChannelLayout layout, ChannelLayoutForImage(info));
-//   const size_t frame_size =
-//       info.width * info.height * NumChannels(layout);
+//   ABSL_ASSIGN_OR_RETURN(const size_t frame_size,
+//                    RequiredOutputSize(info, layout, DataType::U8));
 //   std::vector<uint8_t> output(frame_size);
 //   ABSL_ASSIGN_OR_RETURN(
 //       FeedResult frame_result,
@@ -125,8 +148,8 @@ absl::StatusOr<ChannelLayout> ChannelLayoutForImage(const BasicInfo& info);
 //   ABSL_ASSIGN_OR_RETURN(ChannelLayout layout, ChannelLayoutForImage(info));
 //   ABSL_RETURN_IF_ERROR(decoder.SetPixelLayout(layout, DataType::U8));
 //   ABSL_ASSIGN_OR_RETURN(std::vector<uint8_t> icc, decoder.GetIccProfile());
-//   const size_t frame_size =
-//       info.width * info.height * NumChannels(layout);
+//   ABSL_ASSIGN_OR_RETURN(const size_t frame_size,
+//                    RequiredOutputSize(info, layout, DataType::U8));
 //   std::vector<uint8_t> frame_buf(frame_size);
 //   while (decoder.HasMoreFrames()) {
 //     ABSL_ASSIGN_OR_RETURN(
@@ -220,8 +243,10 @@ class JxlDecoder final {
   //   - NeedsMoreInput: not enough data yet, provide more and retry
   //   - FrameReady: frame decoded, output buffer is filled
   //   - Done: last frame decoded, output buffer is filled
-  // The output buffer must be pre-allocated with sufficient size:
-  //   width * height * NumChannels(channel_layout) * BytesPerSample(data_type)
+  // The output buffer must be pre-allocated with sufficient size (prefer
+  // RequiredOutputSize(info, channel_layout, data_type) for checked sizing):
+  //   static_cast<size_t>(width) * height * NumChannels(channel_layout) *
+  //       BytesPerSample(data_type)
   absl::StatusOr<FeedResult> DecodeFrame(absl::Span<const uint8_t>& data,
                                          ChannelLayout channel_layout,
                                          DataType data_type,
@@ -247,8 +272,9 @@ absl::StatusOr<BasicInfo> DecodeJxlHeader(absl::Span<const uint8_t> data);
 
 // A decoded single-frame image.
 struct DecodedImage {
-  // Interleaved samples: info.width * info.height *
-  // NumChannels(channel_layout) * BytesPerSample(data_type) bytes.
+  // Interleaved samples: static_cast<size_t>(info.width) * info.height *
+  // NumChannels(channel_layout) * BytesPerSample(data_type) bytes (see
+  // RequiredOutputSize).
   std::vector<uint8_t> pixels;
   // The layout `pixels` are interleaved in.
   ChannelLayout channel_layout = ChannelLayout::Rgb;
