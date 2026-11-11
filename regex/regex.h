@@ -119,9 +119,11 @@
 // does not keep temporaries in its range expression alive:
 //
 //   for (Match m : Regex::Compile(R"(\d+)")->FindAll(text)) {  // BAD!
+//   for (Match m : re->FindAll(absl::StrCat(a, b))) {          // BAD!
 //
-// destroys the Regex before the loop body runs. Clang rejects this
-// (-Werror,-Wdangling); see Regex::FindAll() for what it does not catch.
+// destroy the Regex or the text before the loop body runs. Clang rejects
+// both (-Werror,-Wdangling and -Werror,-Wdangling-gsl); see Regex::FindAll()
+// for what it does not catch.
 //
 // -----------------------------------------------------------------------
 // REPLACEMENT AND EXPANSION:
@@ -390,7 +392,10 @@ class Regex {
 
   // Searches for the first match of the regex in `text`, returns an object
   // containing the matches of all captures specified in the regex pattern.
-  std::optional<Captures> FindCaptures(absl::string_view text) const;
+  //
+  // Lifetime: the Captures borrows `text`; see `Find()`.
+  std::optional<Captures> FindCaptures(
+      absl::string_view text ABSL_ATTRIBUTE_LIFETIME_BOUND) const;
 
   // Returns the number of capturing groups. Includes the unnamed overall match.
   size_t NumCaptures() const { return regex_.captures_len(); }
@@ -420,7 +425,21 @@ class Regex {
   // Searches for the first match of the regex in `text` and returns a `Match`.
   // If you only want to check for the existence of a match it's potentially
   // faster to use `IsMatch(text)` instead of `Find(text).has_value()`.
-  std::optional<Match> Find(absl::string_view text) const;
+  //
+  // Lifetime: the Match borrows `text` (not this Regex), so `text` must
+  // outlive it. `text` is ABSL_ATTRIBUTE_LIFETIME_BOUND, which lets Clang
+  // reject (-Werror,-Wdangling-gsl) keeping a Match found in a temporary
+  // string:
+  //     std::optional<Match> m = re.Find(absl::StrCat(a, b));        // error
+  // Passing a string_view, including one returned by value, is fine, and so
+  // is using the result within the full-expression. Taking `AsStr()` from
+  // the Match in the same expression is NOT diagnosed, however the optional
+  // is unwrapped (`->`, `*` or `.value()`). Match is itself a view of `text`,
+  // so `Match::AsStr()` is deliberately neither ABSL_ATTRIBUTE_LIFETIME_BOUND
+  // nor deleted for rvalues: `re.Find(text)->AsStr()` must keep working.
+  //     absl::string_view s = re.Find(absl::StrCat(a, b))->AsStr();  // dangles
+  std::optional<Match> Find(
+      absl::string_view text ABSL_ATTRIBUTE_LIFETIME_BOUND) const;
 
   // A range over all matches of a regex. These ranges can only be iterated
   // once.
@@ -441,10 +460,14 @@ class Regex {
   //     auto all = Regex::Compile(pattern)->FindAll(text);          // error
   //     for (Match m : Regex::Compile(pattern)->FindAll(text)) {}   // error
   //
-  // The borrow of `text` is not annotated, and the cases listed on `AsStr()`
-  // are not diagnosed either. Passing the range to a function within the
-  // full-expression is safe.
-  FindAllResult FindAll(absl::string_view text) const&
+  // `text` is ABSL_ATTRIBUTE_LIFETIME_BOUND too, so the same goes for a range
+  // over a temporary string (-Werror,-Wdangling-gsl):
+  //     for (Match m : re.FindAll(absl::StrCat(a, b))) {}            // error
+  //
+  // The cases listed on `AsStr()` are not diagnosed. Passing the range to a
+  // function within the full-expression is safe.
+  FindAllResult FindAll(
+      absl::string_view text ABSL_ATTRIBUTE_LIFETIME_BOUND) const&
       ABSL_ATTRIBUTE_LIFETIME_BOUND;
   FindAllResult FindAll(absl::string_view text) const&& = delete;
 
@@ -456,7 +479,8 @@ class Regex {
   // Returns a range with all matches of the regex in `text`.
   //
   // Lifetime: the range borrows this Regex and `text`; see `FindAll()`.
-  FindAllCapturesResult FindAllCaptures(absl::string_view text) const&
+  FindAllCapturesResult FindAllCaptures(
+      absl::string_view text ABSL_ATTRIBUTE_LIFETIME_BOUND) const&
       ABSL_ATTRIBUTE_LIFETIME_BOUND;
   FindAllCapturesResult FindAllCaptures(
       absl::string_view text) const&& = delete;
@@ -470,7 +494,7 @@ class Regex {
   // string_views with the parts that DON'T match the regex.
   //
   // Lifetime: the range borrows this Regex and `text`; see `FindAll()`.
-  SplitResult Split(absl::string_view text) const&
+  SplitResult Split(absl::string_view text ABSL_ATTRIBUTE_LIFETIME_BOUND) const&
       ABSL_ATTRIBUTE_LIFETIME_BOUND;
   SplitResult Split(absl::string_view text) const&& = delete;
 
@@ -484,8 +508,8 @@ class Regex {
   // returns at most `limit` pieces.
   //
   // Lifetime: the range borrows this Regex and `text`; see `FindAll()`.
-  SplitNResult Split(absl::string_view text, size_t limit) const&
-      ABSL_ATTRIBUTE_LIFETIME_BOUND;
+  SplitNResult Split(absl::string_view text ABSL_ATTRIBUTE_LIFETIME_BOUND,
+                     size_t limit) const& ABSL_ATTRIBUTE_LIFETIME_BOUND;
   SplitNResult Split(absl::string_view text, size_t limit) const&& = delete;
 
   // Replaces the first match of the regex in `text` with `rewrite`.
