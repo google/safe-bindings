@@ -14,6 +14,7 @@
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
 #include "absl/strings/string_view.h"
+#include "support/rs_std/slice_ref.h"
 #include "support/rs_std/str_ref.h"
 
 namespace security::yaml {
@@ -42,6 +43,14 @@ NodeView NodeView::operator[](rs_std::StrRef key) const {
 std::optional<NodeView> NodeView::Get(size_t index) const {
   if (auto val = view_.get_at_index(index); val.has_value()) {
     return std::make_optional(NodeView(*val));
+  }
+  return std::nullopt;
+}
+
+std::optional<NodeView> NodeView::Get(rs_std::StrRef key) const {
+  if (std::optional<rust::NodeView> val = view_.get_at_key(key);
+      val.has_value()) {
+    return NodeView(*val);
   }
   return std::nullopt;
 }
@@ -196,6 +205,21 @@ absl::StatusOr<Node> Load(rs_std::StrRef input) {
   return Node(first_doc->to_owned());
 }
 
+absl::StatusOr<Node> Load(absl::string_view input) {
+  std::optional<rs_std::StrRef> utf8_input = rs_std::StrRef::FromUtf8(input);
+  if (!utf8_input.has_value()) {
+    return absl::InvalidArgumentError("YAML input is not valid UTF-8");
+  }
+  return Load(*utf8_input);
+}
+
+absl::StatusOr<Node> Load(const char* input) {
+  if (input == nullptr) {
+    return absl::InvalidArgumentError("YAML input must not be null");
+  }
+  return Load(absl::string_view(input));
+}
+
 rust::YamlOwned ToYaml(int64_t value) {
   return rust::yaml_owned_from_i64(value);
 }
@@ -209,14 +233,15 @@ rust::YamlOwned ToYaml(bool value) {
   return rust::yaml_owned_from_bool(value);
 }
 rust::YamlOwned ToYaml(const char* value) {
-  // Ideally, we want to use `rs_std::StrRef` at the function API to avoid
-  // using FromUtf8Unchecked but the compiler does not prefer the user-defined
-  // over the`bool` (built-in) conversion.
-  //
-  // So we have to use char* to provide exact match for string literals
-  return rust::yaml_owned_from_str(rs_std::StrRef::FromUtf8Unchecked(
-      // Check for nullptr before passing into rust
-      ABSL_DIE_IF_NULL(value)));
+  // C++ overload resolution prefers the built-in pointer-to-`bool` conversion
+  // (`ToYaml(bool)`) over user-defined conversions (`absl::string_view`) for
+  // string literals, so `const char*` provides an exact match while still
+  // dying on null pointers.
+  return ToYaml(absl::string_view(ABSL_DIE_IF_NULL(value)));
+}
+rust::YamlOwned ToYaml(absl::string_view value) {
+  return rust::yaml_owned_from_bytes(rs_std::SliceRef<const uint8_t>(
+      reinterpret_cast<const uint8_t*>(value.data()), value.size()));
 }
 
 }  // namespace security::yaml
