@@ -1,9 +1,9 @@
 #ifndef SECURITY_EXIF_BRIDGE_EXIF_BRIDGE_H_
 #define SECURITY_EXIF_BRIDGE_EXIF_BRIDGE_H_
 
-#include <array>
 #include <cstddef>
 #include <cstdint>
+#include <map>
 #include <optional>
 #include <string>
 #include <vector>
@@ -408,6 +408,9 @@ class Tag final {
  * The IFDs are indexed from 0.  The 0th IFD is for the primary image
  * and the 1st one is for the thumbnail.  Two associated constants,
  * `In::kPrimary` and `In::kThumbnail`, are defined for them respectively.
+ *
+ * A TIFF file can have more IFDs (the reader parses up to 8), and
+ * `Field::ifd_num()` reports the actual index for fields in those.
  */
 class In final {
  public:
@@ -672,8 +675,14 @@ class ExifBytes final {
 class Writer final {
  public:
   Writer();
+  // The defaulted move constructor is safe: the storage members hand their
+  // heap blocks over, so the moved Rust writer's borrows stay valid, and the
+  // moved-from object keeps an empty Rust writer.
   Writer(Writer&&) = default;
-  Writer& operator=(Writer&&) = default;
+  // Not defaulted: the Rust writer borrows the storage members, and a
+  // member-wise move would free this object's storage while a Rust writer
+  // still borrows it. See the definition.
+  Writer& operator=(Writer&& other) noexcept;
   Writer(const Writer&) = delete;
   Writer& operator=(const Writer&) = delete;
 
@@ -690,6 +699,7 @@ class Writer final {
    * StripOffsets, StripByteCounts, TileOffsets, TileByteCounts,
    * JPEGInterchangeFormat, and JPEGInterchangeFormatLength.
    *
+   * A moved-from Field is ignored.
    */
   void push_field(Field field);
   /**
@@ -720,29 +730,24 @@ class Writer final {
   absl::chunked_queue<Field> fields_storage_;
 
   /**
-   * Storage for JPEG data corresponding to the IFD. There are only 2 IFDs, so
-   * there are only 2 possible JPEG data. This storage ensures that the Rust
-   * writer can reference them without risking use-after-free.
+   * The JPEG, tiles and strips data set for one IFD, owned here so that the
+   * Rust writer can reference them without risking use-after-free. The Rust
+   * writer borrows the vectors' heap buffers, which stay put when a vector is
+   * moved.
    */
-  std::array<std::vector<uint8_t>, 2> jpeg_storage_;
+  struct IfdStorage {
+    std::vector<uint8_t> jpeg;
+    std::vector<std::vector<uint8_t>> tiles;
+    std::vector<rs_std::SliceRef<const uint8_t>> tiles_refs;
+    std::vector<std::vector<uint8_t>> strips;
+    std::vector<rs_std::SliceRef<const uint8_t>> strips_refs;
+  };
 
   /**
-   * Storage for tiles data corresponding to the IFD. There are only 2 IFDs, so
-   * there are only 2 possible tiles data. This storage ensures that the Rust
-   * writer can reference them without risking use-after-free.
+   * Per-IFD storage, keyed by `In::index()`. A file can have more than two
+   * IFDs (see `In`), so this cannot be a fixed-size array.
    */
-  std::array<std::vector<std::vector<uint8_t>>, 2> tiles_storage_;
-  std::array<std::vector<rs_std::SliceRef<const uint8_t>>, 2>
-      tiles_refs_storage_;
-
-  /**
-   * Storage for strips data corresponding to the IFD. There are only 2 IFDs, so
-   * there are only 2 possible strips data. This storage ensures that the Rust
-   * writer can reference them without risking use-after-free.
-   */
-  std::array<std::vector<std::vector<uint8_t>>, 2> strips_storage_;
-  std::array<std::vector<rs_std::SliceRef<const uint8_t>>, 2>
-      strips_refs_storage_;
+  std::map<uint16_t, IfdStorage> ifd_storage_;
 
   // writer_ must be declared last to ensure other members it might reference
   // are destroyed after it.

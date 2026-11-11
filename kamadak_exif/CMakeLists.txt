@@ -41,3 +41,28 @@ target_link_libraries(exif_bridge PRIVATE rust crubit_helpers absl::status absl:
 
 add_executable(kamadak_exif_example main.cc)
 target_link_libraries(kamadak_exif_example PRIVATE rust exif_bridge absl::statusor absl::strings)
+
+# GoogleTest
+FetchContent_Declare(
+  googletest
+  GIT_REPOSITORY https://github.com/google/googletest.git
+  GIT_TAG v1.18.0
+  FIND_PACKAGE_ARGS NAMES GTest
+)
+FetchContent_MakeAvailable(googletest)
+
+enable_testing()
+include(GoogleTest)
+
+add_executable(exif_bridge_test exif_bridge_test.cc)
+target_include_directories(exif_bridge_test PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/..")
+target_link_libraries(exif_bridge_test PRIVATE
+  rust
+  exif_bridge
+  absl::statusor
+  absl::strings
+  absl::span
+  GTest::gtest_main
+  GTest::gmock
+)
+gtest_discover_tests(exif_bridge_test)
