@@ -37,7 +37,7 @@ target_link_libraries(crubit_helpers INTERFACE absl::strings absl::span)
 
 add_library(exif_bridge exif_bridge.cc exif_bridge.h exif_reader.cc exif_reader.h)
 target_include_directories(exif_bridge PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/..")
-target_link_libraries(exif_bridge PRIVATE rust crubit_helpers absl::status absl::statusor absl::strings absl::span)
+target_link_libraries(exif_bridge PRIVATE rust crubit_helpers absl::base absl::status absl::statusor absl::strings absl::span)
 
 add_executable(kamadak_exif_example main.cc)
 target_link_libraries(kamadak_exif_example PRIVATE rust exif_bridge absl::statusor absl::strings)

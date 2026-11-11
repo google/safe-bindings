@@ -46,6 +46,41 @@ std::vector<uint8_t> MultiIfdTiff(int num_ifds) {
   return tiff;
 }
 
+// Size of the TIFF data that CanonMakerNoteTiff(entries, ...) returns.
+uint32_t CanonMakerNoteTiffSize(int entries) {
+  return 44 + 2 + 12 * entries + 4;
+}
+
+// A big-endian TIFF whose IFD 0 holds Make "Canon" and a Canon maker note
+// with `entries` entries, numbered from 1. Each is UNDEFINED and points at the
+// first `value_size` bytes of the TIFF data.
+std::vector<uint8_t> CanonMakerNoteTiff(int entries, uint32_t value_size) {
+  const uint32_t maker_note_size = CanonMakerNoteTiffSize(entries) - 44;
+  std::vector<uint8_t> tiff = {'M', 'M', 0x00, 0x2a};
+  AppendU32(tiff, 8);
+  AppendU16(tiff, 2);  // Entry count.
+  AppendU16(tiff, 0x010f);  // Make, ASCII, 6 bytes at offset 38.
+  AppendU16(tiff, 2);
+  AppendU32(tiff, 6);
+  AppendU32(tiff, 38);
+  AppendU16(tiff, 0x927c);  // MakerNote, UNDEFINED, at offset 44.
+  AppendU16(tiff, 7);
+  AppendU32(tiff, maker_note_size);
+  AppendU32(tiff, 44);
+  AppendU32(tiff, 0);  // No next IFD.
+  for (char c : std::string("Canon", 6)) tiff.push_back(c);
+  // Canon maker notes are a bare IFD with offsets into the TIFF data.
+  AppendU16(tiff, entries);
+  for (int i = 0; i < entries; ++i) {
+    AppendU16(tiff, i + 1);
+    AppendU16(tiff, 7);
+    AppendU32(tiff, value_size);
+    AppendU32(tiff, 0);
+  }
+  AppendU32(tiff, 0);
+  return tiff;
+}
+
 Field AsciiField(const Tag& tag, const std::string& s) {
   return Field(tag, In::kPrimary, Value::Ascii({s}));
 }
@@ -78,6 +113,48 @@ TEST(InTest, FieldsReportIfdsBeyondTheThumbnail) {
   std::optional<Field> width = exif->get_field(Tag::kImageWidth, ifd2);
   ASSERT_TRUE(width.has_value());
   EXPECT_THAT(width->value().get_uint(0), Optional(102));
+}
+
+TEST(ExifTest, MovedExifKeepsItsFields) {
+  absl::StatusOr<Exif> exif = Reader().read_raw(MultiIfdTiff(3));
+  ASSERT_TRUE(exif.ok()) << exif.status();
+  Exif moved(std::move(*exif));
+
+  EXPECT_EQ(moved.fields().size(), 3);
+  EXPECT_THAT(moved.get_field(Tag::kImageWidth, In::kThumbnail)
+                  ->value()
+                  .get_uint(0),
+              Optional(101));
+  // A moved-from Exif has no fields.
+  EXPECT_TRUE(exif->fields().empty());  // NOLINT(bugprone-use-after-move)
+}
+
+TEST(MakerNoteTest, ParsesCanonMakerNote) {
+  const std::vector<uint8_t> tiff = CanonMakerNoteTiff(1, 8);
+  absl::StatusOr<Exif> exif = Reader().read_raw(tiff);
+  ASSERT_TRUE(exif.ok()) << exif.status();
+
+  EXPECT_EQ(exif->get_mnote_type(), 2);  // Canon.
+  ASSERT_EQ(exif->mnote_fields().size(), 1);
+  std::optional<Field> field = exif->get_mnote_field(1);
+  ASSERT_TRUE(field.has_value());
+  EXPECT_THAT(field->value().get_bytes(),
+              Optional(std::vector<uint8_t>(tiff.begin(), tiff.begin() + 8)));
+}
+
+// The reader parses the maker note up front, so entries that all point at the
+// same bytes used to cost (entries x size) memory before the caller asked for
+// anything.
+TEST(MakerNoteTest, RejectsMakerNoteThatRepeatsTheSameBytes) {
+  constexpr int kEntries = 5;
+  absl::StatusOr<Exif> exif = Reader().read_raw(
+      CanonMakerNoteTiff(kEntries, CanonMakerNoteTiffSize(kEntries)));
+  ASSERT_TRUE(exif.ok()) << exif.status();
+
+  EXPECT_EQ(exif->get_mnote_type(), 2);  // Canon.
+  EXPECT_TRUE(exif->mnote_fields().empty());
+  // The rest of the data is still readable.
+  EXPECT_TRUE(exif->get_field(Tag::kMake, In::kPrimary).has_value());
 }
 
 // Writer used to index a two-element array with In::index(), which was 65535

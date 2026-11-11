@@ -36,24 +36,45 @@ pub struct Exif {
     pub(crate) mnote_fields: Vec<crate::mnote::MnoteField>,
 }
 
+/// kamadak-exif reads at most this many IFDs.
+const MAX_IFDS: u16 = 8;
+
+/// Finds the field with the given tag number in the TIFF or Exif context of
+/// any IFD.
+///
+/// kamadak-exif parses field values lazily. `get_field()` parses only the
+/// field it returns, while iterating `fields()` parses all of them, and a
+/// crafted file can point thousands of entries at the same bytes, so that
+/// costs far more memory than the file itself.
+fn find_by_number(exif: &KamadakExif, number: u16) -> Option<&exif::Field> {
+    (0..MAX_IFDS).find_map(|ifd| {
+        [exif::Context::Tiff, exif::Context::Exif]
+            .into_iter()
+            .find_map(|ctx| exif.get_field(exif::Tag(ctx, number), exif::In(ifd)))
+    })
+}
+
+/// Returns the first string of the Make field, or "" if there is none.
+fn find_make(exif: &KamadakExif) -> String {
+    if let Some(field) = find_by_number(exif, exif::Tag::Make.number())
+        && let exif::Value::Ascii(ref v) = field.value
+        && let Some(first) = v.iter().next()
+        && let Ok(s) = std::str::from_utf8(first)
+    {
+        return s.to_string();
+    }
+    String::new()
+}
+
 impl Exif {
     pub fn new(inner: Option<KamadakExif>) -> Self {
         let mut mnote_type = crate::mnote::MakerNoteType::None;
         let mut mnote_fields = Vec::new();
 
         if let Some(ref exif_data) = inner {
-            let mut make_str = String::new();
-            if let Some(field) =
-                exif_data.fields().find(|f| f.tag.number() == exif::Tag::Make.number())
-                && let exif::Value::Ascii(ref v) = field.value
-                && let Some(first) = v.iter().next()
-                && let Ok(s) = std::str::from_utf8(first)
-            {
-                make_str = s.to_string();
-            }
+            let make_str = find_make(exif_data);
 
-            if let Some(mnote_field) =
-                exif_data.fields().find(|f| f.tag.number() == exif::Tag::MakerNote.number())
+            if let Some(mnote_field) = find_by_number(exif_data, exif::Tag::MakerNote.number())
                 && let exif::Value::Undefined(ref mnote_bytes, _) = mnote_field.value
             {
                 let endian = exif_data.little_endian();
@@ -77,6 +98,10 @@ impl Exif {
     }
 
     /// Returns a vector of Exif fields.
+    ///
+    /// This parses every field value; see `find_by_number` for why that can
+    /// cost much more memory than the file. `get_field` parses only the field
+    /// it returns.
     pub fn fields(&self) -> VecField {
         // Return type of the original function is actually just an opaque type that implements
         // ExactSizeIterator<Item = &Field> trait, so we are just using VecField instead.
@@ -151,24 +176,14 @@ impl Debug for Exif {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match &self.inner {
             Some(exif) => {
-                let mut make_str = String::new();
-                if let Some(field) =
-                    exif.fields().find(|f| f.tag.number() == exif::Tag::Make.number())
-                    && let exif::Value::Ascii(ref v) = field.value
-                    && let Some(first) = v.iter().next()
-                    && let Ok(s) = std::str::from_utf8(first)
-                {
-                    make_str = s.to_string();
-                }
-
                 let mnote_tag_present =
-                    exif.fields().any(|f| f.tag.number() == exif::Tag::MakerNote.number());
+                    find_by_number(exif, exif::Tag::MakerNote.number()).is_some();
                 f.debug_struct("Exif")
                     .field("buffer", &exif.buf())
                     .field("little_endian", &exif.little_endian())
                     .field("mnote_type", &self.mnote_type)
                     .field("mnote_fields_count", &self.mnote_fields.len())
-                    .field("detected_make", &make_str)
+                    .field("detected_make", &find_make(exif))
                     .field("mnote_tag_present", &mnote_tag_present)
                     .finish()
             }

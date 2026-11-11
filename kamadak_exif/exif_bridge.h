@@ -4,12 +4,14 @@
 #include <cstddef>
 #include <cstdint>
 #include <map>
+#include <memory>
 #include <optional>
 #include <string>
 #include <vector>
 
 #include "crubit/rust.h"
 #include "absl/base/attributes.h"
+#include "absl/base/call_once.h"
 #include "absl/container/chunked_queue.h"
 #include "absl/status/statusor.h"
 #include "absl/types/span.h"
@@ -551,6 +553,11 @@ class Exif final {
   /**
    * Returns a span of Exif fields.
    *
+   * The first call parses every field value. A crafted file can make that
+   * take far more memory than the file itself, because any number of fields
+   * can point at the same bytes. To look up particular tags, use
+   * `get_field()`, which parses only the field it returns.
+   *
    * Lifetime: bound to this Exif instance. See Field::value() for exactly
    * what the compiler does and does not catch.
    */
@@ -592,10 +599,15 @@ class Exif final {
 
   explicit Exif(rust::reader::Exif exif);
   rust::reader::Exif exif_;
-  // Internal cached fields. When exif is created, this is populated from
-  // exif_.fields(). Note that this only works because Exif fields is immutable
-  // in this library.
-  std::vector<Field> fields_;
+  // Internal cached fields, populated from exif_.fields() on the first call
+  // to fields() (see there for why not up front). Note that this only works
+  // because Exif fields is immutable in this library. It lives on the heap so
+  // that Exif stays movable; a moved-from Exif has none and no fields.
+  struct LazyFields {
+    absl::once_flag once;
+    std::vector<Field> fields;
+  };
+  std::unique_ptr<LazyFields> fields_;
   // Internal cached MakerNote fields.
   std::vector<Field> mnote_fields_;
   // Internal cached buffer. When exif is created, this is populated from
