@@ -8,7 +8,7 @@ use open_enum::open_enum;
 #[open_enum(allow_alias)]
 #[cpp_enum(kind = "enum class")]
 #[repr(i32)]
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum JxlBridgeDataType {
     U8,
     U16,
@@ -25,7 +25,7 @@ impl Default for JxlBridgeDataType {
 #[open_enum(allow_alias)]
 #[cpp_enum(kind = "enum class")]
 #[repr(i32)]
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum JxlBridgeEndianness {
     /// The byte order of the host.
     Native,
@@ -40,6 +40,13 @@ impl Default for JxlBridgeEndianness {
 }
 
 impl JxlBridgeEndianness {
+    pub(crate) fn validate(self) -> Result<(), String> {
+        match self {
+            Self::Native | Self::LittleEndian | Self::BigEndian => Ok(()),
+            _ => Err("Invalid sample endianness".to_string()),
+        }
+    }
+
     fn to_jxl_endianness(self) -> jxl::api::Endianness {
         match self {
             Self::LittleEndian => jxl::api::Endianness::LittleEndian,
@@ -59,7 +66,7 @@ impl JxlBridgeEndianness {
 #[open_enum(allow_alias)]
 #[cpp_enum(kind = "enum class")]
 #[repr(i32)]
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum JxlBridgeChannelLayout {
     Grayscale,
     GrayscaleAlpha,
@@ -75,6 +82,13 @@ impl Default for JxlBridgeChannelLayout {
 }
 
 impl JxlBridgeChannelLayout {
+    pub(crate) fn validate(self) -> Result<(), String> {
+        match self {
+            Self::Grayscale | Self::GrayscaleAlpha | Self::Rgb | Self::Rgba | Self::Cmyk => Ok(()),
+            _ => Err("Invalid channel layout".to_string()),
+        }
+    }
+
     fn to_jxl_color_type(self) -> jxl::api::JxlColorType {
         match self {
             Self::Grayscale => jxl::api::JxlColorType::Grayscale,
@@ -88,6 +102,13 @@ impl JxlBridgeChannelLayout {
 }
 
 impl JxlBridgeDataType {
+    pub(crate) fn validate(self) -> Result<(), String> {
+        match self {
+            Self::U8 | Self::U16 | Self::F32 => Ok(()),
+            _ => Err("Invalid pixel data type".to_string()),
+        }
+    }
+
     /// Returns the width of a single sample of this type, in bits.
     fn bits_per_sample(self) -> u32 {
         match self {
@@ -118,11 +139,17 @@ pub struct JxlBridgeSampleFormat {
 }
 
 impl JxlBridgeSampleFormat {
+    const DEFAULT_VALUE: Self = Self {
+        data_type: JxlBridgeDataType::U8,
+        bit_depth: 0,
+        endianness: JxlBridgeEndianness::Native,
+    };
+
     /// Creates a sample format using the full range of `data_type` and the
     /// host byte order.
     #[must_use]
     pub fn new(data_type: JxlBridgeDataType) -> Self {
-        Self { data_type, ..Self::default() }
+        Self { data_type, ..Self::DEFAULT_VALUE }
     }
 
     /// Returns `bit_depth` if it was set, and the full width of `data_type`
@@ -136,27 +163,38 @@ impl JxlBridgeSampleFormat {
         }
     }
 
-    /// Returns an error message if the requested bit depth does not fit in the
-    /// output data type.
+    /// Returns an error message if the sample format contains invalid enum
+    /// discriminants or a bit depth that does not fit in the output data type.
     pub(crate) fn validate(&self) -> Result<(), String> {
-        let max_bit_depth = self.data_type.bits_per_sample();
-        let bit_depth = self.effective_bit_depth();
-        if bit_depth > max_bit_depth {
-            return Err(format!(
-                "bit_depth ({bit_depth}) exceeds the {max_bit_depth} bits of the output data type"
-            ));
+        self.data_type.validate()?;
+        self.endianness.validate()?;
+        // `bit_depth` is ignored for `F32` (see field documentation).
+        if self.data_type != JxlBridgeDataType::F32 {
+            let max_bit_depth = self.data_type.bits_per_sample();
+            let bit_depth = self.effective_bit_depth();
+            if bit_depth > max_bit_depth {
+                return Err(format!(
+                    "bit_depth ({bit_depth}) exceeds the {max_bit_depth} bits of the \
+                     output data type"
+                ));
+            }
         }
         Ok(())
     }
 
     fn to_jxl_data_format(&self) -> jxl::api::JxlDataFormat {
-        // `validate` rejects anything wider than the data type, so the cast
-        // cannot truncate.
-        let bit_depth = self.effective_bit_depth() as u8;
         let endianness = self.endianness.to_jxl_endianness();
         match self.data_type {
-            JxlBridgeDataType::U8 => jxl::api::JxlDataFormat::U8 { bit_depth },
-            JxlBridgeDataType::U16 => jxl::api::JxlDataFormat::U16 { endianness, bit_depth },
+            JxlBridgeDataType::U8 => {
+                // `validate` rejects anything wider than 8 bits for `U8`.
+                let bit_depth = self.effective_bit_depth() as u8;
+                jxl::api::JxlDataFormat::U8 { bit_depth }
+            }
+            JxlBridgeDataType::U16 => {
+                // `validate` rejects anything wider than 16 bits for `U16`.
+                let bit_depth = self.effective_bit_depth() as u8;
+                jxl::api::JxlDataFormat::U16 { endianness, bit_depth }
+            }
             JxlBridgeDataType::F32 => jxl::api::JxlDataFormat::F32 { endianness },
             _ => Self::new(JxlBridgeDataType::default()).to_jxl_data_format(),
         }
@@ -324,21 +362,23 @@ pub struct JxlBridgeDecoderOptions {
 
 impl Default for JxlBridgeDecoderOptions {
     fn default() -> Self {
-        Self {
-            adjust_orientation: true,
-            render_spot_colors: true,
-            coalescing: true,
-            skip_preview: true,
-            high_precision: false,
-            premultiply_output: false,
-            scan_frames_only: false,
-            sample_limit: 0,
-            desired_intensity_target: 0.0,
-        }
+        Self::DEFAULT_VALUE
     }
 }
 
 impl JxlBridgeDecoderOptions {
+    const DEFAULT_VALUE: Self = Self {
+        adjust_orientation: true,
+        render_spot_colors: true,
+        coalescing: true,
+        skip_preview: true,
+        high_precision: false,
+        premultiply_output: false,
+        scan_frames_only: false,
+        sample_limit: 0,
+        desired_intensity_target: 0.0,
+    };
+
     /// Creates options with all defaults.
     pub fn new() -> Self {
         Self::default()

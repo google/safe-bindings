@@ -2,6 +2,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <optional>
 #include <utility>
 #include <vector>
@@ -14,6 +15,56 @@
 #include "rust/jxl_bridge_rs.h"
 
 namespace safe_bindings::jxl_bridge {
+namespace {
+
+bool IsValidChannelLayout(ChannelLayout channel_layout) {
+  switch (channel_layout) {
+    case ChannelLayout::Grayscale:
+    case ChannelLayout::GrayscaleAlpha:
+    case ChannelLayout::Rgb:
+    case ChannelLayout::Rgba:
+    case ChannelLayout::Cmyk:
+      return true;
+    default:
+      return false;
+  }
+}
+
+bool IsValidDataType(DataType data_type) {
+  switch (data_type) {
+    case DataType::U8:
+    case DataType::U16:
+    case DataType::F32:
+      return true;
+    default:
+      return false;
+  }
+}
+
+absl::StatusOr<size_t> CheckedSampleCount(uint32_t width, uint32_t height,
+                                          ChannelLayout channel_layout) {
+  if (width == 0 || height == 0) {
+    return absl::InvalidArgumentError("Image has zero width or height");
+  }
+  if (!IsValidChannelLayout(channel_layout)) {
+    return absl::InvalidArgumentError("Invalid channel layout");
+  }
+  const size_t width_sz = static_cast<size_t>(width);
+  const size_t height_sz = static_cast<size_t>(height);
+  if (height_sz > std::numeric_limits<size_t>::max() / width_sz) {
+    return absl::InvalidArgumentError(
+        "Image dimensions too large: width * height overflows");
+  }
+  const size_t num_pixels = width_sz * height_sz;
+  const size_t num_channels = static_cast<size_t>(NumChannels(channel_layout));
+  if (num_channels > std::numeric_limits<size_t>::max() / num_pixels) {
+    return absl::InvalidArgumentError(
+        "Image sample count overflows: dimensions * channels");
+  }
+  return num_pixels * num_channels;
+}
+
+}  // namespace
 
 JxlDecoder::JxlDecoder()
     : decoder_(jxl_bridge_rs::decoder::JxlBridgeDecoder::new_()) {}
@@ -67,6 +118,12 @@ absl::Status JxlDecoder::SetPixelLayout(ChannelLayout channel_layout,
 absl::StatusOr<FeedResult> JxlDecoder::DecodeFrame(
     absl::Span<const uint8_t>& data, ChannelLayout channel_layout,
     DataType data_type, absl::Span<uint8_t> output) {
+  if (!IsValidChannelLayout(channel_layout)) {
+    return absl::InvalidArgumentError("Invalid channel layout");
+  }
+  if (!IsValidDataType(data_type)) {
+    return absl::InvalidArgumentError("Invalid data type");
+  }
   if (!decoder_.has_pixel_layout()) {
     ABSL_RETURN_IF_ERROR(SetPixelLayout(channel_layout, data_type));
   } else if (decoder_.output_channel_layout() != channel_layout ||
@@ -130,9 +187,40 @@ absl::StatusOr<ChannelLayout> ChannelLayoutForImage(const BasicInfo& info) {
   }
 }
 
+absl::StatusOr<size_t> RequiredOutputSize(uint32_t width, uint32_t height,
+                                          ChannelLayout channel_layout,
+                                          DataType data_type) {
+  if (!IsValidDataType(data_type)) {
+    return absl::InvalidArgumentError("Invalid data type");
+  }
+  ABSL_ASSIGN_OR_RETURN(const size_t num_samples,
+                   CheckedSampleCount(width, height, channel_layout));
+  const size_t bytes_per_sample =
+      static_cast<size_t>(BytesPerSample(data_type));
+  if (bytes_per_sample > std::numeric_limits<size_t>::max() / num_samples) {
+    return absl::InvalidArgumentError(
+        "Image buffer size overflows: samples * bytes_per_sample");
+  }
+  const size_t required_bytes = num_samples * bytes_per_sample;
+  const size_t max_addressable_bytes =
+      static_cast<size_t>(std::numeric_limits<ptrdiff_t>::max());
+  if (required_bytes > max_addressable_bytes) {
+    return absl::InvalidArgumentError(
+        "Image buffer size exceeds addressable slice range");
+  }
+  return required_bytes;
+}
+
 absl::StatusOr<DecodedImage> DecodeJxl(
     absl::Span<const uint8_t> data, DataType data_type,
     std::optional<ChannelLayout> forced_layout, size_t sample_limit) {
+  if (!IsValidDataType(data_type)) {
+    return absl::InvalidArgumentError("Invalid data type");
+  }
+  if (forced_layout.has_value() && !IsValidChannelLayout(*forced_layout)) {
+    return absl::InvalidArgumentError("Invalid channel layout");
+  }
+
   DecoderOptions options;
   options.sample_limit = sample_limit;
   JxlDecoder decoder(options);
@@ -156,29 +244,17 @@ absl::StatusOr<DecodedImage> DecodeJxl(
     ABSL_ASSIGN_OR_RETURN(channel_layout, ChannelLayoutForImage(info));
   }
 
-  // Use checked arithmetic to prevent integer overflow from malicious headers.
-  // Width and height are both non-zero here, so the divisions are safe.
-  size_t num_samples = static_cast<size_t>(info.width);
-  if (info.height > SIZE_MAX / num_samples) {
-    return absl::InvalidArgumentError(
-        "Image dimensions too large: width * height overflows");
-  }
-  num_samples *= info.height;
-
-  const size_t pixel_bytes =
-      NumChannels(channel_layout) * BytesPerSample(data_type);
-  if (pixel_bytes > SIZE_MAX / num_samples) {
-    return absl::InvalidArgumentError(
-        "Image buffer size overflows: dimensions * channels");
-  }
-  num_samples *= pixel_bytes;
-
+  ABSL_ASSIGN_OR_RETURN(const size_t num_samples,
+                   CheckedSampleCount(info.width, info.height, channel_layout));
   // sample_limit 0 is treated as no limit.
   if (sample_limit > 0 && num_samples > sample_limit) {
-    return absl::OutOfRangeError("Image buffer size exceeds sample limit");
+    return absl::OutOfRangeError("Image sample count exceeds sample limit");
   }
 
-  std::vector<uint8_t> pixels(num_samples);
+  ABSL_ASSIGN_OR_RETURN(
+      const size_t required_bytes,
+      RequiredOutputSize(info.width, info.height, channel_layout, data_type));
+  std::vector<uint8_t> pixels(required_bytes);
 
   ABSL_ASSIGN_OR_RETURN(const FeedResult result,
                    decoder.DecodeFrame(remaining, channel_layout, data_type,
