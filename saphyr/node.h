@@ -58,20 +58,31 @@ class NodeView {
 
   // Accesses an element in a map by key.
   // Returns a `NodeView` for which `IsDefined()` is false if the node is not a
-  // map or the key is not found.
+  // map, `key` is null or invalid UTF-8, or the key is not found.
   NodeView operator[](rs_std::StrRef key) const;
   NodeView operator[](const char* key) const {
-    return operator[](rs_std::StrRef::FromUtf8Unchecked(key));
+    return key == nullptr ? NodeView() : operator[](absl::string_view(key));
   }
   NodeView operator[](absl::string_view key) const {
-    return operator[](rs_std::StrRef::FromUtf8Unchecked(key));
+    std::optional<rs_std::StrRef> utf8_key = rs_std::StrRef::FromUtf8(key);
+    return utf8_key.has_value() ? operator[](*utf8_key) : NodeView();
   }
 
   // A safer version of `operator[]` for sequence.
   std::optional<NodeView> Get(size_t index) const;
+  std::optional<NodeView> Get(int index) const {
+    return index < 0 ? std::nullopt : Get(static_cast<size_t>(index));
+  }
 
   // A safer version of `operator[]` for map.
   std::optional<NodeView> Get(rs_std::StrRef key) const;
+  std::optional<NodeView> Get(const char* key) const {
+    return key == nullptr ? std::nullopt : Get(absl::string_view(key));
+  }
+  std::optional<NodeView> Get(absl::string_view key) const {
+    std::optional<rs_std::StrRef> utf8_key = rs_std::StrRef::FromUtf8(key);
+    return utf8_key.has_value() ? Get(*utf8_key) : std::nullopt;
+  }
 
   // For map iteration by index.
   NodeView get_key_at_index(size_t index) const;
@@ -211,14 +222,15 @@ class Node {
 
   // Accesses an element in a map by key.
   // Returns a `NodeView` for which `IsDefined()` is false if the node is not a
-  // map or the key is not found.
+  // map, `key` is null or invalid UTF-8, or the key is not found.
   NodeView operator[](rs_std::StrRef key) const ABSL_ATTRIBUTE_LIFETIME_BOUND;
   NodeView operator[](const char* key) const ABSL_ATTRIBUTE_LIFETIME_BOUND {
-    return operator[](rs_std::StrRef::FromUtf8Unchecked(key));
+    return key == nullptr ? NodeView() : operator[](absl::string_view(key));
   }
   NodeView operator[](absl::string_view key) const
       ABSL_ATTRIBUTE_LIFETIME_BOUND {
-    return operator[](rs_std::StrRef::FromUtf8Unchecked(key));
+    std::optional<rs_std::StrRef> utf8_key = rs_std::StrRef::FromUtf8(key);
+    return utf8_key.has_value() ? operator[](*utf8_key) : NodeView();
   }
   // Accesses an element in a sequence by index.
   // Returns a `NodeView` for which `IsDefined()` is false if the node is not a
@@ -230,9 +242,21 @@ class Node {
 
   // A safer version of `operator[]` for sequence.
   std::optional<NodeView> Get(size_t index) const ABSL_ATTRIBUTE_LIFETIME_BOUND;
+  std::optional<NodeView> Get(int index) const ABSL_ATTRIBUTE_LIFETIME_BOUND {
+    return index < 0 ? std::nullopt : Get(static_cast<size_t>(index));
+  }
   // A safer version of `operator[]` for map.
   std::optional<NodeView> Get(rs_std::StrRef key) const
       ABSL_ATTRIBUTE_LIFETIME_BOUND;
+  std::optional<NodeView> Get(const char* key) const
+      ABSL_ATTRIBUTE_LIFETIME_BOUND {
+    return key == nullptr ? std::nullopt : Get(absl::string_view(key));
+  }
+  std::optional<NodeView> Get(absl::string_view key) const
+      ABSL_ATTRIBUTE_LIFETIME_BOUND {
+    std::optional<rs_std::StrRef> utf8_key = rs_std::StrRef::FromUtf8(key);
+    return utf8_key.has_value() ? Get(*utf8_key) : std::nullopt;
+  }
 
   // Sets the value at a given index in a sequence.
   // If `index` is within bounds, the existing value is replaced.
@@ -264,24 +288,20 @@ absl::StatusOr<std::string> Dump(const Node& node);
 std::ostream& operator<<(std::ostream& out, const Node& node);
 
 // Parses a YAML string `input` and returns an owning `Node`.
-// Returns an error if parsing fails.
+// Returns `absl::InvalidArgumentError` if `input` is null, invalid UTF-8,
+// empty, or malformed YAML.
 absl::StatusOr<Node> Load(rs_std::StrRef input);
-
-inline absl::StatusOr<Node> Load(absl::string_view input) {
-  return Load(rs_std::StrRef::FromUtf8Unchecked(input));
-}
-
-inline absl::StatusOr<Node> Load(const char* input) {
-  return Load(rs_std::StrRef::FromUtf8Unchecked(input));
-}
+absl::StatusOr<Node> Load(absl::string_view input);
+absl::StatusOr<Node> Load(const char* input);
 
 // Helper functions to convert primitive C++ types to `rust::YamlOwned`
-// values.
+// values. String inputs replace any invalid UTF-8 byte sequences with U+FFFD.
 rust::YamlOwned ToYaml(int64_t value);
 rust::YamlOwned ToYaml(int value);
 rust::YamlOwned ToYaml(double value);
 rust::YamlOwned ToYaml(bool value);
 rust::YamlOwned ToYaml(const char* value);
+rust::YamlOwned ToYaml(absl::string_view value);
 
 }  // namespace security::yaml
 
