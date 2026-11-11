@@ -211,10 +211,7 @@ impl RoaringBitmap32 {
 
     /// Collects all values into a vector.
     pub fn ToVec(&self) -> vector<u32> {
-        let mut v = vector::default();
-        v.resize(self.inner.len() as usize, 0);
-        let _ = self.inner.iter().next_many(&mut v);
-        v
+        self.inner.iter().collect()
     }
 
     /// Returns the serialized size in bytes.
