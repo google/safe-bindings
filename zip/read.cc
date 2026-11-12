@@ -11,6 +11,7 @@
 #include "converters.h"
 #include "file.h"
 #include "crubit/rust.h"
+#include "absl/functional/overload.h"
 #include "absl/status/status.h"
 #include "absl/status/status_macros.h"
 #include "absl/status/statusor.h"
@@ -151,6 +152,17 @@ absl::StatusOr<FsZipArchive> FsZipArchive::NewFromPath(absl::string_view path) {
   return FsZipArchive(std::move(archive));
 }
 
+absl::Status FsZipArchive::CheckNone() const {
+  return CheckArchiveOpen(archive_);
+}
+
+absl::StatusOr<FsZipArchive> FsZipArchive::TryClone() const {
+  ABSL_RETURN_IF_ERROR(CheckNone());
+  ABSL_ASSIGN_OR_RETURN(rust::FsZipArchive archive,
+                        FromRustFsZipArchive(archive_.try_clone()));
+  return FsZipArchive(std::move(archive));
+}
+
 absl::StatusOr<uintptr_t> FsZipArchive::GetLength() const {
   return GetLengthImpl(archive_);
 }
@@ -185,6 +197,20 @@ absl::StatusOr<ZipArchive> ZipArchive::FromBuffer(absl::string_view data) {
   ABSL_ASSIGN_OR_RETURN(BufferedZipArchive archive,
                         BufferedZipArchive::NewFromData(data));
   return ZipArchive(std::move(archive));
+}
+
+absl::StatusOr<ZipArchive> ZipArchive::TryClone() const {
+  return std::visit(
+      absl::Overload(
+          [](const BufferedZipArchive&) -> absl::StatusOr<ZipArchive> {
+            return absl::UnimplementedError(
+                "TryClone is not supported for archives opened from a buffer");
+          },
+          [](const FsZipArchive& archive) -> absl::StatusOr<ZipArchive> {
+            ABSL_ASSIGN_OR_RETURN(FsZipArchive clone, archive.TryClone());
+            return ZipArchive(std::move(clone));
+          }),
+      archive_);
 }
 
 absl::StatusOr<uintptr_t> ZipArchive::GetLength() const {

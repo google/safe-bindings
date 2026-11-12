@@ -27,9 +27,10 @@ namespace security::zip {
 // the same handle returns `kFailedPrecondition`. Destroy (or `reset()`) the
 // previous ZipFile first, or scope each entry in its own block. To read
 // several entries at once, open an independent handle on the same archive
-// instead of sharing one. Note that `entry = archive.GetFileByIndex(i)` on an
-// existing `absl::StatusOr<ZipFile>` evaluates the call before the old entry
-// is destroyed, so it fails while `entry` still holds one. GetLength(),
+// (see `TryClone()`; each clone has its own entry slot) instead of sharing
+// one. Note that `entry = archive.GetFileByIndex(i)` on an existing
+// `absl::StatusOr<ZipFile>` evaluates the call before the old entry is
+// destroyed, so it fails while `entry` still holds one. GetLength(),
 // GetComment() and GetEntryMetadata() do not borrow the archive and stay
 // usable while an entry is open.
 class BufferedZipArchive final {
@@ -102,6 +103,32 @@ class FsZipArchive final {
   // UTF-8, or is not a valid zip archive, and returns `kFailedPrecondition` if
   // the archive uses an unsupported feature (such as multi-disk spanning).
   static absl::StatusOr<FsZipArchive> NewFromPath(absl::string_view path);
+  // Returns an independent handle onto the same archive.
+  //
+  // The new handle shares the central directory that NewFromPath already
+  // parsed, so this costs one open(2) and is O(1) in the number of entries,
+  // whereas NewFromPath is O(entries). Use it when several entries must be read
+  // at once: GetFileByIndex keeps the archive borrowed for as long as the
+  // returned ZipFile lives, so N concurrently open entries need N handles, and
+  // reopening by path for each one is quadratic on large archives.
+  //
+  // Each handle owns its own file descriptor and therefore its own file
+  // position, so handles may be read independently.
+  //
+  // The path must still resolve to the same, unmodified file the archive was
+  // opened from (for a relative path, the working directory must not have
+  // changed either), since the shared central directory would otherwise
+  // describe byte ranges that no longer hold the entries it names. The
+  // reopened file's identity (length, plus device and inode on Unix) is
+  // compared with what NewFromPath saw, so a file that was replaced, truncated
+  // or appended to in between is detected and reported as
+  // `absl::StatusCode::kFailedPrecondition`. An in-place rewrite that keeps the
+  // inode and the length is not detected.
+  //
+  // Also returns `absl::StatusCode::kFailedPrecondition` on a moved-from
+  // archive, and propagates OS file-open errors (such as `kNotFound` and
+  // `kPermissionDenied`) when the path can no longer be opened.
+  absl::StatusOr<FsZipArchive> TryClone() const;
   // Returns the number of entries in the archive, or `kFailedPrecondition` if
   // the archive is moved-from.
   absl::StatusOr<uintptr_t> GetLength() const;
@@ -152,6 +179,8 @@ class FsZipArchive final {
       : archive_(std::move(archive)),
         active_entry_(std::make_shared<bool>(false)) {}
 
+  absl::Status CheckNone() const;
+
   rust::FsZipArchive archive_;
   // Set while a ZipFile returned by GetFileByIndex* is alive; see
   // internal::ActiveEntryGuard. Null on a moved-from archive.
@@ -166,6 +195,21 @@ class ZipArchive final {
   // Parses `data` as a seekable zip archive; see
   // `BufferedZipArchive::NewFromData` for error codes.
   static absl::StatusOr<ZipArchive> FromBuffer(absl::string_view data);
+  // Returns an independent handle onto the same archive, sharing the central
+  // directory this one already parsed. See FsZipArchive::TryClone for the cost
+  // model and the requirement that the path still name the same, unmodified
+  // file.
+  //
+  // Returns `absl::StatusCode::kFailedPrecondition` on a moved-from file-backed
+  // archive or when the file at the path was replaced, truncated or appended
+  // to since it was opened, or propagates OS file-open errors (such as
+  // `kNotFound` and `kPermissionDenied`) when the path can no longer be opened.
+  //
+  // Not supported for archives opened with FromBuffer, which return
+  // `absl::StatusCode::kUnimplemented` (even when moved from), because their
+  // reader cannot currently be shared and cloning one would copy the whole
+  // archive.
+  absl::StatusOr<ZipArchive> TryClone() const;
   // Returns the number of entries in the archive, or `kFailedPrecondition` if
   // the archive is moved-from.
   absl::StatusOr<uintptr_t> GetLength() const;

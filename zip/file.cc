@@ -11,6 +11,8 @@
 #include "absl/status/status.h"
 #include "absl/status/status_macros.h"
 #include "absl/status/statusor.h"
+#include "absl/types/span.h"
+#include "support/rs_std/slice_ref.h"
 
 namespace security::zip {
 
@@ -78,6 +80,27 @@ absl::StatusOr<RustVecU8Wrapper> ReadBytesImpl(RustZipFile& zip,
                                                size_t max_bytes) {
   ABSL_RETURN_IF_ERROR(CheckFileOpen(zip));
   return FromRustResultVecU8(zip.read_bytes(max_bytes));
+}
+
+// Rust writes into the caller's buffer through this; the slice borrows it and
+// must not outlive the call it is passed to.
+rs_std::SliceRef<uint8_t> AsMutableSlice(absl::Span<char> buf) {
+  return rs_std::SliceRef<uint8_t>(reinterpret_cast<uint8_t*>(buf.data()),
+                                   buf.size());
+}
+
+template <typename RustZipFile>
+absl::StatusOr<size_t> ReadIntoImpl(RustZipFile& zip, absl::Span<char> buf) {
+  ABSL_RETURN_IF_ERROR(CheckFileOpen(zip));
+  ABSL_ASSIGN_OR_RETURN(const uint64_t read,
+                        FromRustResultU64(zip.read_into(AsMutableSlice(buf))));
+  return static_cast<size_t>(read);
+}
+
+template <typename RustZipFile>
+absl::StatusOr<uint64_t> SkipImpl(RustZipFile& zip, uint64_t max_bytes) {
+  ABSL_RETURN_IF_ERROR(CheckFileOpen(zip));
+  return FromRustResultU64(zip.skip(max_bytes));
 }
 
 }  // namespace
@@ -218,6 +241,12 @@ absl::StatusOr<RustVecU8Wrapper> BufferedZipFile::GetFileData(size_t max_size) {
 absl::StatusOr<RustVecU8Wrapper> BufferedZipFile::ReadBytes(size_t max_bytes) {
   return ReadBytesImpl(zip_, max_bytes);
 }
+absl::StatusOr<size_t> BufferedZipFile::ReadInto(absl::Span<char> buf) {
+  return ReadIntoImpl(zip_, buf);
+}
+absl::StatusOr<uint64_t> BufferedZipFile::Skip(uint64_t max_bytes) {
+  return SkipImpl(zip_, max_bytes);
+}
 
 absl::Status FsZipFile::CheckNone() const { return CheckFileOpen(zip_); }
 
@@ -288,6 +317,12 @@ absl::StatusOr<RustVecU8Wrapper> FsZipFile::GetFileData(size_t max_size) {
 absl::StatusOr<RustVecU8Wrapper> FsZipFile::ReadBytes(size_t max_bytes) {
   return ReadBytesImpl(zip_, max_bytes);
 }
+absl::StatusOr<size_t> FsZipFile::ReadInto(absl::Span<char> buf) {
+  return ReadIntoImpl(zip_, buf);
+}
+absl::StatusOr<uint64_t> FsZipFile::Skip(uint64_t max_bytes) {
+  return SkipImpl(zip_, max_bytes);
+}
 
 absl::StatusOr<bool> ZipFile::IsFile() const {
   return std::visit([](const auto& zip) { return zip.IsFile(); }, zip_);
@@ -348,6 +383,13 @@ absl::StatusOr<RustVecU8Wrapper> ZipFile::GetFileData(size_t max_size) {
 }
 absl::StatusOr<RustVecU8Wrapper> ZipFile::ReadBytes(size_t max_bytes) {
   return std::visit([max_bytes](auto& zip) { return zip.ReadBytes(max_bytes); },
+                    zip_);
+}
+absl::StatusOr<size_t> ZipFile::ReadInto(absl::Span<char> buf) {
+  return std::visit([buf](auto& zip) { return zip.ReadInto(buf); }, zip_);
+}
+absl::StatusOr<uint64_t> ZipFile::Skip(uint64_t max_bytes) {
+  return std::visit([max_bytes](auto& zip) { return zip.Skip(max_bytes); },
                     zip_);
 }
 
