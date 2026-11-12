@@ -2,6 +2,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <optional>
 #include <string>
 #include <vector>
@@ -69,6 +70,7 @@ TEST(JxlBridgeTest, BytesPerSampleReturnsCorrectValues) {
   EXPECT_EQ(BytesPerSample(DataType::U8), 1);
   EXPECT_EQ(BytesPerSample(DataType::U16), 2);
   EXPECT_EQ(BytesPerSample(DataType::F32), 4);
+  EXPECT_EQ(BytesPerSample(DataType::F16), 2);
 }
 
 }  // namespace

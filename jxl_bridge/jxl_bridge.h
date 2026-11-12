@@ -64,6 +64,7 @@ inline uint32_t BytesPerSample(DataType data_type) {
     case DataType::U8:
       return 1;
     case DataType::U16:
+    case DataType::F16:
       return 2;
     case DataType::F32:
       return 4;
