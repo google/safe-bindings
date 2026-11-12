@@ -9,7 +9,6 @@
 #include <utility>
 #include <vector>
 
-#include "crubit/rust.h"
 #include "crubit_helpers/string_conversions.h"
 #include "absl/algorithm/container.h"
 #include "absl/status/status.h"
@@ -17,6 +16,7 @@
 #include "absl/status/statusor.h"
 #include "absl/types/span.h"
 #include "support/rs_std/slice_ref.h"
+#include "crubit/rust.h"
 
 namespace security::exif_bridge {
 namespace {
