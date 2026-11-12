@@ -32,20 +32,32 @@ absl::StatusOr<CompressionMethod> ToSecurityZipCompressionMethod(
     case rust::CompressionMethod::Tag::Xz:
       return CompressionMethod::kXz;
     case rust::CompressionMethod::Tag::Unsupported:
-      return absl::InvalidArgumentError("Unsupported compression method");
+      return absl::UnimplementedError("Unsupported compression method");
   }
   return absl::InvalidArgumentError("Unknown compression method");
 }
 
 // The two backends below differ only in the Rust entry type they wrap
-// (rust::{Buffered,Fs}ZipFile), so the data-reading methods whose
-// bodies would otherwise be identical share these helpers.
+// (rust::{Buffered,Fs}ZipFile), so the methods whose bodies would
+// otherwise be identical share these helpers.
 template <typename RustZipFile>
 absl::Status CheckFileOpen(const RustZipFile& zip) {
   if (zip.is_none()) {
     return absl::InternalError("ZipFile object used after being moved-out");
   }
   return absl::OkStatus();
+}
+
+template <typename RustZipFile>
+absl::StatusOr<uint64_t> GetHeaderStartImpl(const RustZipFile& zip) {
+  ABSL_RETURN_IF_ERROR(CheckFileOpen(zip));
+  return zip.get_header_start();
+}
+
+template <typename RustZipFile>
+absl::StatusOr<uint64_t> GetDataStartImpl(const RustZipFile& zip) {
+  ABSL_RETURN_IF_ERROR(CheckFileOpen(zip));
+  return zip.get_data_start();
 }
 
 template <typename RustZipFile>
@@ -69,6 +81,72 @@ absl::StatusOr<RustVecU8Wrapper> ReadBytesImpl(RustZipFile& zip,
 }
 
 }  // namespace
+
+bool ZipEntryMetadata::IsNone() const { return metadata_.is_none(); }
+absl::StatusOr<bool> ZipEntryMetadata::IsFile() const {
+  ABSL_RETURN_IF_ERROR(CheckNone());
+  return metadata_.is_file();
+}
+absl::StatusOr<bool> ZipEntryMetadata::IsDir() const {
+  ABSL_RETURN_IF_ERROR(CheckNone());
+  return metadata_.is_dir();
+}
+absl::StatusOr<bool> ZipEntryMetadata::IsEncrypted() const {
+  ABSL_RETURN_IF_ERROR(CheckNone());
+  return metadata_.is_encrypted();
+}
+absl::StatusOr<std::string> ZipEntryMetadata::GetFileName() const {
+  ABSL_RETURN_IF_ERROR(CheckNone());
+  rust::VecU8 name_vec = metadata_.get_file_name();
+  return std::string(security::crubit_helpers::StringViewFromVecU8(name_vec));
+}
+absl::StatusOr<CompressionMethod> ZipEntryMetadata::GetCompressionMethod()
+    const {
+  ABSL_RETURN_IF_ERROR(CheckNone());
+  return ToSecurityZipCompressionMethod(metadata_.get_compression_method());
+}
+absl::StatusOr<std::string> ZipEntryMetadata::GetComment() const {
+  ABSL_RETURN_IF_ERROR(CheckNone());
+  rust::VecU8 comment_vec = metadata_.get_comment();
+  return std::string(
+      security::crubit_helpers::StringViewFromVecU8(comment_vec));
+}
+absl::StatusOr<uint64_t> ZipEntryMetadata::GetUncompressedSize() const {
+  ABSL_RETURN_IF_ERROR(CheckNone());
+  return metadata_.get_uncompressed_size();
+}
+absl::StatusOr<uint64_t> ZipEntryMetadata::GetCompressedSize() const {
+  ABSL_RETURN_IF_ERROR(CheckNone());
+  return metadata_.get_compressed_size();
+}
+absl::StatusOr<uint32_t> ZipEntryMetadata::GetCrc32() const {
+  ABSL_RETURN_IF_ERROR(CheckNone());
+  return metadata_.get_crc32();
+}
+absl::StatusOr<uint16_t> ZipEntryMetadata::GetLastModifiedDate() const {
+  ABSL_RETURN_IF_ERROR(CheckNone());
+  return metadata_.get_last_modified_date();
+}
+absl::StatusOr<uint16_t> ZipEntryMetadata::GetLastModifiedTime() const {
+  ABSL_RETURN_IF_ERROR(CheckNone());
+  return metadata_.get_last_modified_time();
+}
+absl::StatusOr<uint32_t> ZipEntryMetadata::GetUnixMode() const {
+  ABSL_RETURN_IF_ERROR(CheckNone());
+  return metadata_.get_unix_mode();
+}
+absl::StatusOr<uint64_t> ZipEntryMetadata::GetHeaderStart() const {
+  ABSL_RETURN_IF_ERROR(CheckNone());
+  return metadata_.get_header_start();
+}
+
+absl::Status ZipEntryMetadata::CheckNone() const {
+  if (IsNone()) {
+    return absl::FailedPreconditionError(
+        "ZipEntryMetadata object used after being moved-out");
+  }
+  return absl::OkStatus();
+}
 
 absl::Status BufferedZipFile::CheckNone() const { return CheckFileOpen(zip_); }
 
@@ -124,6 +202,12 @@ absl::StatusOr<uint32_t> BufferedZipFile::GetUnixMode() const {
 absl::StatusOr<RustVecU8Wrapper> BufferedZipFile::GetExtraData() const {
   ABSL_RETURN_IF_ERROR(CheckNone());
   return RustVecU8Wrapper(zip_.get_extra_data());
+}
+absl::StatusOr<uint64_t> BufferedZipFile::GetHeaderStart() const {
+  return GetHeaderStartImpl(zip_);
+}
+absl::StatusOr<uint64_t> BufferedZipFile::GetDataStart() const {
+  return GetDataStartImpl(zip_);
 }
 absl::StatusOr<RustVecU8Wrapper> BufferedZipFile::GetFileData() {
   return GetFileDataImpl(zip_);
@@ -189,6 +273,12 @@ absl::StatusOr<RustVecU8Wrapper> FsZipFile::GetExtraData() const {
   ABSL_RETURN_IF_ERROR(CheckNone());
   return RustVecU8Wrapper(zip_.get_extra_data());
 }
+absl::StatusOr<uint64_t> FsZipFile::GetHeaderStart() const {
+  return GetHeaderStartImpl(zip_);
+}
+absl::StatusOr<uint64_t> FsZipFile::GetDataStart() const {
+  return GetDataStartImpl(zip_);
+}
 absl::StatusOr<RustVecU8Wrapper> FsZipFile::GetFileData() {
   return GetFileDataImpl(zip_);
 }
@@ -242,6 +332,12 @@ absl::StatusOr<uint32_t> ZipFile::GetUnixMode() const {
 }
 absl::StatusOr<RustVecU8Wrapper> ZipFile::GetExtraData() const {
   return std::visit([](const auto& zip) { return zip.GetExtraData(); }, zip_);
+}
+absl::StatusOr<uint64_t> ZipFile::GetHeaderStart() const {
+  return std::visit([](const auto& zip) { return zip.GetHeaderStart(); }, zip_);
+}
+absl::StatusOr<uint64_t> ZipFile::GetDataStart() const {
+  return std::visit([](const auto& zip) { return zip.GetDataStart(); }, zip_);
 }
 absl::StatusOr<RustVecU8Wrapper> ZipFile::GetFileData() {
   return std::visit([](auto& zip) { return zip.GetFileData(); }, zip_);

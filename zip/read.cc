@@ -75,6 +75,16 @@ absl::StatusOr<ZipFile> GetFileByIndexImpl(
   return wrap(std::move(file), internal::ActiveEntryGuard(active_entry));
 }
 
+template <typename RustArchive>
+absl::StatusOr<ZipEntryMetadata> GetEntryMetadataImpl(
+    const RustArchive& archive, uintptr_t index) {
+  ABSL_RETURN_IF_ERROR(CheckArchiveOpen(archive));
+  ABSL_ASSIGN_OR_RETURN(
+      rust::ZipEntryMetadata metadata,
+      FromRustZipEntryMetadata(archive.get_entry_metadata(index)));
+  return ZipEntryMetadata(std::move(metadata));
+}
+
 template <typename StreamReader, typename ConvertFn, typename WrapFn>
 absl::StatusOr<std::optional<ZipFile>> ReadNextFileImpl(
     StreamReader& reader, const std::shared_ptr<bool>& active_entry,
@@ -126,6 +136,11 @@ absl::StatusOr<ZipFile> BufferedZipArchive::GetFileByIndexRaw(uintptr_t index) {
                             FromRustBufferedZipFile, ZipFile::FromBuffer);
 }
 
+absl::StatusOr<ZipEntryMetadata> BufferedZipArchive::GetEntryMetadata(
+    uintptr_t index) const {
+  return GetEntryMetadataImpl(archive_, index);
+}
+
 bool BufferedZipArchive::IsNone() const { return archive_.is_none(); }
 
 absl::StatusOr<FsZipArchive> FsZipArchive::NewFromPath(absl::string_view path) {
@@ -152,6 +167,11 @@ absl::StatusOr<ZipFile> FsZipArchive::GetFileByIndex(uintptr_t index) {
 absl::StatusOr<ZipFile> FsZipArchive::GetFileByIndexRaw(uintptr_t index) {
   return GetFileByIndexImpl(archive_, active_entry_, index, /*raw=*/true,
                             FromRustFsZipFile, ZipFile::FromFile);
+}
+
+absl::StatusOr<ZipEntryMetadata> FsZipArchive::GetEntryMetadata(
+    uintptr_t index) const {
+  return GetEntryMetadataImpl(archive_, index);
 }
 
 bool FsZipArchive::IsNone() const { return archive_.is_none(); }
@@ -183,6 +203,13 @@ absl::StatusOr<ZipFile> ZipArchive::GetFileByIndex(uintptr_t index) {
 absl::StatusOr<ZipFile> ZipArchive::GetFileByIndexRaw(uintptr_t index) {
   return std::visit([index](auto& arg) { return arg.GetFileByIndexRaw(index); },
                     archive_);
+}
+
+absl::StatusOr<ZipEntryMetadata> ZipArchive::GetEntryMetadata(
+    uintptr_t index) const {
+  return std::visit(
+      [index](const auto& arg) { return arg.GetEntryMetadata(index); },
+      archive_);
 }
 
 bool ZipArchive::IsNone() const {

@@ -29,7 +29,9 @@ namespace security::zip {
 // several entries at once, open an independent handle on the same archive
 // instead of sharing one. Note that `entry = archive.GetFileByIndex(i)` on an
 // existing `absl::StatusOr<ZipFile>` evaluates the call before the old entry
-// is destroyed, so it fails while `entry` still holds one.
+// is destroyed, so it fails while `entry` still holds one. GetLength(),
+// GetComment() and GetEntryMetadata() do not borrow the archive and stay
+// usable while an entry is open.
 class BufferedZipArchive final {
  public:
   // Parses `data` as a zip archive. Returns `kInvalidArgument` if `data` is not
@@ -60,6 +62,13 @@ class BufferedZipArchive final {
   // This data will be compressed again when written through a `*ZipWriter`.
   absl::StatusOr<ZipFile> GetFileByIndexRaw(uintptr_t index)
       ABSL_ATTRIBUTE_LIFETIME_BOUND;
+  // Returns what the central directory records about the entry at `index`,
+  // reading nothing. Prefer this to GetFileByIndex when the entry's contents
+  // are not wanted: that one also reads the entry's local file header, so
+  // listing an archive with it costs one read per entry. Returns `kOutOfRange`
+  // if `index >= GetLength()` and `kFailedPrecondition` on a moved-from
+  // archive.
+  absl::StatusOr<ZipEntryMetadata> GetEntryMetadata(uintptr_t index) const;
   // True if moved-from; the accessors above then return `kFailedPrecondition`.
   [[nodiscard]] bool IsNone() const;
 
@@ -117,6 +126,13 @@ class FsZipArchive final {
   // This data will be compressed again when written through a `*ZipWriter`.
   absl::StatusOr<ZipFile> GetFileByIndexRaw(uintptr_t index)
       ABSL_ATTRIBUTE_LIFETIME_BOUND;
+  // Returns what the central directory records about the entry at `index`,
+  // reading nothing. Prefer this to GetFileByIndex when the entry's contents
+  // are not wanted: that one also reads the entry's local file header, so
+  // listing an archive with it costs one read per entry. Returns `kOutOfRange`
+  // if `index >= GetLength()` and `kFailedPrecondition` on a moved-from
+  // archive.
+  absl::StatusOr<ZipEntryMetadata> GetEntryMetadata(uintptr_t index) const;
   // True if moved-from; the accessors above then return `kFailedPrecondition`.
   [[nodiscard]] bool IsNone() const;
 
@@ -174,6 +190,13 @@ class ZipArchive final {
   // This data will be compressed again when written through a `*ZipWriter`.
   absl::StatusOr<ZipFile> GetFileByIndexRaw(uintptr_t index)
       ABSL_ATTRIBUTE_LIFETIME_BOUND;
+  // Returns what the central directory records about the entry at `index`,
+  // reading nothing. Prefer this to GetFileByIndex when the entry's contents
+  // are not wanted: that one also reads the entry's local file header, so
+  // listing an archive with it costs one read per entry. Returns `kOutOfRange`
+  // if `index >= GetLength()` and `kFailedPrecondition` on a moved-from
+  // archive.
+  absl::StatusOr<ZipEntryMetadata> GetEntryMetadata(uintptr_t index) const;
   // True if moved-from; the accessors above then return `kFailedPrecondition`.
   [[nodiscard]] bool IsNone() const;
 

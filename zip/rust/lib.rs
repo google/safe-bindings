@@ -6,6 +6,9 @@
 
 #![forbid(unsafe_code)]
 
+mod entry_metadata;
+pub use entry_metadata::ZipEntryMetadata;
+
 mod file;
 pub use file::{BufferedZipFile, FsZipFile};
 

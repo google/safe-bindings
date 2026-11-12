@@ -1,16 +1,65 @@
 // Crubit does not support generic type parameters, so we need to implement
 // BufferedZipArchive and FsZipArchive manually.
 
-use crate::{BufferedZipFile, FsZipFile, VecU8, ZipError};
+use crate::{BufferedZipFile, FsZipFile, VecU8, ZipEntryMetadata, ZipError};
 use std::fmt::{Debug, Formatter};
 use std::fs::File;
 use std::io::{Cursor, Read, Seek};
-use zip::read::ZipFile as WrappedZipFile;
+use std::sync::Arc;
+use zip::read::{ZipArchiveMetadata, ZipFile as WrappedZipFile};
 use zip::ZipArchive as WrappedZipArchive;
+
+/// An open archive's central directory, kept beside the reader rather than
+/// read through it.
+///
+/// A `*ZipFile` returned by `get_file_by_index*` holds a `&mut` into the boxed
+/// `WrappedZipArchive` for as long as it lives. Crubit cannot make C++ respect
+/// that borrow, and C++ callers legitimately call the `&self` accessors
+/// (`get_length`, `get_comment`, `get_entry_metadata`) while an entry is open;
+/// dereferencing the box there would create a `&WrappedZipArchive` aliasing
+/// that `&mut`, which Rust's aliasing rules forbid even though nothing is
+/// written. The parsed central directory is immutable and reference-counted
+/// inside the zip crate, so holding our own `Arc` to it and a copy of the
+/// comment lets those accessors never touch the box.
+#[derive(Clone, Default)]
+struct CentralDirectory {
+    metadata: Option<Arc<ZipArchiveMetadata>>,
+    comment: Vec<u8>,
+}
+
+impl CentralDirectory {
+    fn new<R: Read + Seek>(archive: &WrappedZipArchive<R>) -> Self {
+        Self { metadata: Some(archive.metadata()), comment: archive.comment().to_vec() }
+    }
+
+    /// Returns the number of entries, or 0 if the archive is not open.
+    fn len(&self) -> usize {
+        self.metadata.as_ref().map_or(0, |metadata| metadata.len())
+    }
+
+    /// Returns the archive comment, or an empty vector if the archive is not
+    /// open.
+    fn comment(&self) -> VecU8 {
+        VecU8::copy_from_slice(&self.comment)
+    }
+
+    /// Returns what the central directory records about the entry at `index`.
+    ///
+    /// Returns `FailedPrecondition` if the archive is not open and `OutOfRange`
+    /// if `index` is out of bounds, the same codes `get_file_by_index` uses.
+    fn entry_metadata(&self, index: usize) -> Result<ZipEntryMetadata, ZipError> {
+        let Some(metadata) = self.metadata.as_ref() else {
+            return Err(ZipError::failed_precondition("Zip archive is not open"));
+        };
+        let entry = metadata.entry(index).map_err(ZipError::from_zip_error)?;
+        Ok(ZipEntryMetadata::from_entry(&entry))
+    }
+}
 
 #[derive(Default)]
 pub struct BufferedZipArchive {
     reader: Option<Box<WrappedZipArchive<Cursor<Vec<u8>>>>>,
+    central_directory: CentralDirectory,
 }
 
 impl Debug for BufferedZipArchive {
@@ -54,6 +103,7 @@ impl BufferedZipArchive {
         let cursor = Cursor::new(data.into_vec());
         let reader = WrappedZipArchive::new(cursor)
             .map_err(|e| ZipError::from_zip_error(e).with_context("Failed to open zip buffer"))?;
+        self.central_directory = CentralDirectory::new(&reader);
         self.reader = Some(Box::new(reader));
         Ok(())
     }
@@ -68,13 +118,13 @@ impl BufferedZipArchive {
     /// Returns the number of files in the archive.
     #[must_use]
     pub fn get_length(&self) -> usize {
-        get_length_impl(&self.reader)
+        self.central_directory.len()
     }
 
     /// Returns the comment of the zip archive.
     #[must_use]
     pub fn get_comment(&self) -> VecU8 {
-        get_comment_impl(&self.reader)
+        self.central_directory.comment()
     }
 
     /// Returns a zip file by its index.
@@ -95,11 +145,25 @@ impl BufferedZipArchive {
     pub fn get_file_by_index_raw(&mut self, index: usize) -> Result<BufferedZipFile<'_>, ZipError> {
         get_file_by_index_impl(&mut self.reader, index, true).map(BufferedZipFile::new)
     }
+
+    /// Returns what the central directory records about the entry at `index`,
+    /// without reading anything. Usable while an entry is open.
+    ///
+    /// Prefer this to `get_file_by_index` when the entry's contents are not
+    /// wanted: that one also reads the entry's local file header, so listing
+    /// an archive with it costs one read per entry.
+    ///
+    /// Returns `FailedPrecondition` if the archive is not open and `OutOfRange`
+    /// if `index` is out of bounds.
+    pub fn get_entry_metadata(&self, index: usize) -> Result<ZipEntryMetadata, ZipError> {
+        self.central_directory.entry_metadata(index)
+    }
 }
 
 #[derive(Default)]
 pub struct FsZipArchive {
     reader: Option<Box<WrappedZipArchive<File>>>,
+    central_directory: CentralDirectory,
 }
 
 impl Debug for FsZipArchive {
@@ -143,6 +207,7 @@ impl FsZipArchive {
             .map_err(|e| ZipError::from_io_error(e).with_context("Failed to open zip archive"))?;
         let reader = WrappedZipArchive::new(file)
             .map_err(|e| ZipError::from_zip_error(e).with_context("Failed to open zip archive"))?;
+        self.central_directory = CentralDirectory::new(&reader);
         self.reader = Some(Box::new(reader));
         Ok(())
     }
@@ -157,13 +222,13 @@ impl FsZipArchive {
     /// Returns the number of files in the archive.
     #[must_use]
     pub fn get_length(&self) -> usize {
-        get_length_impl(&self.reader)
+        self.central_directory.len()
     }
 
     /// Returns the comment of the zip archive.
     #[must_use]
     pub fn get_comment(&self) -> VecU8 {
-        get_comment_impl(&self.reader)
+        self.central_directory.comment()
     }
 
     /// Returns a zip file by its index.
@@ -184,17 +249,19 @@ impl FsZipArchive {
     pub fn get_file_by_index_raw(&mut self, index: usize) -> Result<FsZipFile<'_>, ZipError> {
         get_file_by_index_impl(&mut self.reader, index, true).map(FsZipFile::new)
     }
-}
 
-fn get_length_impl<R: Read + Seek>(reader: &Option<Box<WrappedZipArchive<R>>>) -> usize {
-    match reader.as_ref() {
-        Some(r) => r.len(),
-        None => 0,
+    /// Returns what the central directory records about the entry at `index`,
+    /// without reading anything. Usable while an entry is open.
+    ///
+    /// Prefer this to `get_file_by_index` when the entry's contents are not
+    /// wanted: that one also reads the entry's local file header, so listing
+    /// an archive with it costs one read per entry.
+    ///
+    /// Returns `FailedPrecondition` if the archive is not open and `OutOfRange`
+    /// if `index` is out of bounds.
+    pub fn get_entry_metadata(&self, index: usize) -> Result<ZipEntryMetadata, ZipError> {
+        self.central_directory.entry_metadata(index)
     }
-}
-
-fn get_comment_impl<R: Read + Seek>(reader: &Option<Box<WrappedZipArchive<R>>>) -> VecU8 {
-    reader.as_ref().map(|r| VecU8::copy_from_slice(r.comment())).unwrap_or_default()
 }
 
 fn get_file_by_index_impl<'a, R: Read + Seek>(
@@ -437,6 +504,81 @@ mod tests {
         writer.start_file(b"second.txt", options).unwrap();
         writer.write_data(VecU8::from(b"Second file content".to_vec())).unwrap();
         writer.finish().unwrap()
+    }
+
+    #[gtest]
+    fn test_entry_offsets_delimit_the_stored_bytes() {
+        let zip_data = create_test_zip();
+        let raw = zip_data.as_slice().to_vec();
+        let mut archive = BufferedZipArchive::new_from_data(zip_data).unwrap();
+        let file = archive.get_file_by_index(0).unwrap();
+
+        let header_start = file.get_header_start();
+        let data_start = file.get_data_start();
+        let compressed_size = file.get_compressed_size();
+
+        // The first entry's local header sits at the very start of the archive,
+        // and its data follows the 30-byte fixed header plus the file name.
+        expect_eq!(header_start, 0);
+        expect_eq!(data_start, 30 + "hello.txt".len() as u64);
+        // The entry is Stored, so the raw bytes in that range are the contents.
+        let begin = data_start as usize;
+        let end = begin + compressed_size as usize;
+        expect_eq!(&raw[begin..end], b"Hello, world!");
+    }
+
+    #[gtest]
+    fn test_stream_entries_report_unknown_data_start() {
+        let zip_data = create_test_zip();
+        let mut reader = BufferedZipStreamReader::new_from_data(zip_data).unwrap();
+        let file = reader.read_next_file().unwrap();
+
+        // Stream readers never learn where the entry lives in the archive.
+        // `data_start` reports that as 0, which no real entry can have;
+        // `header_start` is simply 0 and not meaningful for stream entries (the
+        // first entry of an archive genuinely starts at 0 too).
+        expect_eq!(file.get_data_start(), 0);
+        expect_eq!(file.get_header_start(), 0);
+    }
+
+    #[gtest]
+    fn test_get_entry_metadata_lists_the_central_directory() {
+        let zip_data = create_test_zip();
+        let archive = BufferedZipArchive::new_from_data(zip_data).unwrap();
+
+        let first = archive.get_entry_metadata(0).unwrap();
+        expect_false!(first.is_none());
+        expect_eq!(first.clone(), first);
+        expect_true!(ZipEntryMetadata::default().is_none());
+        expect_eq!(first.get_file_name().as_slice(), b"hello.txt");
+        expect_eq!(first.get_uncompressed_size(), "Hello, world!".len() as u64);
+        expect_eq!(first.get_compressed_size(), "Hello, world!".len() as u64);
+        expect_eq!(first.get_compression_method(), CompressionMethod::Stored);
+        expect_eq!(first.get_header_start(), 0);
+        expect_true!(first.is_file());
+        expect_false!(first.is_dir());
+        expect_false!(first.is_encrypted());
+
+        let second = archive.get_entry_metadata(1).unwrap();
+        expect_eq!(second.get_file_name().as_slice(), b"second.txt");
+        expect_eq!(second.get_uncompressed_size(), "Second file content".len() as u64);
+        // The second entry's local header follows the first entry: its 30-byte
+        // fixed header, its name and its stored contents.
+        expect_eq!(
+            second.get_header_start(),
+            30 + "hello.txt".len() as u64 + "Hello, world!".len() as u64
+        );
+
+        let code = archive.get_entry_metadata(2).err().map(|e| e.code);
+        expect_eq!(code, Some(ZipErrorCode::OutOfRange));
+    }
+
+    #[gtest]
+    fn test_get_entry_metadata_on_an_unopened_archive_fails_precondition() {
+        let archive = BufferedZipArchive::new();
+        expect_true!(archive.is_none());
+        let code = archive.get_entry_metadata(0).err().map(|e| e.code);
+        expect_eq!(code, Some(ZipErrorCode::FailedPrecondition));
     }
 
     #[gtest]

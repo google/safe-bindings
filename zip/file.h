@@ -84,6 +84,110 @@ enum class CompressionMethod : int32_t {
   kXz,
 };
 
+// What an archive's central directory records about one entry.
+//
+// Obtaining this reads nothing: the central directory is parsed when the
+// archive is opened. Contrast a ZipFile, which additionally reads the entry's
+// local file header to find where its data begins, so that listing an archive
+// entry by entry costs one read apiece. Prefer this whenever the entry's
+// contents are not wanted; over a network the difference is one round trip
+// against one per entry.
+//
+// This is a snapshot and does not borrow the archive, so it stays valid after
+// the archive is destroyed and several may be held at once.
+//
+// Correspondingly there is no GetDataStart(): where an entry's data begins is
+// the one thing the central directory does not record. Open the entry for it.
+// Nor is there GetExtraData(): the zip crate exposes an entry's extra fields
+// only once the entry is opened, so open it (ZipFile::GetExtraData()) for them.
+//
+// A moved-from ZipEntryMetadata is empty (`IsNone() == true`), and every
+// entry-property getter returns `absl::StatusCode::kFailedPrecondition`.
+class ZipEntryMetadata final {
+ public:
+  explicit ZipEntryMetadata(rust::ZipEntryMetadata metadata)
+      : metadata_(std::move(metadata)) {}
+  ZipEntryMetadata(const ZipEntryMetadata&) = default;
+  ZipEntryMetadata& operator=(const ZipEntryMetadata&) = default;
+  ZipEntryMetadata(ZipEntryMetadata&&) noexcept = default;
+  // Leaves `other` empty (`IsNone()`); see internal::MoveAssignRustHandle.
+  ZipEntryMetadata& operator=(ZipEntryMetadata&& other) noexcept {
+    if (this != &other) {
+      internal::MoveAssignRustHandle(metadata_, std::move(other.metadata_));
+    }
+    return *this;
+  }
+
+  // Returns whether this object was moved from (and therefore describes no
+  // entry).
+  [[nodiscard]] bool IsNone() const;
+  // Returns whether the entry is a file, that is, neither a directory nor a
+  // symbolic link. Returns `kFailedPrecondition` if this object was moved from.
+  absl::StatusOr<bool> IsFile() const;
+  // Returns whether the entry is a directory, or `kFailedPrecondition` if this
+  // object was moved from.
+  absl::StatusOr<bool> IsDir() const;
+  // Returns whether the entry's data is encrypted, or `kFailedPrecondition` if
+  // this object was moved from. This library does not decrypt, so such an entry
+  // can be listed but not read.
+  absl::StatusOr<bool> IsEncrypted() const;
+  // WARNING: Path Traversal ("Zip Slip") Hazard: The returned file name is
+  // extracted directly from the archive header without sanitization. If using
+  // this path for filesystem operations, callers MUST sanitize and validate
+  // that the resolved path does not traverse outside the target destination
+  // directory (e.g., rejecting paths with ".." components or leading directory
+  // separators).
+  absl::StatusOr<std::string> GetFileName() const;
+  // Returns `kFailedPrecondition` if this object was moved from, or
+  // `kUnimplemented` if the compression method is unsupported (the same code
+  // GetFileByIndex returns when asked to open such an entry).
+  absl::StatusOr<CompressionMethod> GetCompressionMethod() const;
+  // Returns the entry comment decoded to UTF-8 the way zip-rs decodes it: as
+  // UTF-8 (invalid sequences replaced) if the entry's language-encoding flag
+  // (general purpose bit 11) is set, else transcoded from CP437. This differs
+  // from *ZipArchive::GetComment(), which returns the archive comment's raw
+  // bytes. Empty if the entry has no comment.
+  absl::StatusOr<std::string> GetComment() const;
+  // WARNING: Untrusted Header Value: Returns the uncompressed size declared in
+  // the ZIP header without verifying it against the actual decompressed
+  // payload. Crafty or corrupted archives (including zip bombs) may spoof this
+  // value; do not trust it for unbounded memory pre-allocation.
+  absl::StatusOr<uint64_t> GetUncompressedSize() const;
+  absl::StatusOr<uint64_t> GetCompressedSize() const;
+  // WARNING: Untrusted Header Value: Returns the raw CRC-32 checksum declared
+  // in the ZIP header. The checksum is only verified when the entry payload is
+  // actually read and decompressed.
+  absl::StatusOr<uint32_t> GetCrc32() const;
+  // Returns the last-modified date encoded as an MS-DOS FAT date bitfield
+  // (bits 15-9: year offset from 1980, bits 8-5: month [1-12], bits 4-0: day
+  // [1-31]), or 0 if the entry records none.
+  absl::StatusOr<uint16_t> GetLastModifiedDate() const;
+  // Returns the last-modified time encoded as an MS-DOS FAT time bitfield
+  // (bits 15-11: hour [0-23], bits 10-5: minute [0-59], bits 4-0: second / 2
+  // [0-29]), or 0 if the entry records none.
+  absl::StatusOr<uint16_t> GetLastModifiedTime() const;
+  // Returns the full POSIX `st_mode` bitmask (including `S_IFMT` file-type bits
+  // such as `0100644` for regular files), or 0 if Unix mode metadata is absent
+  // (e.g. non-Unix archives).
+  absl::StatusOr<uint32_t> GetUnixMode() const;
+  // Returns the offset of this entry's local file header within the archive.
+  // Unlike ZipFile::GetHeaderStart() this is never a placeholder 0, since a
+  // ZipEntryMetadata only ever comes from an archive's central directory.
+  //
+  // WARNING: Untrusted Header Value: the offset is copied from the central
+  // directory record and is not checked against the archive's size until the
+  // entry is opened, which listing never does. A crafted archive can report
+  // any value, so a caller slicing an archive buffer by it MUST bounds-check
+  // first, and `offset + 30 + name_length + extra_field_length` (the local
+  // header's fixed size plus its variable fields) may overflow.
+  absl::StatusOr<uint64_t> GetHeaderStart() const;
+
+ private:
+  absl::Status CheckNone() const;
+
+  rust::ZipEntryMetadata metadata_;
+};
+
 class BufferedZipFile final {
  public:
   explicit BufferedZipFile(rust::BufferedZipFile zip)
@@ -107,6 +211,9 @@ class BufferedZipFile final {
   // directory (e.g., rejecting paths with ".." components or leading directory
   // separators).
   absl::StatusOr<std::string> GetFileName() const;
+  // Returns `kUnimplemented` if the entry's compression method is unsupported.
+  // GetFileByIndex() already rejects such entries with that code, so this only
+  // arises for entries opened raw (GetFileByIndexRaw()).
   absl::StatusOr<CompressionMethod> GetCompressionMethod() const;
   absl::StatusOr<std::string> GetComment() const;
   // WARNING: Untrusted Header Value: Returns the uncompressed size declared in
@@ -135,6 +242,31 @@ class BufferedZipFile final {
   // omits ExtendedTimestamp (0x5455) and Ntfs (0x000a) extra fields when
   // re-serializing `extra_data()`).
   absl::StatusOr<RustVecU8Wrapper> GetExtraData() const;
+  // Returns the offset of this entry's local file header within the archive.
+  // Only meaningful for entries opened from a *ZipArchive: entries produced by
+  // a *ZipStreamReader do not know their offset and always report 0, which is
+  // indistinguishable from the genuine offset of an archive's first entry.
+  // For an entry opened from a *ZipArchive the local file header has already
+  // been read from this offset, so it lies within the archive; the header's
+  // contents (sizes, CRC-32) remain untrusted until the entry is read.
+  absl::StatusOr<uint64_t> GetHeaderStart() const;
+  // Returns the offset of this entry's data within the archive, or 0 if it is
+  // unknown. Together with GetCompressedSize() this delimits the entry's raw
+  // bytes, so a caller that only needs a kStored entry can read that byte range
+  // directly rather than through this object. The offset is only known once the
+  // local file header has been parsed, which happens when an archive opens the
+  // entry; entries produced by a *ZipStreamReader always report 0.
+  //
+  // WARNING: Untrusted Header Values: both the offset and GetCompressedSize()
+  // come from archive headers that zip-rs does not validate against the
+  // archive's size: it checks neither `data_start <= archive_size` nor
+  // `compressed_size <= archive_size - data_start`, and `data_start +
+  // compressed_size` may overflow. A caller slicing an archive buffer by these
+  // values MUST bounds-check both before indexing. Reading the range
+  // `[GetDataStart(), GetDataStart() + GetCompressedSize())` directly also
+  // bypasses the CRC-32 verification that reading through this object
+  // performs, so the bytes obtained that way are unverified.
+  absl::StatusOr<uint64_t> GetDataStart() const;
 
   // WARNING: Decompression Bomb Hazard: This overload decompresses the entire
   // entry into an unbounded heap buffer. For untrusted zip archives, prefer
@@ -195,6 +327,9 @@ class FsZipFile final {
   // directory (e.g., rejecting paths with ".." components or leading directory
   // separators).
   absl::StatusOr<std::string> GetFileName() const;
+  // Returns `kUnimplemented` if the entry's compression method is unsupported.
+  // GetFileByIndex() already rejects such entries with that code, so this only
+  // arises for entries opened raw (GetFileByIndexRaw()).
   absl::StatusOr<CompressionMethod> GetCompressionMethod() const;
   absl::StatusOr<std::string> GetComment() const;
   // WARNING: Untrusted Header Value: Returns the uncompressed size declared in
@@ -223,6 +358,31 @@ class FsZipFile final {
   // omits ExtendedTimestamp (0x5455) and Ntfs (0x000a) extra fields when
   // re-serializing `extra_data()`).
   absl::StatusOr<RustVecU8Wrapper> GetExtraData() const;
+  // Returns the offset of this entry's local file header within the archive.
+  // Only meaningful for entries opened from a *ZipArchive: entries produced by
+  // a *ZipStreamReader do not know their offset and always report 0, which is
+  // indistinguishable from the genuine offset of an archive's first entry.
+  // For an entry opened from a *ZipArchive the local file header has already
+  // been read from this offset, so it lies within the archive; the header's
+  // contents (sizes, CRC-32) remain untrusted until the entry is read.
+  absl::StatusOr<uint64_t> GetHeaderStart() const;
+  // Returns the offset of this entry's data within the archive, or 0 if it is
+  // unknown. Together with GetCompressedSize() this delimits the entry's raw
+  // bytes, so a caller that only needs a kStored entry can read that byte range
+  // directly rather than through this object. The offset is only known once the
+  // local file header has been parsed, which happens when an archive opens the
+  // entry; entries produced by a *ZipStreamReader always report 0.
+  //
+  // WARNING: Untrusted Header Values: both the offset and GetCompressedSize()
+  // come from archive headers that zip-rs does not validate against the
+  // archive's size: it checks neither `data_start <= archive_size` nor
+  // `compressed_size <= archive_size - data_start`, and `data_start +
+  // compressed_size` may overflow. A caller slicing an archive buffer by these
+  // values MUST bounds-check both before indexing. Reading the range
+  // `[GetDataStart(), GetDataStart() + GetCompressedSize())` directly also
+  // bypasses the CRC-32 verification that reading through this object
+  // performs, so the bytes obtained that way are unverified.
+  absl::StatusOr<uint64_t> GetDataStart() const;
 
   // WARNING: Decompression Bomb Hazard: This overload decompresses the entire
   // entry into an unbounded heap buffer. For untrusted zip archives, prefer
@@ -299,6 +459,9 @@ class ZipFile final {
   // directory (e.g., rejecting paths with ".." components or leading directory
   // separators).
   absl::StatusOr<std::string> GetFileName() const;
+  // Returns `kUnimplemented` if the entry's compression method is unsupported.
+  // GetFileByIndex() already rejects such entries with that code, so this only
+  // arises for entries opened raw (GetFileByIndexRaw()).
   absl::StatusOr<CompressionMethod> GetCompressionMethod() const;
   absl::StatusOr<std::string> GetComment() const;
   // WARNING: Untrusted Header Value: Returns the uncompressed size declared in
@@ -327,6 +490,31 @@ class ZipFile final {
   // omits ExtendedTimestamp (0x5455) and Ntfs (0x000a) extra fields when
   // re-serializing `extra_data()`).
   absl::StatusOr<RustVecU8Wrapper> GetExtraData() const;
+  // Returns the offset of this entry's local file header within the archive.
+  // Only meaningful for entries opened from a *ZipArchive: entries produced by
+  // a *ZipStreamReader do not know their offset and always report 0, which is
+  // indistinguishable from the genuine offset of an archive's first entry.
+  // For an entry opened from a *ZipArchive the local file header has already
+  // been read from this offset, so it lies within the archive; the header's
+  // contents (sizes, CRC-32) remain untrusted until the entry is read.
+  absl::StatusOr<uint64_t> GetHeaderStart() const;
+  // Returns the offset of this entry's data within the archive, or 0 if it is
+  // unknown. Together with GetCompressedSize() this delimits the entry's raw
+  // bytes, so a caller that only needs a kStored entry can read that byte range
+  // directly rather than through this object. The offset is only known once the
+  // local file header has been parsed, which happens when an archive opens the
+  // entry; entries produced by a *ZipStreamReader always report 0.
+  //
+  // WARNING: Untrusted Header Values: both the offset and GetCompressedSize()
+  // come from archive headers that zip-rs does not validate against the
+  // archive's size: it checks neither `data_start <= archive_size` nor
+  // `compressed_size <= archive_size - data_start`, and `data_start +
+  // compressed_size` may overflow. A caller slicing an archive buffer by these
+  // values MUST bounds-check both before indexing. Reading the range
+  // `[GetDataStart(), GetDataStart() + GetCompressedSize())` directly also
+  // bypasses the CRC-32 verification that reading through this object
+  // performs, so the bytes obtained that way are unverified.
+  absl::StatusOr<uint64_t> GetDataStart() const;
 
   // WARNING: Decompression Bomb Hazard: This overload decompresses the entire
   // entry into an unbounded heap buffer. For untrusted zip archives, prefer

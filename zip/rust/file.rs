@@ -7,7 +7,6 @@ use std::fs::File;
 use std::io::{Cursor, Error, ErrorKind, Read};
 use std::vec::Vec;
 use zip::read::ZipFile as WrappedZipFile;
-use zip::CompressionMethod as ZipCrateCompressionMethod;
 
 #[derive(Default)]
 pub struct BufferedZipFile<'a> {
@@ -110,6 +109,34 @@ impl<'a> BufferedZipFile<'a> {
     /// The result is only valid if `is_none()` returns false.
     pub fn get_extra_data(&self) -> VecU8 {
         get_extra_data_impl(&self.file)
+    }
+
+    /// Returns the offset of this entry's local file header within the archive.
+    ///
+    /// Only meaningful for entries opened from a `*ZipArchive`: entries
+    /// obtained from a `*ZipStreamReader` do not know their offset and always
+    /// report 0, which is indistinguishable from the genuine offset of an
+    /// archive's first entry.
+    ///
+    /// The result is only valid if `is_none()` returns false.
+    #[must_use]
+    pub fn get_header_start(&self) -> u64 {
+        get_header_start_impl(&self.file)
+    }
+
+    /// Returns the offset of this entry's data within the archive, or 0 if it
+    /// is unknown. Together with `get_compressed_size()` this delimits the
+    /// entry's raw bytes, so a caller that only needs a `Stored` entry can read
+    /// that byte range directly instead of going through this archive.
+    ///
+    /// The offset is only known once the local file header has been parsed,
+    /// which archive-based readers do when the entry is opened. It is never
+    /// known for entries obtained from a `*ZipStreamReader`, which report 0.
+    ///
+    /// The result is only valid if `is_none()` returns false.
+    #[must_use]
+    pub fn get_data_start(&self) -> u64 {
+        get_data_start_impl(&self.file)
     }
 
     /// Returns the data of the file.
@@ -246,6 +273,34 @@ impl<'a> FsZipFile<'a> {
         get_extra_data_impl(&self.file)
     }
 
+    /// Returns the offset of this entry's local file header within the archive.
+    ///
+    /// Only meaningful for entries opened from a `*ZipArchive`: entries
+    /// obtained from a `*ZipStreamReader` do not know their offset and always
+    /// report 0, which is indistinguishable from the genuine offset of an
+    /// archive's first entry.
+    ///
+    /// The result is only valid if `is_none()` returns false.
+    #[must_use]
+    pub fn get_header_start(&self) -> u64 {
+        get_header_start_impl(&self.file)
+    }
+
+    /// Returns the offset of this entry's data within the archive, or 0 if it
+    /// is unknown. Together with `get_compressed_size()` this delimits the
+    /// entry's raw bytes, so a caller that only needs a `Stored` entry can read
+    /// that byte range directly instead of going through this archive.
+    ///
+    /// The offset is only known once the local file header has been parsed,
+    /// which archive-based readers do when the entry is opened. It is never
+    /// known for entries obtained from a `*ZipStreamReader`, which report 0.
+    ///
+    /// The result is only valid if `is_none()` returns false.
+    #[must_use]
+    pub fn get_data_start(&self) -> u64 {
+        get_data_start_impl(&self.file)
+    }
+
     /// Returns the data of the file.
     /// Returns an error if `is_none()` returns true.
     pub fn get_file_data(&mut self) -> Result<VecU8, ZipError> {
@@ -333,19 +388,28 @@ fn get_extra_data_impl<'a, R: Read>(file: &Option<Box<WrappedZipFile<'a, R>>>) -
     file.as_ref().and_then(|f| f.extra_data()).map(VecU8::from).unwrap_or_default()
 }
 
+fn get_header_start_impl<'a, R: Read>(file: &Option<Box<WrappedZipFile<'a, R>>>) -> u64 {
+    match file.as_ref() {
+        Some(file) => file.header_start(),
+        None => 0,
+    }
+}
+
+fn get_data_start_impl<'a, R: Read>(file: &Option<Box<WrappedZipFile<'a, R>>>) -> u64 {
+    match file.as_ref() {
+        // `data_start` is `None` until the local file header has been parsed,
+        // and a real entry can never start at offset 0 because the header
+        // itself occupies at least 30 bytes, so 0 is unambiguously "unknown".
+        Some(file) => file.data_start().unwrap_or(0),
+        None => 0,
+    }
+}
+
 fn get_compression_method_impl<'a, R: Read>(
     file: &Option<Box<WrappedZipFile<'a, R>>>,
 ) -> CompressionMethod {
     match file.as_ref() {
-        Some(file) => match file.compression() {
-            ZipCrateCompressionMethod::Stored => CompressionMethod::Stored,
-            ZipCrateCompressionMethod::Deflated => CompressionMethod::Deflated,
-            ZipCrateCompressionMethod::Bzip2 => CompressionMethod::Bzip2,
-            ZipCrateCompressionMethod::Zstd => CompressionMethod::Zstd,
-            ZipCrateCompressionMethod::Lzma => CompressionMethod::Lzma,
-            ZipCrateCompressionMethod::Xz => CompressionMethod::Xz,
-            _ => CompressionMethod::Unsupported,
-        },
+        Some(file) => CompressionMethod::from_zip_crate(file.compression()),
         None => CompressionMethod::Unsupported,
     }
 }

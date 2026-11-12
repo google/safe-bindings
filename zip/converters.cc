@@ -94,6 +94,12 @@ absl::StatusOr<rust::FsZipFile> FromRustFsZipFile(
   return FromRustResult(std::move(result_fs_zip_file));
 }
 
+absl::StatusOr<rust::ZipEntryMetadata> FromRustZipEntryMetadata(
+    rs_std::Result<rust::ZipEntryMetadata, rust::ZipError>
+        result_zip_entry_metadata) {
+  return FromRustResult(std::move(result_zip_entry_metadata));
+}
+
 absl::StatusOr<rust::BufferedZipWriter> FromRustBufferedZipWriter(
     rs_std::Result<rust::BufferedZipWriter, rust::ZipError>
         result_buffered_zip_writer) {
