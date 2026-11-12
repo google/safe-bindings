@@ -64,6 +64,12 @@ absl::Status JxlDecoder::SetPixelLayout(ChannelLayout channel_layout,
   return decoder_.set_pixel_layout_with_format(channel_layout, sample_format);
 }
 
+absl::Status JxlDecoder::SetPixelLayoutWithExtraChannels(
+    ChannelLayout channel_layout, const SampleFormat& sample_format) {
+  return decoder_.set_pixel_layout_with_extra_channels(channel_layout,
+                                                       sample_format);
+}
+
 absl::StatusOr<FeedResult> JxlDecoder::DecodeFrame(
     absl::Span<const uint8_t>& data, ChannelLayout channel_layout,
     DataType data_type, absl::Span<uint8_t> output) {
@@ -85,6 +91,19 @@ absl::StatusOr<FeedResult> JxlDecoder::DecodeFrame(
         "SetPixelLayout must be called before DecodeFrame");
   }
   ABSL_ASSIGN_OR_RETURN(auto result, decoder_.decode_frame(data, output));
+  data.remove_prefix(result.consumed);
+  return result.status;
+}
+
+absl::StatusOr<FeedResult> JxlDecoder::DecodeFrame(
+    absl::Span<const uint8_t>& data, absl::Span<uint8_t> output,
+    absl::Span<uint8_t> extra_channels) {
+  if (!decoder_.has_pixel_layout()) {
+    return absl::FailedPreconditionError(
+        "SetPixelLayoutWithExtraChannels must be called before DecodeFrame");
+  }
+  ABSL_ASSIGN_OR_RETURN(auto result, decoder_.decode_frame_with_extra_channels(
+                                    data, output, extra_channels));
   data.remove_prefix(result.consumed);
   return result.status;
 }

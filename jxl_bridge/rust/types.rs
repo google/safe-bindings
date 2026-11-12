@@ -13,6 +13,8 @@ pub enum JxlBridgeDataType {
     U8,
     U16,
     F32,
+    /// IEEE 754 binary16 ("half") floats.
+    F16,
 }
 
 impl Default for JxlBridgeDataType {
@@ -92,7 +94,7 @@ impl JxlBridgeDataType {
     fn bits_per_sample(self) -> u32 {
         match self {
             Self::U8 => 8,
-            Self::U16 => 16,
+            Self::U16 | Self::F16 => 16,
             Self::F32 => 32,
             _ => Self::default().bits_per_sample(),
         }
@@ -111,7 +113,7 @@ pub struct JxlBridgeSampleFormat {
     /// range, e.g. a 12-bit image then yields values in `0..=4095` stored in
     /// `U16` samples rather than being stretched to `0..=65535`.
     ///
-    /// Ignored for `F32`.
+    /// Ignored for `F16` and `F32`.
     pub bit_depth: u32,
     /// Byte order of multi-byte samples. Ignored for `U8`.
     pub endianness: JxlBridgeEndianness,
@@ -158,6 +160,7 @@ impl JxlBridgeSampleFormat {
             JxlBridgeDataType::U8 => jxl::api::JxlDataFormat::U8 { bit_depth },
             JxlBridgeDataType::U16 => jxl::api::JxlDataFormat::U16 { endianness, bit_depth },
             JxlBridgeDataType::F32 => jxl::api::JxlDataFormat::F32 { endianness },
+            JxlBridgeDataType::F16 => jxl::api::JxlDataFormat::F16 { endianness },
             _ => Self::new(JxlBridgeDataType::default()).to_jxl_data_format(),
         }
     }
@@ -407,18 +410,25 @@ pub struct JxlBridgeProcessResult {
 }
 
 /// Build the JxlPixelFormat from bridge types.
+///
+/// Extra channels are ignored unless `decode_extra_channels` is set (alpha is
+/// interleaved into the color channels by the channel layout either way), in
+/// which case each of them is decoded to a plane of its own in
+/// `sample_format`.
 pub(crate) fn build_pixel_format(
     channel_layout: &JxlBridgeChannelLayout,
     sample_format: &JxlBridgeSampleFormat,
     num_extra_channels: usize,
+    decode_extra_channels: bool,
 ) -> jxl::api::JxlPixelFormat {
     let jxl_color_type = channel_layout.to_jxl_color_type();
     let jxl_data_format = sample_format.to_jxl_data_format();
     jxl::api::JxlPixelFormat {
         color_type: jxl_color_type,
         color_data_format: Some(jxl_data_format),
-        // Ignore extra channels by default (alpha is interleaved into the
-        // color channels by the channel layout).
-        extra_channel_format: vec![None; num_extra_channels],
+        extra_channel_format: vec![
+            decode_extra_channels.then_some(jxl_data_format);
+            num_extra_channels
+        ],
     }
 }
