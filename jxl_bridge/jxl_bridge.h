@@ -64,6 +64,7 @@ inline uint32_t BytesPerSample(DataType data_type) {
     case DataType::U8:
       return 1;
     case DataType::U16:
+    case DataType::F16:
       return 2;
     case DataType::F32:
       return 4;
@@ -210,6 +211,21 @@ class JxlDecoder final {
   absl::Status SetPixelLayout(ChannelLayout channel_layout,
                               const SampleFormat& sample_format);
 
+  // Like SetPixelLayout(), but frames are then decoded with the DecodeFrame()
+  // overload that takes `extra_channels`, which also writes every extra
+  // channel of the image (see BasicInfo::extra_channels) to a plane of its own,
+  // in `sample_format`.
+  //
+  // Use this for images whose extra channels are data rather than
+  // transparency, e.g. the bands of a multispectral image beyond the first one
+  // or three.
+  //
+  // This is independent of `channel_layout`: an alpha or black channel that
+  // the layout interleaves with the color channels is written to its plane as
+  // well.
+  absl::Status SetPixelLayoutWithExtraChannels(
+      ChannelLayout channel_layout, const SampleFormat& sample_format);
+
   // Decodes the next frame from the input data into the output buffer.
   // Consumes bytes from `data` by advancing the span.
   // If the decoder is in HeaderDecoded state, this will also parse the frame
@@ -231,6 +247,19 @@ class JxlDecoder final {
   // SetPixelLayout() must have been called before this.
   absl::StatusOr<FeedResult> DecodeFrame(absl::Span<const uint8_t>& data,
                                          absl::Span<uint8_t> output);
+
+  // Overload for a pixel layout set with SetPixelLayoutWithExtraChannels():
+  // additionally decodes the extra channels into `extra_channels`.
+  //
+  // `extra_channels` holds one plane per extra channel, back to back in the
+  // order of BasicInfo::extra_channels. Each plane is width * height samples in
+  // row-major order, in the sample format of the pixel layout, so the buffer
+  // must be pre-allocated with
+  //   info.extra_channels.size() * width * height * BytesPerSample(data_type)
+  // bytes.
+  absl::StatusOr<FeedResult> DecodeFrame(absl::Span<const uint8_t>& data,
+                                         absl::Span<uint8_t> output,
+                                         absl::Span<uint8_t> extra_channels);
 
   // Returns true if there are more frames to decode (for animations).
   bool HasMoreFrames() const;
