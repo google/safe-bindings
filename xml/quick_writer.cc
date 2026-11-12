@@ -21,10 +21,10 @@ namespace security::xml {
 namespace {
 
 using ::security::crubit_helpers::StringViewFromVecU8;
-using WriteResult = rs_std::Result<bool, rust::WriterError>;
+using WriteResult = rs::Result<bool, rust::WriterError>;
 
-rs_std::SliceRef<const uint8_t> SliceFromView(absl::string_view s) {
-  return rs_std::SliceRef<const uint8_t>(absl::Span<const uint8_t>(
+rs::SliceRef<const uint8_t> SliceFromView(absl::string_view s) {
+  return rs::SliceRef<const uint8_t>(absl::Span<const uint8_t>(
       reinterpret_cast<const uint8_t*>(s.data()), s.size()));
 }
 
@@ -201,12 +201,12 @@ absl::Status QuickWriter::WriteEvent(QuickReader::Event& event) {
 }
 
 absl::StatusOr<std::string> QuickWriter::Content() {
-  rs_std::Result<rs_std::SliceRef<const uint8_t>, rust::WriterError>
-      res = rust_writer_.content();
+  rs::Result<rs::SliceRef<const uint8_t>, rust::WriterError> res =
+      rust_writer_.content();
   if (!res.has_value()) {
     return WriterErrorToStatus(std::move(res).err());
   }
-  rs_std::SliceRef<const uint8_t> slice = std::move(res).value();
+  rs::SliceRef<const uint8_t> slice = std::move(res).value();
   if (slice.size() == 0) {
     return std::string();
   }
