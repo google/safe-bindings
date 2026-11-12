@@ -139,7 +139,7 @@ class QuickReader::Data {
   // reasons (lifetimes of references to the reader from the event), but sadly
   // we cannot turn that directly into a `std::string` there, because inside
   // Rust one cannot construct a `std::string`. Therefore Rust always delivers a
-  // `rs_std::Vec<uint8_t>`. Turning that into a `std::string` on the C++ side
+  // `rs::Vec<uint8_t>`. Turning that into a `std::string` on the C++ side
   // would be the second copy.
   //
   // WARNING: The returned string_view is NOT null-terminated. Do NOT pass
@@ -156,7 +156,7 @@ class QuickReader::Data {
   rust::XmlEvent event_;
   // `content_` is lazily initialized to avoid copying the content if it is not
   // needed, which might frequently be the case.
-  std::optional<rs_std::Vec<uint8_t>> content_;
+  std::optional<rs::Vec<uint8_t>> content_;
 };
 
 class QuickReader::Name {
@@ -165,7 +165,7 @@ class QuickReader::Name {
   // this would be to return a `std::string`, but that would force an extra copy
   // for every call. Even if there were just one call, there would be two
   // copies, because inside Rust one cannot construct a `std::string` so it's
-  // always input -> `rs_std::Vec<uint8_t>` -> `std::string`.
+  // always input -> `rs::Vec<uint8_t>` -> `std::string`.
   //
   // WARNING: The returned string_views are NOT null-terminated. Do NOT pass
   // `.data()` to C-style APIs expecting null-terminated strings.
@@ -199,13 +199,13 @@ class QuickReader::Name {
   rust::XmlEvent event_;
   // The following 4 fields are lazily initialized to avoid copying the content
   // if not needed, which might frequently be the case.
-  std::optional<rs_std::Vec<uint8_t>> qualified_name_;
-  std::optional<rs_std::Vec<uint8_t>> local_name_;
+  std::optional<rs::Vec<uint8_t>> qualified_name_;
+  std::optional<rs::Vec<uint8_t>> local_name_;
   // The double-optional is on purpose: the outer one is for the lazy retrieval.
   // The inner one matches the Rust API, which can signal that there was no
   // prefix (no ":" in the qualified name) as opposed to an empty prefix.
-  std::optional<std::optional<rs_std::Vec<uint8_t>>> namespace_prefix_;
-  std::optional<rs_std::Vec<uint8_t>> resolved_namespace_;
+  std::optional<std::optional<rs::Vec<uint8_t>>> namespace_prefix_;
+  std::optional<rs::Vec<uint8_t>> resolved_namespace_;
 };
 
 class QuickReader::Attribute {
@@ -248,12 +248,12 @@ class QuickReader::Attribute {
   // The following 3 fields are computed by Rust on demand, so they are lazily
   // initialized to avoid the work if not needed, which might frequently be
   // the case.
-  std::optional<rs_std::Vec<uint8_t>> local_name_;
+  std::optional<rs::Vec<uint8_t>> local_name_;
   // The double-optional is on purpose: the outer one is for the lazy retrieval.
   // The inner one matches the Rust API, which can signal that there was no
   // prefix (no ":" in the qualified name) as opposed to an empty prefix.
-  std::optional<std::optional<rs_std::Vec<uint8_t>>> namespace_prefix_;
-  std::optional<rs_std::Vec<uint8_t>> resolved_namespace_;
+  std::optional<std::optional<rs::Vec<uint8_t>>> namespace_prefix_;
+  std::optional<rs::Vec<uint8_t>> resolved_namespace_;
 };
 
 class QuickReader::Attributes {
