@@ -11,7 +11,7 @@ doctest = false
 [dependencies]
 anyhow = "1.0"
 log = "0.4"
-quick-xml = "0.40"
+quick-xml = "0.42"
 xml = "1.4"
 xmlparser = "0.13"
 # xmltree-ns is published from https://github.com/kaidokert/xmltree-rs, a fork of
