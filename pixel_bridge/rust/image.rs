@@ -2,6 +2,7 @@ use crate::{
     reader::{Format, ReadSeek},
     vec_u8::VecU8,
 };
+use crubit_annotate::cpp_enum;
 use image::{
     codecs::bmp::BmpDecoder as RustBmpDecoder, codecs::gif::GifDecoder as RustGifDecoder,
     codecs::ico::IcoDecoder as RustIcoDecoder, codecs::jpeg::JpegDecoder as RustJpegDecoder,
@@ -160,29 +161,39 @@ fn invalid_argument_error(message: impl Into<String>) -> Status {
     Err(message.into().into())
 }
 
-/// Which Rust integer type backs the value of a pixel.
-#[repr(C)]
-#[derive(Default, Copy, Clone)]
+fn try_alloc_zeroed<T: Clone>(len: usize, zero: T) -> Result<Vec<T>, Status> {
+    let mut buf = Vec::new();
+    buf.try_reserve_exact(len)
+        .map_err(|_| invalid_argument_error("Failed to allocate intermediate decode buffer"))?;
+    buf.resize(len, zero);
+    Ok(buf)
+}
+
+/// An enumeration over the types that back the value of a pixel.
+#[cpp_enum(kind = "enum class")]
+#[repr(transparent)]
+#[derive(Default, Copy, Clone, PartialEq, Eq)]
 #[cfg_attr(debug_assertions, derive(Debug))]
-pub enum PixelType {
-    // We need a default since this type is otherwise not bridged by Crubit.
-    #[default]
-    U8,
-    U16,
-    F32,
+pub struct PixelType(pub i32);
+
+#[allow(non_upper_case_globals)]
+impl PixelType {
+    pub const kUint8: PixelType = PixelType(0);
+    pub const kUint16: PixelType = PixelType(1);
+    pub const kFloat32: PixelType = PixelType(2);
 }
 
 impl From<RustColorType> for PixelType {
     fn from(value: RustColorType) -> Self {
         match value {
             RustColorType::L8 | RustColorType::La8 | RustColorType::Rgb8 | RustColorType::Rgba8 => {
-                PixelType::U8
+                PixelType::kUint8
             }
             RustColorType::L16
             | RustColorType::La16
             | RustColorType::Rgb16
-            | RustColorType::Rgba16 => PixelType::U16,
-            RustColorType::Rgb32F | RustColorType::Rgba32F => PixelType::F32,
+            | RustColorType::Rgba16 => PixelType::kUint16,
+            RustColorType::Rgb32F | RustColorType::Rgba32F => PixelType::kFloat32,
             // Match arm exists because the enum is non-exhaustive. All currently mentioned
             // options are listed here.
             _ => PixelType::default(),
@@ -191,16 +202,39 @@ impl From<RustColorType> for PixelType {
 }
 
 /// An enumeration over supported color types.
-#[repr(C)]
-#[derive(Default, Copy, Clone)]
+#[cpp_enum(kind = "enum class")]
+#[repr(transparent)]
+#[derive(Default, Copy, Clone, PartialEq, Eq)]
 #[cfg_attr(debug_assertions, derive(Debug))]
-pub enum ColorType {
-    // We need a default since this type is otherwise not bridged by Crubit.
-    #[default]
-    L,
-    La,
-    Rgb,
-    Rgba,
+pub struct ColorType(pub i32);
+
+#[allow(non_upper_case_globals)]
+impl ColorType {
+    /// Luminance.
+    pub const kL: ColorType = ColorType(0);
+    /// Luminance with alpha channel.
+    pub const kLa: ColorType = ColorType(1);
+    /// Pixel contains R, G and B channels.
+    pub const kRgb: ColorType = ColorType(2);
+    /// Pixel contains R, G and B channels with an alpha channel.
+    pub const kRgba: ColorType = ColorType(3);
+}
+
+/// Controls how 16-bit integer samples are narrowed to 8-bit integer samples.
+#[cpp_enum(kind = "enum class")]
+#[repr(transparent)]
+#[derive(Default, Copy, Clone, PartialEq, Eq)]
+#[cfg_attr(debug_assertions, derive(Debug))]
+pub struct DownscaleMode(pub i32);
+
+#[allow(non_upper_case_globals)]
+impl DownscaleMode {
+    /// Retains the most significant byte (`sample >> 8`), matching libpng's
+    /// `png_set_strip_16`.
+    pub const kTruncateHighByte: DownscaleMode = DownscaleMode(0);
+    /// Rounds `sample * 255 / 65535` via `(sample + 128) / 257`, matching the
+    /// Rust `image` crate's `DynamicImage::to_*8` conversions.
+    pub const kRound: DownscaleMode = DownscaleMode(1);
 }
 
 /// Information about strides (offset to the next sample).
@@ -216,11 +250,11 @@ pub struct Strides {
 impl From<RustColorType> for ColorType {
     fn from(value: RustColorType) -> Self {
         match value {
-            RustColorType::L8 | RustColorType::L16 => ColorType::L,
-            RustColorType::La8 | RustColorType::La16 => ColorType::La,
-            RustColorType::Rgb8 | RustColorType::Rgb16 | RustColorType::Rgb32F => ColorType::Rgb,
+            RustColorType::L8 | RustColorType::L16 => ColorType::kL,
+            RustColorType::La8 | RustColorType::La16 => ColorType::kLa,
+            RustColorType::Rgb8 | RustColorType::Rgb16 | RustColorType::Rgb32F => ColorType::kRgb,
             RustColorType::Rgba8 | RustColorType::Rgba16 | RustColorType::Rgba32F => {
-                ColorType::Rgba
+                ColorType::kRgba
             }
             // Match arm exists because the enum is non-exhaustive. All currently mentioned
             // options are listed here.
@@ -448,6 +482,211 @@ impl ImageDecoder {
                 ok()
             }
             Err(status) => status,
+        }
+    }
+
+    /// Validates packed-buffer conversion options and returns the total number
+    /// of output samples (`width * height * target_channels`).
+    pub fn converted_packed_samples(
+        &self,
+        target_color: ColorType,
+        target_pixel: PixelType,
+        downscale_mode: DownscaleMode,
+        row_bytes: usize,
+    ) -> Result<u64, VecU8> {
+        let Some(inner_ref) = self.inner.as_ref() else {
+            crate::convert::validate_target_options(target_color, target_pixel, downscale_mode)
+                .map_err(VecU8::from)?;
+            return Ok(0);
+        };
+        let (width_u32, height_u32) = inner_ref.dimensions();
+        let src_rust_color = inner_ref.color_type();
+        let spec = crate::convert::ConversionSpec {
+            width: width_u32 as usize,
+            height: height_u32 as usize,
+            src_color: ColorType::from(src_rust_color),
+            src_pixel: PixelType::from(src_rust_color),
+            target_color,
+            target_pixel,
+            downscale_mode,
+            row_bytes,
+            rows_bottom_up: false,
+        };
+        crate::convert::validate_packed_samples(&spec)
+            .map(|samples| samples as u64)
+            .map_err(VecU8::from)
+    }
+
+    /// Reads and converts decoded image samples into `buf` according to the
+    /// requested color type, pixel type, 16-to-8 downscale mode, optional
+    /// `row_bytes` stride (`0` selects tightly packed rows), and
+    /// `rows_bottom_up` row ordering.
+    pub fn read_converted_u8_slice(
+        self,
+        buf: &mut [u8],
+        target_color: ColorType,
+        target_pixel: PixelType,
+        downscale_mode: DownscaleMode,
+        row_bytes: usize,
+        rows_bottom_up: bool,
+    ) -> Status {
+        let Some(inner_ref) = self.inner.as_ref() else {
+            return internal_error("ImageDecoder is in invalid, moved out state");
+        };
+        let (width_u32, height_u32) = inner_ref.dimensions();
+        let width = width_u32 as usize;
+        let height = height_u32 as usize;
+        let src_rust_color = inner_ref.color_type();
+        let src_color = ColorType::from(src_rust_color);
+        let src_pixel = PixelType::from(src_rust_color);
+        let spec = crate::convert::ConversionSpec {
+            width,
+            height,
+            src_color,
+            src_pixel,
+            target_color,
+            target_pixel,
+            downscale_mode,
+            row_bytes,
+            rows_bottom_up,
+        };
+
+        let layout = match crate::convert::validate_layout(&spec, buf.len()) {
+            Ok(layout) => layout,
+            Err(msg) => return invalid_argument_error(msg),
+        };
+
+        let Ok(native_total_bytes) = usize::try_from(inner_ref.total_bytes()) else {
+            return invalid_argument_error("Decoded image exceeds addressable memory");
+        };
+
+        if layout.is_identity_packed {
+            if buf.len() < native_total_bytes {
+                return invalid_argument_error("Destination buffer is too small for decoded image");
+            }
+            match layout.src_pixel {
+                crate::convert::ValidPixelType::U8 => {
+                    if let Some(exact_buf) = buf.get_mut(..native_total_bytes) {
+                        return self.read_u8_slice(exact_buf);
+                    }
+                }
+                crate::convert::ValidPixelType::U16 => {
+                    if let Some(exact_buf) = buf.get_mut(..native_total_bytes)
+                        && let Ok(u16_buf) = bytemuck::try_cast_slice_mut::<u8, u16>(exact_buf)
+                    {
+                        return self.read_u16_slice(u16_buf);
+                    }
+                }
+                crate::convert::ValidPixelType::F32 => {
+                    if let Some(exact_buf) = buf.get_mut(..native_total_bytes)
+                        && let Ok(f32_buf) = bytemuck::try_cast_slice_mut::<u8, f32>(exact_buf)
+                    {
+                        return self.read_f32_slice(f32_buf);
+                    }
+                }
+            }
+        }
+
+        let Some(inner) = self.inner else {
+            return internal_error("ImageDecoder is in invalid, moved out state");
+        };
+
+        match layout.src_pixel {
+            crate::convert::ValidPixelType::U8 => {
+                let mut native_u8 = match try_alloc_zeroed(native_total_bytes, 0u8) {
+                    Ok(v) => v,
+                    Err(status) => return status,
+                };
+                if let Err(status) = run_read_image(|| inner.read_image(&mut native_u8)) {
+                    return status;
+                }
+                if let Some(background_subs) = self.background_subs {
+                    Self::perform_color_correction(
+                        &mut native_u8,
+                        background_subs,
+                        src_rust_color,
+                        width_u32,
+                        height_u32,
+                    );
+                }
+                if self.should_premultiply {
+                    match src_rust_color {
+                        RustColorType::Rgba8 => pic_scale_safe::premultiply_rgba8(&mut native_u8),
+                        RustColorType::La8 => pic_scale_safe::premultiply_la8(&mut native_u8),
+                        _ => {}
+                    }
+                }
+                match crate::convert::convert_u8_pixels(&native_u8, buf, &layout) {
+                    Ok(()) => ok(),
+                    Err(msg) => invalid_argument_error(msg),
+                }
+            }
+            crate::convert::ValidPixelType::U16 => {
+                let sample_size = std::mem::size_of::<u16>();
+                if native_total_bytes % sample_size != 0 {
+                    return internal_error("Decoded u16 image byte count is not a multiple of 2");
+                }
+                let mut native_u16 = match try_alloc_zeroed(native_total_bytes / sample_size, 0u16)
+                {
+                    Ok(v) => v,
+                    Err(status) => return status,
+                };
+                {
+                    let byte_buf: &mut [u8] = bytemuck::cast_slice_mut(&mut native_u16);
+                    if let Err(status) = run_read_image(|| inner.read_image(byte_buf)) {
+                        return status;
+                    }
+                    if let Some(background_subs) = self.background_subs {
+                        Self::perform_color_correction(
+                            byte_buf,
+                            background_subs,
+                            src_rust_color,
+                            width_u32,
+                            height_u32,
+                        );
+                    }
+                }
+                if self.should_premultiply {
+                    match src_rust_color {
+                        RustColorType::Rgba16 => {
+                            pic_scale_safe::premultiply_rgba16(&mut native_u16, 16);
+                        }
+                        RustColorType::La16 => {
+                            pic_scale_safe::premultiply_la16(&mut native_u16, 16);
+                        }
+                        _ => {}
+                    }
+                }
+                match crate::convert::convert_u16_pixels(&native_u16, buf, &layout) {
+                    Ok(()) => ok(),
+                    Err(msg) => invalid_argument_error(msg),
+                }
+            }
+            crate::convert::ValidPixelType::F32 => {
+                let sample_size = std::mem::size_of::<f32>();
+                if native_total_bytes % sample_size != 0 {
+                    return internal_error("Decoded f32 image byte count is not a multiple of 4");
+                }
+                let mut native_f32 =
+                    match try_alloc_zeroed(native_total_bytes / sample_size, 0.0f32) {
+                        Ok(v) => v,
+                        Err(status) => return status,
+                    };
+                {
+                    let byte_buf: &mut [u8] = bytemuck::cast_slice_mut(&mut native_f32);
+                    if let Err(status) = run_read_image(|| inner.read_image(byte_buf)) {
+                        return status;
+                    }
+                }
+                if self.should_premultiply && src_rust_color == RustColorType::Rgba32F {
+                    pic_scale_safe::premultiply_rgba_f32(&mut native_f32);
+                }
+                let src_bytes: &[u8] = bytemuck::cast_slice(&native_f32);
+                match crate::convert::copy_strided_rows(src_bytes, buf, &layout) {
+                    Ok(()) => ok(),
+                    Err(msg) => invalid_argument_error(msg),
+                }
+            }
         }
     }
 

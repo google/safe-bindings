@@ -4,6 +4,7 @@
 //!
 //! WARNING: This crate should never be used from Rust, instead use image directly.
 
+pub(crate) mod convert;
 pub mod image;
 pub mod reader;
 pub mod vec_u8;
