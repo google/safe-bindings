@@ -22,6 +22,24 @@ FetchContent_Declare(
 
 FetchContent_MakeAvailable(Corrosion)
 
+FetchContent_Declare(
+  googletest
+  GIT_REPOSITORY https://github.com/google/googletest.git
+  GIT_TAG v1.18.0
+  FIND_PACKAGE_ARGS NAMES GTest
+)
+FetchContent_MakeAvailable(googletest)
+
+set(ABSL_BUILD_TEST_HELPERS ON CACHE BOOL "" FORCE)
+set(ABSL_USE_EXTERNAL_GOOGLETEST ON CACHE BOOL "" FORCE)
+set(ABSL_FIND_GOOGLETEST OFF CACHE BOOL "" FORCE)
+FetchContent_Declare(
+  absl
+  GIT_REPOSITORY https://github.com/abseil/abseil-cpp.git
+  FIND_PACKAGE_ARGS NAMES absl
+)
+FetchContent_MakeAvailable(absl)
+
 corrosion_experimental_crubit(regex_cpp_bindings)
 corrosion_import_crate(MANIFEST_PATH Cargo.toml)
 
@@ -45,13 +63,6 @@ add_custom_command(
 )
 
 FetchContent_Declare(
-  absl
-  GIT_REPOSITORY https://github.com/abseil/abseil-cpp.git
-  FIND_PACKAGE_ARGS NAMES absl
-)
-FetchContent_MakeAvailable(absl)
-
-FetchContent_Declare(
   re2
   GIT_REPOSITORY https://github.com/google/re2.git
   GIT_TAG main
@@ -71,7 +82,7 @@ set(BENCHMARK_ENABLE_INSTALL OFF CACHE BOOL "" FORCE)
 FetchContent_MakeAvailable(google_benchmark)
 
 add_library(regex regex.cc regex.h regex_internal.h)
-target_link_libraries(regex PRIVATE
+target_link_libraries(regex PUBLIC
   regex_cpp_bindings
   absl::check
   absl::core_headers
@@ -101,4 +112,63 @@ target_link_libraries(regex_benchmark PRIVATE
   absl::statusor
   absl::strings
   absl::str_format
+)
+
+enable_testing()
+include(GoogleTest)
+
+add_test(NAME regex_example COMMAND regex_example)
+set_tests_properties(regex_example PROPERTIES LABELS example)
+
+add_executable(regex_test regex_test.cc)
+target_link_libraries(regex_test PRIVATE
+  regex
+  absl::status
+  absl::status_matchers
+  absl::statusor
+  absl::strings
+  GTest::gmock
+  GTest::gtest_main
+)
+gtest_discover_tests(regex_test)
+
+add_executable(regex_flag_test regex_flag_test.cc regex_flag.h)
+target_link_libraries(regex_flag_test PRIVATE
+  regex
+  absl::flags
+  absl::flags_commandlineflag
+  absl::flags_reflection
+  absl::strings
+  GTest::gmock
+  GTest::gtest_main
+)
+gtest_discover_tests(regex_flag_test)
+
+add_executable(re2_differences_test re2_differences_test.cc)
+target_link_libraries(re2_differences_test PRIVATE
+  regex
+  re2::re2
+  absl::status
+  absl::status_matchers
+  absl::statusor
+  absl::strings
+  GTest::gmock
+  GTest::gtest_main
+)
+gtest_discover_tests(re2_differences_test)
+
+add_executable(regex_wrapper_binding_test rust/regex_wrapper_binding_test.cc)
+target_link_libraries(regex_wrapper_binding_test PRIVATE
+  regex_cpp_bindings
+  absl::span
+  absl::strings
+  GTest::gmock
+  GTest::gtest_main
+)
+gtest_discover_tests(regex_wrapper_binding_test)
+
+find_program(CARGO_EXECUTABLE cargo REQUIRED)
+add_test(
+  NAME regex_rust_test
+  COMMAND "${CARGO_EXECUTABLE}" test --manifest-path "${CMAKE_CURRENT_SOURCE_DIR}/Cargo.toml" --target-dir "${CMAKE_CURRENT_BINARY_DIR}/cargo_test"
 )
