@@ -4,6 +4,8 @@
 #include <cstddef>
 #include <cstdint>
 #include <iterator>
+#include <map>
+#include <memory>
 #include <optional>
 #include <string>
 #include <utility>
@@ -12,6 +14,7 @@
 #include "crubit/rust.h"
 #include "crubit_helpers/string_conversions.h"
 #include "absl/algorithm/container.h"
+#include "absl/base/call_once.h"
 #include "absl/status/status.h"
 #include "absl/status/status_macros.h"
 #include "absl/status/statusor.h"
@@ -485,22 +488,14 @@ absl::StatusOr<TiffExifData> parse_exif(absl::Span<const uint8_t> data) {
 }
 
 // Exif
-Exif::Exif(rust::reader::Exif exif) : exif_(std::move(exif)) {
+Exif::Exif(rust::reader::Exif exif)
+    : exif_(std::move(exif)), fields_(std::make_unique<LazyFields>()) {
   // Initialize cached buffer.
   rust::types::VecU8 buf_view = exif_.buf();
   buf_ = std::vector<uint8_t>(buf_view.as_mut_ptr(),
                               buf_view.as_mut_ptr() + buf_view.len());
-  // Initialize cached fields.
-  rust::types::VecField fields_vec = exif_.fields();
-  std::vector<Field> fields;
-  fields.reserve(fields_vec.len());
-  std::transform(
-      fields_vec.as_mut_ptr(), fields_vec.as_mut_ptr() + fields_vec.len(),
-      std::back_inserter(fields),
-      [](rust::tiff::Field& f) { return Field(std::move(f)); });
-  fields_ = std::move(fields);
-
-  // Initialize cached mnote fields.
+  // Initialize cached mnote fields. The reader has already parsed these, with
+  // a limit on their size.
   rust::types::VecField mnote_vec = exif_.mnote_fields();
   std::vector<Field> mnote_fields;
   mnote_fields.reserve(mnote_vec.len());
@@ -516,7 +511,17 @@ absl::Span<const uint8_t> Exif::buf() const& {
 }
 
 absl::Span<const Field> Exif::fields() const& {
-  return absl::Span<const Field>(fields_);
+  if (fields_ == nullptr) return {};  // Moved from.
+  absl::call_once(fields_->once, [this] {
+    rust::types::VecField fields_vec = exif_.fields();
+    std::vector<Field>& fields = fields_->fields;
+    fields.reserve(fields_vec.len());
+    std::transform(
+        fields_vec.as_mut_ptr(), fields_vec.as_mut_ptr() + fields_vec.len(),
+        std::back_inserter(fields),
+        [](rust::tiff::Field& f) { return Field(std::move(f)); });
+  });
+  return absl::Span<const Field>(fields_->fields);
 }
 
 absl::Span<const Field> Exif::mnote_fields() const& {
@@ -572,6 +577,20 @@ absl::StatusOr<Exif> Reader::read_from_container(
 // Writer
 Writer::Writer() : writer_(rust::writer::Writer::new_()) {}
 
+Writer& Writer::operator=(Writer&& other) noexcept {
+  if (this == &other) return *this;
+  // `writer_` borrows this object's storage, which the moves below free, so
+  // drop it first. (Moves of Rust types are swaps: a defaulted move left
+  // `other.writer_` borrowing the freed storage.)
+  writer_ = rust::writer::Writer::new_();
+  fields_storage_ = std::move(other.fields_storage_);
+  ifd_storage_ = std::move(other.ifd_storage_);
+  // `other.writer_` borrows the storage just taken over. Swapping it in
+  // leaves `other` with the empty writer, which borrows nothing.
+  writer_ = std::move(other.writer_);
+  return *this;
+}
+
 void Writer::push_field(Field field) {
   // We can further optimize this, since upstream's push_field ignores
   // some fields. It's therefore not necessary to store references to these
@@ -581,36 +600,44 @@ void Writer::push_field(Field field) {
   writer_.push_field(&fields_storage_.back().field_);
 }
 
-void Writer::set_strips(std::vector<std::vector<uint8_t>> strips, In ifd_num) {
-  uint16_t idx = ifd_num.index();
-  strips_storage_[idx] = std::move(strips);
-  strips_refs_storage_[idx].clear();
+namespace {
 
-  for (const auto& v : strips_storage_[idx]) {
-    strips_refs_storage_[idx].push_back(
-        rs_std::SliceRef<const uint8_t>(absl::MakeConstSpan(v)));
+std::vector<rs_std::SliceRef<const uint8_t>> MakeSliceRefs(
+    const std::vector<std::vector<uint8_t>>& chunks) {
+  std::vector<rs_std::SliceRef<const uint8_t>> refs;
+  refs.reserve(chunks.size());
+  for (const std::vector<uint8_t>& chunk : chunks) {
+    refs.push_back(rs_std::SliceRef<const uint8_t>(absl::MakeConstSpan(chunk)));
   }
+  return refs;
+}
 
-  writer_.set_strips(strips_refs_storage_[idx], ifd_num.in_);
+}  // namespace
+
+// The setters below hand the Rust writer the new data before giving up the
+// old, which it may still reference: the swaps move the old buffers into the
+// locals, which free them on return.
+
+void Writer::set_strips(std::vector<std::vector<uint8_t>> strips, In ifd_num) {
+  std::vector<rs_std::SliceRef<const uint8_t>> refs = MakeSliceRefs(strips);
+  writer_.set_strips(refs, ifd_num.in_);
+  IfdStorage& storage = ifd_storage_[ifd_num.index()];
+  storage.strips.swap(strips);
+  storage.strips_refs.swap(refs);
 }
 
 void Writer::set_tiles(std::vector<std::vector<uint8_t>> tiles, In ifd_num) {
-  uint16_t idx = ifd_num.index();
-  tiles_storage_[idx] = std::move(tiles);
-  tiles_refs_storage_[idx].clear();
-
-  for (const auto& v : tiles_storage_[idx]) {
-    tiles_refs_storage_[idx].push_back(
-        rs_std::SliceRef<const uint8_t>(absl::MakeConstSpan(v)));
-  }
-
-  writer_.set_tiles(tiles_refs_storage_[idx], ifd_num.in_);
+  std::vector<rs_std::SliceRef<const uint8_t>> refs = MakeSliceRefs(tiles);
+  writer_.set_tiles(refs, ifd_num.in_);
+  IfdStorage& storage = ifd_storage_[ifd_num.index()];
+  storage.tiles.swap(tiles);
+  storage.tiles_refs.swap(refs);
 }
 
 void Writer::set_jpeg(absl::Span<const uint8_t> jpeg, In ifd_num) {
-  uint16_t idx = ifd_num.index();
-  jpeg_storage_[idx] = std::vector<uint8_t>(jpeg.begin(), jpeg.end());
-  writer_.set_jpeg(jpeg_storage_[idx], ifd_num.in_);
+  std::vector<uint8_t> data(jpeg.begin(), jpeg.end());
+  writer_.set_jpeg(data, ifd_num.in_);
+  ifd_storage_[ifd_num.index()].jpeg.swap(data);
 }
 
 absl::StatusOr<ExifBytes> Writer::write(bool little_endian) {
