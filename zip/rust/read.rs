@@ -4,8 +4,8 @@
 use crate::{BufferedZipFile, FsZipFile, VecU8, ZipEntryMetadata, ZipError};
 use std::fmt::{Debug, Formatter};
 use std::fs::File;
-use std::io::{Cursor, Read, Seek};
-use std::sync::Arc;
+use std::io::{Cursor, IoSliceMut, Read, Seek, SeekFrom};
+use std::sync::{Arc, Mutex};
 use zip::read::{ZipArchiveMetadata, ZipFile as WrappedZipFile};
 use zip::ZipArchive as WrappedZipArchive;
 
@@ -53,6 +53,103 @@ impl CentralDirectory {
         };
         let entry = metadata.entry(index).map_err(ZipError::from_zip_error)?;
         Ok(ZipEntryMetadata::from_entry(&entry))
+    }
+}
+
+#[derive(Debug, Default)]
+struct CloneFileSlot {
+    lock: Mutex<()>,
+    staged: Mutex<Option<File>>,
+}
+
+impl CloneFileSlot {
+    /// Stages `file` for the next `FsReader::clone` to adopt.
+    fn stage(&self, file: File) {
+        *self.staged.lock().expect("CloneFileSlot staged mutex poisoned") = Some(file);
+    }
+
+    /// Removes and returns whatever is staged, if anything.
+    fn take_staged(&self) -> Option<File> {
+        self.staged.lock().expect("CloneFileSlot staged mutex poisoned").take()
+    }
+}
+
+/// What identifies the file an `FsZipArchive` was opened from, so that
+/// `try_clone` can tell whether the path still names that same file.
+///
+/// Length always participates. On Unix the device and inode numbers do too,
+/// which catches the file being replaced by another of the same length
+/// (atomic rename, remove and recreate). An in-place rewrite that keeps the
+/// inode and the length is not detectable this way.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+struct FileIdentity {
+    len: u64,
+    #[cfg(unix)]
+    dev: u64,
+    #[cfg(unix)]
+    ino: u64,
+}
+
+impl FileIdentity {
+    fn of(file: &File) -> std::io::Result<Self> {
+        let metadata = file.metadata()?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::MetadataExt;
+            Ok(Self { len: metadata.len(), dev: metadata.dev(), ino: metadata.ino() })
+        }
+        #[cfg(not(unix))]
+        {
+            Ok(Self { len: metadata.len() })
+        }
+    }
+}
+
+/// A `File` wrapper that implements `Clone` by adopting a freshly opened
+/// descriptor staged in `CloneFileSlot`, allowing `zip::ZipArchive<FsReader>`
+/// to clone its parsed central directory (`Arc<ZipArchiveMetadata>`) in safe
+/// Rust without reparsing.
+#[derive(Debug)]
+pub(crate) struct FsReader {
+    file: File,
+    clone_slot: Option<Arc<CloneFileSlot>>,
+}
+
+impl FsReader {
+    fn with_clone_slot(file: File, clone_slot: Arc<CloneFileSlot>) -> Self {
+        Self { file, clone_slot: Some(clone_slot) }
+    }
+
+    fn uncloneable(file: File) -> Self {
+        Self { file, clone_slot: None }
+    }
+}
+
+impl Clone for FsReader {
+    fn clone(&self) -> Self {
+        let slot = self.clone_slot.as_ref().expect("FsReader::clone requires a clone slot");
+        let file = slot.take_staged().expect("FsReader::clone requires a staged File");
+        Self { file, clone_slot: Some(Arc::clone(slot)) }
+    }
+}
+
+impl Read for FsReader {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        self.file.read(buf)
+    }
+
+    fn read_vectored(&mut self, bufs: &mut [IoSliceMut<'_>]) -> std::io::Result<usize> {
+        self.file.read_vectored(bufs)
+    }
+}
+
+impl Seek for FsReader {
+    fn seek(&mut self, pos: SeekFrom) -> std::io::Result<u64> {
+        self.file.seek(pos)
+    }
+
+    fn stream_position(&mut self) -> std::io::Result<u64> {
+        self.file.stream_position()
     }
 }
 
@@ -162,8 +259,16 @@ impl BufferedZipArchive {
 
 #[derive(Default)]
 pub struct FsZipArchive {
-    reader: Option<Box<WrappedZipArchive<File>>>,
+    reader: Option<Box<WrappedZipArchive<FsReader>>>,
     central_directory: CentralDirectory,
+    /// Path the archive was opened from, retained so that `try_clone` can open
+    /// an independent file descriptor onto the same archive. Empty until
+    /// `open` succeeds.
+    path: String,
+    /// Identity of the file at `path` when it was opened, checked by
+    /// `try_clone` against the reopened file. Zero until `open` succeeds.
+    identity: FileIdentity,
+    clone_slot: Option<Arc<CloneFileSlot>>,
 }
 
 impl Debug for FsZipArchive {
@@ -205,11 +310,82 @@ impl FsZipArchive {
         let path_str = ZipError::validate_non_empty_utf8_path(path, "Failed to open zip archive")?;
         let file = File::open(path_str)
             .map_err(|e| ZipError::from_io_error(e).with_context("Failed to open zip archive"))?;
-        let reader = WrappedZipArchive::new(file)
+        let identity = FileIdentity::of(&file)
+            .map_err(|e| ZipError::from_io_error(e).with_context("Failed to open zip archive"))?;
+        let clone_slot = Arc::new(CloneFileSlot::default());
+        let fs_reader = FsReader::with_clone_slot(file, Arc::clone(&clone_slot));
+        let reader = WrappedZipArchive::new(fs_reader)
             .map_err(|e| ZipError::from_zip_error(e).with_context("Failed to open zip archive"))?;
         self.central_directory = CentralDirectory::new(&reader);
         self.reader = Some(Box::new(reader));
+        self.path = path_str.to_string();
+        self.identity = identity;
+        self.clone_slot = Some(clone_slot);
         Ok(())
+    }
+
+    /// Returns an independent handle onto the same archive.
+    ///
+    /// The new handle shares the central directory that `new_from_path` already
+    /// parsed, so this costs one `open(2)` and is O(1) in the number of entries,
+    /// whereas `new_from_path` is O(entries). Use it when several entries must
+    /// be read at once: `get_file_by_index` borrows the archive mutably, so a
+    /// caller that wants N concurrently open entries needs N handles, and
+    /// reopening by path for each one is quadratic on large archives.
+    ///
+    /// Each handle owns its own file descriptor and therefore its own file
+    /// position, so handles may be read independently.
+    ///
+    /// The path must still resolve to the same, unmodified file the archive was
+    /// opened from (for a relative path, the working directory must not have
+    /// changed either), since the shared central directory would otherwise
+    /// describe byte ranges that no longer hold the entries it names. The
+    /// reopened file's identity (length, plus device and inode on Unix) is
+    /// compared with what `new_from_path` saw, so a file that was replaced,
+    /// truncated or appended to in between is detected and reported as
+    /// `ZipErrorCode::FailedPrecondition`. An in-place rewrite that keeps the
+    /// inode and the length is not detected.
+    ///
+    /// Also returns `ZipErrorCode::FailedPrecondition` if the archive is not
+    /// open (default-constructed or moved-from), and propagates OS file-open
+    /// errors (such as `ZipErrorCode::NotFound` and
+    /// `ZipErrorCode::PermissionDenied`) if the path can no longer be opened.
+    pub fn try_clone(&self) -> Result<FsZipArchive, ZipError> {
+        let (Some(reader), Some(clone_slot)) = (self.reader.as_ref(), self.clone_slot.as_ref())
+        else {
+            return Err(ZipError::failed_precondition("Zip archive is not open"));
+        };
+        let file = File::open(&self.path)
+            .map_err(|e| ZipError::from_io_error(e).with_context("Failed to reopen zip archive"))?;
+        let identity = FileIdentity::of(&file)
+            .map_err(|e| ZipError::from_io_error(e).with_context("Failed to reopen zip archive"))?;
+        if identity != self.identity {
+            return Err(ZipError::failed_precondition(format!(
+                "Zip archive at {} was replaced or modified since it was opened",
+                self.path
+            )));
+        }
+        let archive = {
+            let _guard = clone_slot.lock.lock().expect("CloneFileSlot clone mutex poisoned");
+            clone_slot.stage(file);
+            let archive = (**reader).clone();
+            // `zip::ZipArchive::clone` clones its reader exactly once, which
+            // adopts the staged file. Anything still staged means it did not,
+            // and `archive` would share a descriptor rather than own one.
+            if clone_slot.take_staged().is_some() {
+                return Err(ZipError::internal(
+                    "zip::ZipArchive::clone did not take the staged file",
+                ));
+            }
+            archive
+        };
+        Ok(FsZipArchive {
+            reader: Some(Box::new(archive)),
+            central_directory: self.central_directory.clone(),
+            path: self.path.clone(),
+            identity: self.identity,
+            clone_slot: Some(Arc::clone(clone_slot)),
+        })
     }
 
     /// Returns whether the zip archive is none (due to being
@@ -409,7 +585,7 @@ impl BufferedZipStreamReader {
 /// A streaming zip reader that reads sequentially from a file without seeking.
 #[derive(Default)]
 pub struct FsZipStreamReader {
-    reader: Option<Box<File>>,
+    reader: Option<Box<FsReader>>,
     finished: bool,
     /// Set once a `read_next_file*` call has failed; see `read_next_file_impl`.
     poisoned: bool,
@@ -418,7 +594,7 @@ pub struct FsZipStreamReader {
 impl Debug for FsZipStreamReader {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("FsZipStreamReader")
-            .field("reader", &if self.reader.is_some() { "Some(File)" } else { "None" })
+            .field("reader", &if self.reader.is_some() { "Some(FsReader)" } else { "None" })
             .field("finished", &self.finished)
             .field("poisoned", &self.poisoned)
             .finish()
@@ -441,7 +617,11 @@ impl FsZipStreamReader {
         let path_str = ZipError::validate_non_empty_utf8_path(path, "Failed to open zip stream")?;
         let file = File::open(path_str)
             .map_err(|e| ZipError::from_io_error(e).with_context("Failed to open zip stream"))?;
-        Ok(Self { reader: Some(Box::new(file)), finished: false, poisoned: false })
+        Ok(Self {
+            reader: Some(Box::new(FsReader::uncloneable(file))),
+            finished: false,
+            poisoned: false,
+        })
     }
 
     /// Returns whether the stream reader is none (due to being default-constructed
@@ -495,6 +675,7 @@ mod tests {
         use super::*;
     use crate::{BufferedZipWriter, CompressionMethod, ZipErrorCode, ZipWriterFileOptions};
     use googletest::prelude::*;
+    use std::io::Write;
 
     fn create_test_zip() -> VecU8 {
         let mut writer = BufferedZipWriter::new_from_data(VecU8::default(), false).unwrap();
@@ -504,6 +685,116 @@ mod tests {
         writer.start_file(b"second.txt", options).unwrap();
         writer.write_data(VecU8::from(b"Second file content".to_vec())).unwrap();
         writer.finish().unwrap()
+    }
+
+    /// Writes `create_test_zip()` to a uniquely named file under the test's
+    /// temporary directory and returns the path.
+    fn create_test_zip_file(name: &str) -> String {
+        let dir = std::env::var("TEST_TMPDIR").unwrap_or_else(|_| "/tmp".to_string());
+        let path = format!("{}/{}.zip", dir, name);
+        let mut file = File::create(&path).unwrap();
+        file.write_all(create_test_zip().as_slice()).unwrap();
+        file.flush().unwrap();
+        path
+    }
+
+    #[gtest]
+    fn test_fs_archive_try_clone_reads_the_same_entries() {
+        let path = create_test_zip_file("try_clone_same_entries");
+        let archive = FsZipArchive::new_from_path(path.as_bytes()).unwrap();
+        let mut clone = archive.try_clone().unwrap();
+
+        expect_false!(clone.is_none());
+        expect_eq!(clone.get_length(), archive.get_length());
+        let mut file = clone.get_file_by_index(0).unwrap();
+        expect_eq!(file.get_file_name().as_slice(), b"hello.txt");
+        expect_eq!(file.get_file_data().unwrap().as_slice(), b"Hello, world!");
+    }
+
+    #[gtest]
+    fn test_fs_archive_clones_have_independent_positions() {
+        let path = create_test_zip_file("try_clone_independent");
+        let mut archive = FsZipArchive::new_from_path(path.as_bytes()).unwrap();
+        let mut clone = archive.try_clone().unwrap();
+
+        // Each handle owns its own descriptor, so reading one entry to
+        // completion must not disturb the other handle's entry. This is the
+        // whole point of `try_clone`: `get_file_by_index` borrows the archive
+        // mutably, so two entries can only be open at once via two handles.
+        // Open both before reading either, then read them in the opposite
+        // order, so that a shared file position would be detected.
+        let mut first = archive.get_file_by_index(0).unwrap();
+        let mut second = clone.get_file_by_index(1).unwrap();
+        expect_eq!(second.get_file_data().unwrap().as_slice(), b"Second file content");
+        expect_eq!(first.get_file_data().unwrap().as_slice(), b"Hello, world!");
+    }
+
+    #[gtest]
+    fn test_fs_archive_try_clone_fails_when_not_open() {
+        let archive = FsZipArchive::new();
+        expect_eq!(archive.try_clone().unwrap_err().code, ZipErrorCode::FailedPrecondition);
+    }
+
+    #[gtest]
+    fn test_fs_archive_try_clone_reopen_failure() {
+        let path = create_test_zip_file("try_clone_reopen_failure");
+        let archive = FsZipArchive::new_from_path(path.as_bytes()).unwrap();
+        std::fs::remove_file(&path).unwrap();
+        expect_eq!(archive.try_clone().unwrap_err().code, ZipErrorCode::NotFound);
+    }
+
+    // Only Unix `FileIdentity` includes device and inode numbers; elsewhere it
+    // compares the length alone, which this replacement keeps equal.
+    #[cfg(unix)]
+    #[gtest]
+    fn test_fs_archive_try_clone_detects_replaced_file() {
+        let path = create_test_zip_file("try_clone_replaced");
+        let archive = FsZipArchive::new_from_path(path.as_bytes()).unwrap();
+
+        // Replace the archive with a different file of the same contents (and
+        // therefore the same length) via rename, as an atomic rewrite would.
+        let replacement = format!("{path}.new");
+        std::fs::write(&replacement, create_test_zip().as_slice()).unwrap();
+        std::fs::rename(&replacement, &path).unwrap();
+
+        let err = archive.try_clone().unwrap_err();
+        expect_eq!(err.code, ZipErrorCode::FailedPrecondition);
+        expect_that!(
+            String::from_utf8_lossy(err.message.as_slice()).into_owned(),
+            contains_substring("replaced or modified")
+        );
+    }
+
+    #[gtest]
+    fn test_fs_archive_try_clone_detects_truncated_or_appended_file() {
+        let path = create_test_zip_file("try_clone_resized");
+        let archive = FsZipArchive::new_from_path(path.as_bytes()).unwrap();
+
+        // Appending keeps the inode, so only the length gives it away.
+        {
+            let mut file = std::fs::OpenOptions::new().append(true).open(&path).unwrap();
+            file.write_all(b"trailing garbage").unwrap();
+        }
+        expect_eq!(archive.try_clone().unwrap_err().code, ZipErrorCode::FailedPrecondition);
+
+        // Truncating in place likewise keeps the inode.
+        {
+            let file = std::fs::OpenOptions::new().write(true).open(&path).unwrap();
+            file.set_len(4).unwrap();
+        }
+        expect_eq!(archive.try_clone().unwrap_err().code, ZipErrorCode::FailedPrecondition);
+    }
+
+    #[gtest]
+    fn test_fs_archive_try_clone_of_clone() {
+        let path = create_test_zip_file("try_clone_of_clone");
+        let archive = FsZipArchive::new_from_path(path.as_bytes()).unwrap();
+        let clone1 = archive.try_clone().unwrap();
+        let mut clone2 = clone1.try_clone().unwrap();
+
+        let mut file = clone2.get_file_by_index(1).unwrap();
+        expect_eq!(file.get_file_name().as_slice(), b"second.txt");
+        expect_eq!(file.get_file_data().unwrap().as_slice(), b"Second file content");
     }
 
     #[gtest]

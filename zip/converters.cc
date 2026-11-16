@@ -1,5 +1,6 @@
 #include "converters.h"
 
+#include <cstdint>
 #include <string>
 #include <utility>
 
@@ -68,6 +69,11 @@ absl::Status FromRustResultUnit(
     return ZipErrorToStatus(std::move(result_unit).err());
   }
   return absl::OkStatus();
+}
+
+absl::StatusOr<uint64_t> FromRustResultU64(
+    rs_std::Result<uint64_t, rust::ZipError> result_u64) {
+  return FromRustResult(std::move(result_u64));
 }
 
 absl::StatusOr<rust::BufferedZipArchive> FromRustBufferedZipArchive(
