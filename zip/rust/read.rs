@@ -1,7 +1,7 @@
 // Crubit does not support generic type parameters, so we need to implement
 // BufferedZipArchive and FsZipArchive manually.
 
-use crate::{BufferedZipFile, FsZipFile, VecU8, ZipEntryMetadata, ZipError};
+use crate::{BufferedZipFile, CompressionMethod, FsZipFile, VecU8, ZipEntryMetadata, ZipError};
 use std::fmt::{Debug, Formatter};
 use std::fs::File;
 use std::io::{Cursor, IoSliceMut, Read, Seek, SeekFrom};
@@ -448,7 +448,31 @@ fn get_file_by_index_impl<'a, R: Read + Seek>(
     let reader =
         reader.as_mut().ok_or_else(|| ZipError::failed_precondition("Zip archive is not open"))?;
     let result = if raw { reader.by_index_raw(index) } else { reader.by_index(index) };
-    result.map_err(ZipError::from_zip_error)
+    let file = result.map_err(ZipError::from_zip_error)?;
+    if !raw {
+        check_compression_method(&file)?;
+    }
+    Ok(file)
+}
+
+/// Returns `Unimplemented` if `file` uses a compression method that
+/// `CompressionMethod` does not name.
+///
+/// zip-rs only reports an unsupported method on the first read, and decodes
+/// some that `CompressionMethod` does not name: Crubit's generated crate
+/// depends on zip with its default features, whatever `Cargo.toml` asks for,
+/// which add PPMd and Deflate64. A PPMd entry's 2-byte header can make the
+/// decoder allocate and zero 256 MiB.
+fn check_compression_method<R: Read + ?Sized>(
+    file: &WrappedZipFile<'_, R>,
+) -> Result<(), ZipError> {
+    if CompressionMethod::from_zip_crate(file.compression()) == CompressionMethod::Unsupported {
+        return Err(ZipError::unimplemented(format!(
+            "compression method not supported: {}",
+            file.compression()
+        )));
+    }
+    Ok(())
 }
 
 /// Shared body of `read_next_file` / `read_next_file_with_compressed_size` for
@@ -464,7 +488,8 @@ fn get_file_by_index_impl<'a, R: Read + Seek>(
 /// local file header, leaving the stream positioned at the entry's untrusted
 /// payload. Parsing that payload as the next header would let a crafted
 /// archive smuggle entries past the error, so a failed read sets `poisoned`
-/// and every later call fails with `FailedPrecondition`. `finished` is left
+/// and every later call fails with `FailedPrecondition`. An entry with an
+/// unsupported compression method counts as a failed read. `finished` is left
 /// untouched (false) in that state.
 fn read_next_file_impl<'a, R: Read>(
     reader: &'a mut Option<Box<R>>,
@@ -489,7 +514,13 @@ fn read_next_file_impl<'a, R: Read>(
         None => zip::read::read_zipfile_from_stream(reader),
     };
     match result {
-        Ok(Some(file)) => Ok(Some(file)),
+        Ok(Some(file)) => match check_compression_method(&file) {
+            Ok(()) => Ok(Some(file)),
+            Err(e) => {
+                *poisoned = true;
+                Err(e)
+            }
+        },
         Ok(None) => {
             *finished = true;
             Ok(None)
@@ -1092,6 +1123,126 @@ mod tests {
         expect_eq!(
             corrupt_archive.get_file_by_index_raw(0).err().map(|e| e.code),
             Some(ZipErrorCode::InvalidArgument)
+        );
+    }
+
+    /// Builds a one-entry archive that stores `payload`, then rewrites the
+    /// compression method in its local and central headers to `method`.
+    fn create_zip_with_method(method: u16, payload: &[u8]) -> VecU8 {
+        let options = ZipWriterFileOptions::new().compression_method(CompressionMethod::Stored);
+        let mut writer = BufferedZipWriter::new_from_data(VecU8::default(), false).unwrap();
+        writer.start_file(b"entry.bin", options).unwrap();
+        writer.write_data(VecU8::copy_from_slice(payload)).unwrap();
+        let mut zip_data = writer.finish().unwrap().into_vec();
+        // The method is at offset 8 of the local header and 10 of the central one.
+        assert_eq!(&zip_data[..4], b"PK\x03\x04");
+        zip_data[8..10].copy_from_slice(&method.to_le_bytes());
+        let cd_pos = zip_data.windows(4).position(|w| w == b"PK\x01\x02").unwrap();
+        zip_data[cd_pos + 10..cd_pos + 12].copy_from_slice(&method.to_le_bytes());
+        VecU8::from(zip_data)
+    }
+
+    /// A PPMd entry whose header asks for order 6 with 256 MiB of model
+    /// memory, which a PPMd decoder allocates and zeroes before it decodes
+    /// anything.
+    fn create_ppmd_zip() -> VecU8 {
+        let mut payload = ((0xFF_u16 << 4) | 5).to_le_bytes().to_vec();
+        payload.resize(18, 0);
+        create_zip_with_method(98, &payload)
+    }
+
+    #[gtest]
+    fn test_ppmd_entry_is_unimplemented() {
+        let zip_data = create_ppmd_zip();
+        let mut archive = BufferedZipArchive::new_from_data(zip_data.clone()).unwrap();
+        expect_eq!(
+            archive.get_entry_metadata(0).unwrap().get_compression_method(),
+            CompressionMethod::Unsupported
+        );
+        expect_eq!(
+            archive.get_file_by_index(0).err().map(|e| e.code),
+            Some(ZipErrorCode::Unimplemented)
+        );
+
+        // Raw access does not decompress, so it still works.
+        let mut raw = archive.get_file_by_index_raw(0).unwrap();
+        expect_eq!(raw.get_file_data().unwrap().len(), 18);
+
+        let path = format!(
+            "{}/ppmd_entry.zip",
+            std::env::var("TEST_TMPDIR").unwrap_or_else(|_| "/tmp".to_string())
+        );
+        std::fs::write(&path, zip_data.as_slice()).unwrap();
+        let mut fs_archive = FsZipArchive::new_from_path(path.as_bytes()).unwrap();
+        expect_eq!(
+            fs_archive.get_file_by_index(0).err().map(|e| e.code),
+            Some(ZipErrorCode::Unimplemented)
+        );
+    }
+
+    #[gtest]
+    fn test_stream_reader_rejects_ppmd_entry() {
+        let mut reader = BufferedZipStreamReader::new_from_data(create_ppmd_zip()).unwrap();
+        expect_eq!(
+            reader.read_next_file().err().map(|e| e.code),
+            Some(ZipErrorCode::Unimplemented)
+        );
+        // Like any failed read, it leaves the reader poisoned.
+        expect_eq!(
+            reader.read_next_file().err().map(|e| e.code),
+            Some(ZipErrorCode::FailedPrecondition)
+        );
+    }
+
+    #[gtest]
+    fn test_deflate64_entry_is_unimplemented() {
+        let mut archive =
+            BufferedZipArchive::new_from_data(create_zip_with_method(9, b"data")).unwrap();
+        expect_eq!(
+            archive.get_file_by_index(0).err().map(|e| e.code),
+            Some(ZipErrorCode::Unimplemented)
+        );
+    }
+
+    #[gtest]
+    fn test_aes_entry_is_failed_precondition() {
+        let name = b"a.txt";
+        // AE-2 extra field: vendor version 2, vendor "AE", AES-256, stored.
+        let extra = b"\x01\x99\x07\x00\x02\x00AE\x03\x00\x00";
+        // Salt, password verifier, 5 bytes of data and the authentication code.
+        let payload = [0u8; 16 + 2 + 5 + 10];
+        let mut local = Vec::new();
+        local.extend_from_slice(b"PK\x03\x04\x33\x00\x01\x00\x63\x00\x00\x00\x21\x00");
+        local.extend_from_slice(&0u32.to_le_bytes()); // CRC-32, unused by AE-2
+        local.extend_from_slice(&(payload.len() as u32).to_le_bytes());
+        local.extend_from_slice(&5u32.to_le_bytes());
+        local.extend_from_slice(&(name.len() as u16).to_le_bytes());
+        local.extend_from_slice(&(extra.len() as u16).to_le_bytes());
+        local.extend_from_slice(name);
+        local.extend_from_slice(extra);
+        local.extend_from_slice(&payload);
+        let mut central = Vec::new();
+        central.extend_from_slice(b"PK\x01\x02\x33\x00\x33\x00\x01\x00\x63\x00\x00\x00\x21\x00");
+        central.extend_from_slice(&0u32.to_le_bytes());
+        central.extend_from_slice(&(payload.len() as u32).to_le_bytes());
+        central.extend_from_slice(&5u32.to_le_bytes());
+        central.extend_from_slice(&(name.len() as u16).to_le_bytes());
+        central.extend_from_slice(&(extra.len() as u16).to_le_bytes());
+        central.extend_from_slice(&[0; 14]); // Comment length to local header offset (0).
+        central.extend_from_slice(name);
+        central.extend_from_slice(extra);
+        let mut zip_data = local.clone();
+        zip_data.extend_from_slice(&central);
+        zip_data.extend_from_slice(b"PK\x05\x06\x00\x00\x00\x00\x01\x00\x01\x00");
+        zip_data.extend_from_slice(&(central.len() as u32).to_le_bytes());
+        zip_data.extend_from_slice(&(local.len() as u32).to_le_bytes());
+        zip_data.extend_from_slice(b"\x00\x00");
+
+        let mut archive = BufferedZipArchive::new_from_data(VecU8::from(zip_data)).unwrap();
+        expect_true!(archive.get_entry_metadata(0).unwrap().is_encrypted());
+        expect_eq!(
+            archive.get_file_by_index(0).err().map(|e| e.code),
+            Some(ZipErrorCode::FailedPrecondition)
         );
     }
 }

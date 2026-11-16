@@ -48,3 +48,11 @@ target_link_libraries(zip_write PUBLIC zip_converters zip_file rust absl::status
 
 add_executable(zip_example main.cc)
 target_link_libraries(zip_example PRIVATE rust zip_converters zip_file zip_read zip_write absl::statusor absl::strings)
+
+enable_testing()
+
+find_program(CARGO_EXECUTABLE cargo REQUIRED)
+add_test(
+  NAME zip_rust_test
+  COMMAND "${CARGO_EXECUTABLE}" test --manifest-path "${CMAKE_CURRENT_SOURCE_DIR}/rust/Cargo.toml" --target-dir "${CMAKE_CURRENT_BINARY_DIR}/cargo_test"
+)
