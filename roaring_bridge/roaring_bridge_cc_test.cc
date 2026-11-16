@@ -1,4 +1,5 @@
 #include <cstdint>
+#include <numeric>
 #include <optional>
 #include <string>
 #include <type_traits>
@@ -292,6 +293,17 @@ TYPED_TEST(RoaringBitmapTest, ToVec) {
   EXPECT_EQ(values[2], 5);
 }
 
+TYPED_TEST(RoaringBitmapTest, ToVecWithFullRunContainer) {
+  using ValueType = typename BitmapTraits<TypeParam>::ValueType;
+  // 0..65535 fills a whole container as a single run.
+  TypeParam bm;
+  bm.InsertRange(0, 70000);
+
+  std::vector<ValueType> expected(70000);
+  std::iota(expected.begin(), expected.end(), ValueType{0});
+  EXPECT_EQ(ToStdVec(bm.ToVec()), expected);
+}
+
 TYPED_TEST(RoaringBitmapTest, RangeForIteration) {
   using ValueType = typename BitmapTraits<TypeParam>::ValueType;
   TypeParam bm;
@@ -473,6 +485,18 @@ TEST(RoaringBitmap32Test, AddOffsetBoundary) {
   RoaringBitmap32 max_neg = bm.AddOffset(-int64_t{UINT32_MAX});
   EXPECT_EQ(max_neg.len(), 1);
   EXPECT_TRUE(max_neg.Contains(0));
+}
+
+TEST(RoaringBitmap32Test, ToVecAfterDeserializingFullRunContainer) {
+  // The serialized form of 0..65535: one container holding a single run.
+  std::vector<uint8_t> bytes = {0x3B, 0x30, 0x00, 0x00, 0x01, 0x00, 0x00, 0xFF,
+                                0xFF, 0x01, 0x00, 0x00, 0x00, 0xFF, 0xFF};
+  std::optional<RoaringBitmap32> bm = RoaringBitmap32::Deserialize(bytes);
+  ASSERT_TRUE(bm.has_value());
+
+  std::vector<uint32_t> expected(65536);
+  std::iota(expected.begin(), expected.end(), 0u);
+  EXPECT_EQ(ToStdVec(bm->ToVec()), expected);
 }
 
 TEST(RoaringBitmap64Test, AddOffsetLargeValues) {

@@ -211,10 +211,10 @@ impl RoaringBitmap32 {
 
     /// Collects all values into a vector.
     pub fn ToVec(&self) -> vector<u32> {
-        let mut v = vector::default();
-        v.resize(self.inner.len() as usize, 0);
-        let _ = self.inner.iter().next_many(&mut v);
-        v
+        // Not `Iter::next_many`: in roaring 0.12 it overflows on a run container
+        // that covers all 65536 values, leaving the rest of the vector zeroed
+        // (https://github.com/RoaringBitmap/roaring-rs/issues/403).
+        self.inner.iter().collect()
     }
 
     /// Returns the serialized size in bytes.
