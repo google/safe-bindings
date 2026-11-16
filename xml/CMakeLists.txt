@@ -33,7 +33,15 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(absl)
 
-add_library(xml_lib 
+FetchContent_Declare(
+  googletest
+  GIT_REPOSITORY https://github.com/google/googletest.git
+  GIT_TAG v1.18.0
+  FIND_PACKAGE_ARGS NAMES GTest
+)
+FetchContent_MakeAvailable(googletest)
+
+add_library(xml_lib
     quick_reader.cc 
     quick_writer.cc 
     xmltree.cc
@@ -58,5 +66,17 @@ add_executable(xml_example main.cc)
 target_link_libraries(xml_example PRIVATE xml_lib absl::status_macros)
 
 enable_testing()
+include(GoogleTest)
+
 add_test(NAME xml_example COMMAND xml_example)
 set_tests_properties(xml_example PROPERTIES LABELS example)
+
+add_executable(xmltree_test xmltree_test.cc)
+target_link_libraries(xmltree_test PRIVATE
+  xml_lib
+  absl::status
+  absl::statusor
+  absl::strings
+  GTest::gtest_main
+)
+gtest_discover_tests(xmltree_test)
