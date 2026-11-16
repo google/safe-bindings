@@ -145,11 +145,11 @@ struct FftTraits<double> {
 
 // Converts a Result from Rust into an absl::Status.
 inline absl::Status ToStatus(
-    const rs_std::Result<rs_std::unit_t, rs_std::Vec<uint8_t>>& result) {
+    const rs::Result<rs::unit_t, rs::Vec<uint8_t>>& result) {
   if (result.has_value()) {
     return absl::OkStatus();
   }
-  const rs_std::Vec<uint8_t>& err = result.err();
+  const rs::Vec<uint8_t>& err = result.err();
   return absl::InternalError(
       absl::string_view(reinterpret_cast<const char*>(err.data()), err.size()));
 }
@@ -157,8 +157,8 @@ inline absl::Status ToStatus(
 // Converts a span of real values to a slice of the appropriate Rust wrapper
 // type (RealF32 or RealF64).
 template <typename T>
-rs_std::SliceRef<typename FftTraits<T>::Real> ToSliceRef(absl::Span<T> span) {
-  return rs_std::SliceRef<typename FftTraits<T>::Real>(absl::MakeSpan(
+rs::SliceRef<typename FftTraits<T>::Real> ToSliceRef(absl::Span<T> span) {
+  return rs::SliceRef<typename FftTraits<T>::Real>(absl::MakeSpan(
       reinterpret_cast<typename FftTraits<T>::Real*>(span.data()),
       span.size()));
 }
@@ -166,9 +166,9 @@ rs_std::SliceRef<typename FftTraits<T>::Real> ToSliceRef(absl::Span<T> span) {
 // Converts a span of complex values to a slice of the appropriate Rust wrapper
 // type (ComplexF32 or ComplexF64).
 template <typename T>
-rs_std::SliceRef<typename FftTraits<T>::Complex> ToSliceRef(
+rs::SliceRef<typename FftTraits<T>::Complex> ToSliceRef(
     absl::Span<std::complex<T>> span) {
-  return rs_std::SliceRef<typename FftTraits<T>::Complex>(absl::MakeSpan(
+  return rs::SliceRef<typename FftTraits<T>::Complex>(absl::MakeSpan(
       reinterpret_cast<typename FftTraits<T>::Complex*>(span.data()),
       span.size()));
 }
@@ -176,23 +176,21 @@ rs_std::SliceRef<typename FftTraits<T>::Complex> ToSliceRef(
 // Converts a span of const real values to a const slice of the appropriate Rust
 // wrapper type (RealF32 or RealF64).
 template <typename T>
-rs_std::SliceRef<const typename FftTraits<T>::Real> ToConstSliceRef(
+rs::SliceRef<const typename FftTraits<T>::Real> ToConstSliceRef(
     absl::Span<const T> span) {
-  return rs_std::SliceRef<const typename FftTraits<T>::Real>(
-      absl::MakeConstSpan(
-          reinterpret_cast<const typename FftTraits<T>::Real*>(span.data()),
-          span.size()));
+  return rs::SliceRef<const typename FftTraits<T>::Real>(absl::MakeConstSpan(
+      reinterpret_cast<const typename FftTraits<T>::Real*>(span.data()),
+      span.size()));
 }
 
 // Converts a span of const complex values to a const slice of the appropriate
 // Rust wrapper type (ComplexF32 or ComplexF64).
 template <typename T>
-rs_std::SliceRef<const typename FftTraits<T>::Complex> ToConstSliceRef(
+rs::SliceRef<const typename FftTraits<T>::Complex> ToConstSliceRef(
     absl::Span<const std::complex<T>> span) {
-  return rs_std::SliceRef<const typename FftTraits<T>::Complex>(
-      absl::MakeConstSpan(
-          reinterpret_cast<const typename FftTraits<T>::Complex*>(span.data()),
-          span.size()));
+  return rs::SliceRef<const typename FftTraits<T>::Complex>(absl::MakeConstSpan(
+      reinterpret_cast<const typename FftTraits<T>::Complex*>(span.data()),
+      span.size()));
 }
 
 // Runs an N-dimensional transform by running `t` from `input` to `output` along

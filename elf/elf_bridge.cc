@@ -21,7 +21,7 @@ namespace {
 
 // When ABSL_OPTION_USE_STD_STRING_VIEW == 0, absl::string_view is not an alias
 // for std::string_view and cannot be constructed from std::string_view.
-constexpr absl::string_view StringViewFromStrRef(rs_std::StrRef str) noexcept {
+constexpr absl::string_view StringViewFromStrRef(rs::StrRef str) noexcept {
   return absl::string_view(str.data(), str.size());
 }
 
@@ -76,7 +76,7 @@ absl::StatusOr<To> MapResult(From&& r) {
 }
 
 template <typename T, typename E>
-absl::StatusOr<std::string> MapResult(rs_std::Result<T, E>&& r) {
+absl::StatusOr<std::string> MapResult(rs::Result<T, E>&& r) {
   if (!r.has_value()) {
     return absl::InternalError(absl::StrCat(r.error()));
   }
@@ -84,8 +84,8 @@ absl::StatusOr<std::string> MapResult(rs_std::Result<T, E>&& r) {
 }
 
 template <template <typename> class Wrapper, typename T, typename E>
-absl::StatusOr<std::string> MapResult(Wrapper<rs_std::Result<T, E>>&& r) {
-  rs_std::Result<T, E> unwrapped = std::move(r);
+absl::StatusOr<std::string> MapResult(Wrapper<rs::Result<T, E>>&& r) {
+  rs::Result<T, E> unwrapped = std::move(r);
   return MapResult(std::move(unwrapped));
 }
 

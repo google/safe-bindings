@@ -18,9 +18,9 @@ using ::security::crubit_helpers::StringViewFromVecU8;
 
 absl::StatusOr<std::string> ConvertYamlToJson(absl::string_view yaml_text,
                                               const ParseOptions& options) {
-  auto bytes_slice = rs_std::SliceRef<const uint8_t>(absl::Span<const uint8_t>(
+  auto bytes_slice = rs::SliceRef<const uint8_t>(absl::Span<const uint8_t>(
       reinterpret_cast<const uint8_t*>(yaml_text.data()), yaml_text.size()));
-  rs_std::Result<rust::vec_u8::VecU8, rust::vec_u8::VecU8> result =
+  rs::Result<rust::vec_u8::VecU8, rust::vec_u8::VecU8> result =
       rust::convert_yaml_to_json(bytes_slice, options.recursion_depth_limit);
 
   if (!result.has_value()) {

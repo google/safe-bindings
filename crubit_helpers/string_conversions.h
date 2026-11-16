@@ -18,7 +18,7 @@ concept HasAsPtrReturningUint8Ptr = requires(T t) {
   { t.as_ptr() } -> std::same_as<const uint8_t*>;
 };
 
-// Matches Crubit's native `rs_std::Vec<uint8_t>`, which exposes `data()`/
+// Matches Crubit's native `rs::Vec<uint8_t>`, which exposes `data()`/
 // `size()`.
 template <typename T>
 concept HasDataReturningUint8Ptr = requires(const T t) {
