@@ -19,6 +19,7 @@ namespace {
 
 using ::testing::ElementsAre;
 using ::testing::HasSubstr;
+using ::testing::status::IsOkAndHolds;
 using ::testing::status::StatusIs;
 
 TEST(JxlBridgeTest, HasJxlSignatureReturnsFalseForEmptyInput) {
