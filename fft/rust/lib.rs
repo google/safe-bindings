@@ -61,30 +61,22 @@ use ndrustfft::{
 pub use ndarray::Slice;
 
 // Monomorphized Complex types for crubit.
+#[derive(TransparentWrapper)]
 #[repr(transparent)]
 pub struct ComplexF64(pub Complex<f64>);
 
-// SAFETY: Trivially matches safety contract of TransparentWrapper.
-unsafe impl TransparentWrapper<Complex<f64>> for ComplexF64 {}
-
+#[derive(TransparentWrapper)]
 #[repr(transparent)]
 pub struct ComplexF32(pub Complex<f32>);
 
-// SAFETY: Trivially matches safety contract of TransparentWrapper.
-unsafe impl TransparentWrapper<Complex<f32>> for ComplexF32 {}
-
 // Wrappers for real numbers so we can treat them the same as complex numbers in macros.
+#[derive(TransparentWrapper)]
 #[repr(transparent)]
 pub struct RealF64(pub f64);
 
-// SAFETY: Trivially matches safety contract of TransparentWrapper.
-unsafe impl TransparentWrapper<f64> for RealF64 {}
-
+#[derive(TransparentWrapper)]
 #[repr(transparent)]
 pub struct RealF32(pub f32);
-
-// SAFETY: Trivially matches safety contract of TransparentWrapper.
-unsafe impl TransparentWrapper<f32> for RealF32 {}
 
 // Monomorphized *Handler types for Crubit.
 #[derive(Clone)]
