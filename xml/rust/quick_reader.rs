@@ -187,18 +187,24 @@ fn expand(entity: &[u8]) -> anyhow::Result<Vec<u8>> {
 // fails, returns the original attribute value. If the attribute value contains a '<' (signalling an
 // invalid attribute value), returns an error.
 fn expand_entities_in_attribute_value(attribute_value: &[u8]) -> anyhow::Result<Cow<'_, [u8]>> {
-    // Check for early exit to avoid running a nested parser. If there is no `&` in the attribute
-    // value, then there are no entities to expand.
-    if !attribute_value.contains(&b'&') {
-        return Ok(Cow::Borrowed(attribute_value));
-    }
     // Attribute values must not contain '<' (see https://www.w3.org/TR/xml/#NT-AttValue), so
     // parsing them as XML yields a sequence of Text and GeneralRef events only. This is exactly
     // what is needed in this function: Text are passed through, entities are expanded.
     if attribute_value.contains(&b'<') {
         return Err(anyhow::anyhow!("Invalid attribute value: contains '<'"));
     }
+    // Check for early exit to avoid running a nested parser. If there is no `&` in the attribute
+    // value, then there are no entities to expand.
+    if !attribute_value.contains(&b'&') {
+        return Ok(Cow::Borrowed(attribute_value));
+    }
     let mut result = Vec::new();
+    // `PlainReader` starts in `ParseState::Init`, which strips a single leading UTF-8 BOM
+    // (`\u{FEFF}`) as if `attribute_value` were the start of an XML document. Preserve it here.
+    let bom = "\u{FEFF}".as_bytes();
+    if attribute_value.starts_with(bom) {
+        result.extend_from_slice(bom);
+    }
     let mut reader = PlainReader::from_reader(attribute_value);
     let mut buf = Vec::new();
 
