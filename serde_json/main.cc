@@ -27,6 +27,12 @@ int main(int argc, char** argv) {
                    rust::ToString(json).as_str())
             << std::endl;
 
+  std::cout << "Sorted JSON: "
+            << std::string_view(
+                   rust::ToString(
+                       json, {.sort_keys = true, .trailing_newline = true})
+                       .as_str());
+
   if (auto name = json["name"].as_str(); name.has_value()) {
     std::cout << "Name: " << std::string_view(*name) << std::endl;
   }

@@ -52,15 +52,47 @@ pub fn parse(data: &[u8]) -> StatusOr<Value> {
 
 type ToStringResult = String;
 
+/// Formatting options for `ToString`.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[crubit_annotate::must_bind]
+pub struct ToStringOptions {
+    /// If true, reorders entries in all nested objects alphabetically before serializing.
+    pub sort_keys: bool,
+    /// If true, appends a trailing `\n` to the serialized JSON string.
+    pub trailing_newline: bool,
+}
+
 /// Serializes the given [Value] to a string of JSON.
 #[crubit_annotate::cpp_name("ToString")]
 pub fn to_string(value: &Value) -> ToStringResult {
+    to_string_with_options(value, ToStringOptions::default())
+}
+
+/// Serializes the given [Value] to a compact string of JSON according to `options` without
+/// mutating `value`.
+#[must_use]
+#[crubit_annotate::must_bind]
+#[crubit_annotate::cpp_name("ToString")]
+pub fn to_string_with_options(value: &Value, options: ToStringOptions) -> ToStringResult {
+    let mut sorted_value;
+    let target = if options.sort_keys {
+        sorted_value = value.clone();
+        sorted_value.sort_all_objects();
+        &sorted_value.value
+    } else {
+        &value.value
+    };
     // Serialization can fail if:
     // - the value is not valid JSON, e.g. contains non-string keys or infinite numbers -->
     //   impossible for serde_json::Value, which represents any _valid_ JSON value
     // - the underlying buffer errors on write --> impossible for `String`
-    serde_json::to_string(&value.value)
-        .expect("Value is guaranteed to be serializable to JSON")
+    let mut serialized =
+        serde_json::to_string(target).expect("Value is guaranteed to be serializable to JSON");
+    if options.trailing_newline {
+        serialized.push('\n');
+    }
+    serialized
 }
 
 /// Serializes the given [Value] to a pretty-printed string of JSON.
