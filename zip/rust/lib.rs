@@ -6,6 +6,11 @@
 
 #![forbid(unsafe_code)]
 
+// NOTE(b/553659636): Remove this `allow` once the archive and file types built
+// on `callback_reader` have landed; nothing uses it until then.
+#[allow(dead_code)]
+mod callback_reader;
+
 mod entry_metadata;
 pub use entry_metadata::ZipEntryMetadata;
 
