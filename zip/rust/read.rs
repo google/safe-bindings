@@ -1,12 +1,13 @@
 // Crubit does not support generic type parameters, so we need to implement
 // BufferedZipArchive and FsZipArchive manually.
 
-use crate::{BufferedZipFile, FsZipFile, VecU8, ZipEntryMetadata, ZipError};
+use crate::callback_reader::CallbackReader;
+use crate::{BufferedZipFile, CallbackZipFile, FsZipFile, VecU8, ZipEntryMetadata, ZipError};
 use std::fmt::{Debug, Formatter};
 use std::fs::File;
 use std::io::{Cursor, IoSliceMut, Read, Seek, SeekFrom};
-use std::sync::{Arc, Mutex};
-use zip::read::{ZipArchiveMetadata, ZipFile as WrappedZipFile};
+use std::sync::{Arc, Mutex, MutexGuard};
+use zip::read::{ArchiveOffset, Config, ZipArchiveMetadata, ZipFile as WrappedZipFile};
 use zip::ZipArchive as WrappedZipArchive;
 
 /// An open archive's central directory, kept beside the reader rather than
@@ -56,21 +57,45 @@ impl CentralDirectory {
     }
 }
 
-#[derive(Debug, Default)]
-struct CloneFileSlot {
+/// Hands a staged replacement to the next `Clone::clone` of the reader an
+/// archive was opened on. That is how `zip::ZipArchive::clone` is made to
+/// clone its parsed central directory (`Arc<ZipArchiveMetadata>`) onto a
+/// reader of the caller's choosing, in safe Rust and without reparsing.
+///
+/// `T` is what gets staged: a `File` for `FsReader`, a `CallbackReader` for
+/// itself. Callers hold `lock()` across staging, cloning and the check that
+/// the staged value was taken, so that two concurrent clones cannot adopt each
+/// other's replacement.
+///
+/// The mutexes are `expect`ed rather than recovered from poisoning: a panic
+/// while a replacement is staged must not let a later clone on another thread
+/// silently adopt it.
+#[derive(Debug)]
+pub(crate) struct CloneSlot<T> {
     lock: Mutex<()>,
-    staged: Mutex<Option<File>>,
+    staged: Mutex<Option<T>>,
 }
 
-impl CloneFileSlot {
-    /// Stages `file` for the next `FsReader::clone` to adopt.
-    fn stage(&self, file: File) {
-        *self.staged.lock().expect("CloneFileSlot staged mutex poisoned") = Some(file);
+impl<T> Default for CloneSlot<T> {
+    fn default() -> Self {
+        Self { lock: Mutex::new(()), staged: Mutex::new(None) }
+    }
+}
+
+impl<T> CloneSlot<T> {
+    /// Serializes stage / clone / take sequences against each other.
+    pub(crate) fn lock(&self) -> MutexGuard<'_, ()> {
+        self.lock.lock().expect("CloneSlot clone mutex poisoned")
+    }
+
+    /// Stages `value` for the next clone to adopt.
+    pub(crate) fn stage(&self, value: T) {
+        *self.staged.lock().expect("CloneSlot staged mutex poisoned") = Some(value);
     }
 
     /// Removes and returns whatever is staged, if anything.
-    fn take_staged(&self) -> Option<File> {
-        self.staged.lock().expect("CloneFileSlot staged mutex poisoned").take()
+    pub(crate) fn take_staged(&self) -> Option<T> {
+        self.staged.lock().expect("CloneSlot staged mutex poisoned").take()
     }
 }
 
@@ -106,17 +131,17 @@ impl FileIdentity {
 }
 
 /// A `File` wrapper that implements `Clone` by adopting a freshly opened
-/// descriptor staged in `CloneFileSlot`, allowing `zip::ZipArchive<FsReader>`
+/// descriptor staged in its `CloneSlot`, allowing `zip::ZipArchive<FsReader>`
 /// to clone its parsed central directory (`Arc<ZipArchiveMetadata>`) in safe
 /// Rust without reparsing.
 #[derive(Debug)]
 pub(crate) struct FsReader {
     file: File,
-    clone_slot: Option<Arc<CloneFileSlot>>,
+    clone_slot: Option<Arc<CloneSlot<File>>>,
 }
 
 impl FsReader {
-    fn with_clone_slot(file: File, clone_slot: Arc<CloneFileSlot>) -> Self {
+    fn with_clone_slot(file: File, clone_slot: Arc<CloneSlot<File>>) -> Self {
         Self { file, clone_slot: Some(clone_slot) }
     }
 
@@ -240,7 +265,7 @@ impl BufferedZipArchive {
     /// Returns an error if the archive is not open (`is_none()`), if `index` is
     /// out of bounds, or if the entry's local file header is invalid.
     pub fn get_file_by_index_raw(&mut self, index: usize) -> Result<BufferedZipFile<'_>, ZipError> {
-        get_file_by_index_impl(&mut self.reader, index, true).map(BufferedZipFile::new)
+        get_file_by_index_impl(&mut self.reader, index, true).map(BufferedZipFile::new_raw)
     }
 
     /// Returns what the central directory records about the entry at `index`,
@@ -268,7 +293,7 @@ pub struct FsZipArchive {
     /// Identity of the file at `path` when it was opened, checked by
     /// `try_clone` against the reopened file. Zero until `open` succeeds.
     identity: FileIdentity,
-    clone_slot: Option<Arc<CloneFileSlot>>,
+    clone_slot: Option<Arc<CloneSlot<File>>>,
 }
 
 impl Debug for FsZipArchive {
@@ -312,7 +337,7 @@ impl FsZipArchive {
             .map_err(|e| ZipError::from_io_error(e).with_context("Failed to open zip archive"))?;
         let identity = FileIdentity::of(&file)
             .map_err(|e| ZipError::from_io_error(e).with_context("Failed to open zip archive"))?;
-        let clone_slot = Arc::new(CloneFileSlot::default());
+        let clone_slot = Arc::new(CloneSlot::default());
         let fs_reader = FsReader::with_clone_slot(file, Arc::clone(&clone_slot));
         let reader = WrappedZipArchive::new(fs_reader)
             .map_err(|e| ZipError::from_zip_error(e).with_context("Failed to open zip archive"))?;
@@ -366,7 +391,7 @@ impl FsZipArchive {
             )));
         }
         let archive = {
-            let _guard = clone_slot.lock.lock().expect("CloneFileSlot clone mutex poisoned");
+            let _guard = clone_slot.lock();
             clone_slot.stage(file);
             let archive = (**reader).clone();
             // `zip::ZipArchive::clone` clones its reader exactly once, which
@@ -423,7 +448,7 @@ impl FsZipArchive {
     /// Returns an error if the archive is not open (`is_none()`), if `index` is
     /// out of bounds, or if the entry's local file header is invalid.
     pub fn get_file_by_index_raw(&mut self, index: usize) -> Result<FsZipFile<'_>, ZipError> {
-        get_file_by_index_impl(&mut self.reader, index, true).map(FsZipFile::new)
+        get_file_by_index_impl(&mut self.reader, index, true).map(FsZipFile::new_raw)
     }
 
     /// Returns what the central directory records about the entry at `index`,
@@ -432,6 +457,257 @@ impl FsZipArchive {
     /// Prefer this to `get_file_by_index` when the entry's contents are not
     /// wanted: that one also reads the entry's local file header, so listing
     /// an archive with it costs one read per entry.
+    ///
+    /// Returns `FailedPrecondition` if the archive is not open and `OutOfRange`
+    /// if `index` is out of bounds.
+    pub fn get_entry_metadata(&self, index: usize) -> Result<ZipEntryMetadata, ZipError> {
+        self.central_directory.entry_metadata(index)
+    }
+}
+
+#[derive(Default)]
+pub struct CallbackZipArchive {
+    reader: Option<Box<WrappedZipArchive<CallbackReader>>>,
+    central_directory: CentralDirectory,
+    clone_slot: Option<Arc<CloneSlot<CallbackReader>>>,
+    /// Total number of bytes the archive was opened from, kept so that
+    /// `try_clone_with_callbacks` can reject a reader of a different length.
+    len: u64,
+}
+
+impl Debug for CallbackZipArchive {
+    fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
+        f.debug_struct("CallbackZipArchive")
+            .field(
+                "reader",
+                &if self.reader.is_some() { "Some(CallbackZipArchive)" } else { "None" },
+            )
+            .finish()
+    }
+}
+
+impl CallbackZipArchive {
+    /// Initializes an empty `CallbackZipArchive`.
+    ///
+    /// An archive created this way will be in an empty state. Use
+    /// `new_from_callbacks` to read an archive through callbacks.
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Creates an archive that reads its bytes by calling back into the caller.
+    ///
+    /// Opening only reads the end-of-central-directory record and the central
+    /// directory, so an archive held in remote storage does not have to be
+    /// downloaded in full; individual entries are fetched when they are opened.
+    ///
+    /// `read_at` must read up to `len` bytes from `context` starting at
+    /// `offset`, stage exactly the bytes it read with a single call to
+    /// [`crate::stage_callback_chunk`] (which replaces anything staged
+    /// before), and return their count; it must return 0 only at end of input,
+    /// and a negative value if the read failed. It may return fewer bytes than
+    /// requested. `size` must return the total number of bytes in the archive,
+    /// or a negative value on failure. `release` is called with `context`
+    /// exactly once, once this archive and all of its clones are gone; it is
+    /// called even if this function fails.
+    ///
+    /// Handles obtained through `try_clone` share `context` and may be used
+    /// from different threads at once, so `read_at` must be safe to call
+    /// concurrently with itself from any thread. `size` is called once, before
+    /// any clone exists, and `release` runs after the last clone is dropped, so
+    /// neither overlaps another callback. None of the callbacks may unwind
+    /// across FFI.
+    ///
+    /// Returns an error if the size cannot be determined or the bytes are not a
+    /// valid zip archive that starts at offset 0.
+    pub fn new_from_callbacks(
+        read_at: extern "C" fn(usize, u64, usize) -> i64,
+        size: extern "C" fn(usize) -> i64,
+        release: extern "C" fn(usize),
+        context: usize,
+    ) -> Result<CallbackZipArchive, ZipError> {
+        let reader = CallbackReader::try_new(read_at, size, release, context)?;
+        let len = reader.len();
+        let clone_slot = reader.clone_slot();
+        // With the default `ArchiveOffset::Detect`, zip 9.x locates the central
+        // directory by scanning the archive *forwards from byte 0*, i.e. it
+        // reads the whole archive just to open it. That defeats the purpose of
+        // a lazy, callback-backed reader, so require the archive to start at
+        // offset 0 (no prepended data), which only needs the end of the file.
+        let config = Config { archive_offset: ArchiveOffset::Known(0) };
+        let reader =
+            WrappedZipArchive::with_config(config, reader).map_err(ZipError::from_zip_error)?;
+        // zip 9.x does not hold an archive without entries to the known
+        // offset: with no central directory header to look for there, it
+        // accepts the archive wherever its end-of-central-directory record
+        // places it. Check the offset here, so that data in front of the
+        // archive is rejected whether or not the archive has entries.
+        if reader.offset() != 0 {
+            return Err(ZipError::invalid_argument(
+                "The zip archive does not start at offset 0 of the reader",
+            ));
+        }
+        Ok(Self {
+            central_directory: CentralDirectory::new(&reader),
+            reader: Some(Box::new(reader)),
+            clone_slot: Some(clone_slot),
+            len,
+        })
+    }
+
+    /// Returns an independent handle onto the same archive.
+    ///
+    /// Unlike `FsZipArchive::try_clone` this performs no I/O whatsoever: the
+    /// clone shares both the already parsed central directory and the callback
+    /// context, and only tracks its own read position. Use it when several
+    /// entries must be read at once, since `get_file_by_index` borrows the
+    /// archive mutably and so each concurrently open entry needs its own
+    /// handle.
+    ///
+    /// Returns an error if the archive is not open.
+    pub fn try_clone(&self) -> Result<CallbackZipArchive, ZipError> {
+        let (Some(reader), Some(clone_slot)) = (self.reader.as_ref(), self.clone_slot.as_ref())
+        else {
+            return Err(ZipError::failed_precondition("Zip archive is not open"));
+        };
+        let archive = {
+            let _guard = clone_slot.lock();
+            (**reader).clone()
+        };
+        Ok(CallbackZipArchive {
+            reader: Some(Box::new(archive)),
+            central_directory: self.central_directory.clone(),
+            clone_slot: Some(Arc::clone(clone_slot)),
+            len: self.len,
+        })
+    }
+
+    /// Returns an independent handle onto the same archive that reads through a
+    /// fresh set of callbacks.
+    ///
+    /// Like `try_clone` this reuses the central directory that
+    /// `new_from_callbacks` already parsed and so is O(1) in the number of
+    /// entries, but the new handle does not share the original's context. That
+    /// is what a caller wants when the context carries per-handle state such as
+    /// a read cache, which two handles reading two different entries would
+    /// otherwise thrash, or when the context is not thread-safe and the handles
+    /// are to be used from different threads.
+    ///
+    /// The new callbacks must uphold the same contract as `new_from_callbacks`
+    /// and serve the exact bytes the original ones did. The shared central
+    /// directory would otherwise describe byte ranges that do not hold the
+    /// entries it names. That cannot be checked in full, but a reader whose
+    /// `size` differs from the one this archive was opened from certainly does
+    /// not qualify and is rejected with `ZipErrorCode::InvalidArgument`.
+    ///
+    /// Returns `ZipErrorCode::FailedPrecondition` if the archive is not open,
+    /// `ZipErrorCode::Internal` if `size` fails, and
+    /// `ZipErrorCode::InvalidArgument` if `size` disagrees with the original.
+    /// `release` is called on `context` in every case, including failure.
+    pub fn try_clone_with_callbacks(
+        &self,
+        read_at: extern "C" fn(usize, u64, usize) -> i64,
+        size: extern "C" fn(usize) -> i64,
+        release: extern "C" fn(usize),
+        context: usize,
+    ) -> Result<CallbackZipArchive, ZipError> {
+        let (Some(original), Some(clone_slot)) = (self.reader.as_ref(), self.clone_slot.as_ref())
+        else {
+            // Ownership of `context` transferred on call, so release it before
+            // failing without invoking `size`.
+            release(context);
+            return Err(ZipError::failed_precondition("Zip archive is not open"));
+        };
+        let reader = CallbackReader::try_new(read_at, size, release, context)?;
+        // The contract above cannot be checked in full, but a reader of a
+        // different length certainly does not serve the same bytes, and this
+        // catches the common mistake of handing over the wrong object.
+        if reader.len() != self.len {
+            return Err(ZipError::invalid_argument(format!(
+                "The new reader has {} bytes but the archive was opened from {} bytes",
+                reader.len(),
+                self.len
+            )));
+        }
+        let next_clone_slot = reader.clone_slot();
+        let archive = {
+            let _guard = clone_slot.lock();
+            clone_slot.stage(reader);
+            let archive = (**original).clone();
+            // `zip::ZipArchive::clone` clones its reader exactly once, which
+            // adopts the staged reader. Anything still staged means it did not,
+            // and `archive` would share the original's context after all.
+            if clone_slot.take_staged().is_some() {
+                return Err(ZipError::internal(
+                    "zip::ZipArchive::clone did not take the staged reader",
+                ));
+            }
+            archive
+        };
+        Ok(CallbackZipArchive {
+            reader: Some(Box::new(archive)),
+            central_directory: self.central_directory.clone(),
+            clone_slot: Some(next_clone_slot),
+            len: self.len,
+        })
+    }
+
+    /// Returns whether the zip archive is none (due to being
+    /// default-constructed or moved-from).
+    #[must_use]
+    pub fn is_none(&self) -> bool {
+        self.reader.is_none()
+    }
+
+    /// Returns the number of files in the archive.
+    ///
+    /// The result is only valid if `is_none()` returns false.
+    #[must_use]
+    pub fn get_length(&self) -> usize {
+        self.central_directory.len()
+    }
+
+    /// Returns the comment of the zip archive.
+    ///
+    /// The result is only valid if `is_none()` returns false.
+    #[must_use]
+    pub fn get_comment(&self) -> VecU8 {
+        self.central_directory.comment()
+    }
+
+    /// Returns a zip file by its index.
+    ///
+    /// Returns an error if the archive is not open, `index` is out of bounds,
+    /// or the entry's local file header is invalid or unsupported. Opening an
+    /// entry reads its local file header through the callbacks, so a failing
+    /// `read_at` is also reported here.
+    pub fn get_file_by_index(&mut self, index: usize) -> Result<CallbackZipFile<'_>, ZipError> {
+        get_file_by_index_impl(&mut self.reader, index, false).map(CallbackZipFile::new)
+    }
+
+    /// Returns a raw (compressed) zip file by its index.
+    ///
+    /// Warning: Writers in zip-rs do not support writing compressed data as-is.
+    /// This data will be compressed again when writing.
+    ///
+    /// Returns an error if the archive is not open, `index` is out of bounds,
+    /// or the entry's local file header is invalid. Opening an entry reads its
+    /// local file header through the callbacks, so a failing `read_at` is also
+    /// reported here.
+    pub fn get_file_by_index_raw(&mut self, index: usize) -> Result<CallbackZipFile<'_>, ZipError> {
+        get_file_by_index_impl(&mut self.reader, index, true).map(CallbackZipFile::new_raw)
+    }
+
+    /// Returns what the central directory records about the entry at `index`,
+    /// without reading anything.
+    ///
+    /// Prefer this to `get_file_by_index` when the entry's contents are not
+    /// wanted: that one also reads the entry's local file header, so listing
+    /// an archive with it costs one read per entry. For this archive the
+    /// reads go through the caller's callbacks, which is typically a network,
+    /// so listing with `get_file_by_index` costs one round trip per entry.
+    /// Usable while an entry is open.
     ///
     /// Returns `FailedPrecondition` if the archive is not open and `OutOfRange`
     /// if `index` is out of bounds.
@@ -675,7 +951,10 @@ mod tests {
         use super::*;
     use crate::{BufferedZipWriter, CompressionMethod, ZipErrorCode, ZipWriterFileOptions};
     use googletest::prelude::*;
+    use std::collections::HashMap;
     use std::io::Write;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::LazyLock;
 
     fn create_test_zip() -> VecU8 {
         let mut writer = BufferedZipWriter::new_from_data(VecU8::default(), false).unwrap();
@@ -733,6 +1012,188 @@ mod tests {
     fn test_fs_archive_try_clone_fails_when_not_open() {
         let archive = FsZipArchive::new();
         expect_eq!(archive.try_clone().unwrap_err().code, ZipErrorCode::FailedPrecondition);
+    }
+
+    /// Callback context over an owned byte buffer, for `CallbackZipArchive`
+    /// tests. The `CallbackReader` tests cover the reader itself; here the
+    /// callbacks only need to serve bytes.
+    struct BytesContext {
+        data: Vec<u8>,
+    }
+
+    static NEXT_BYTES_TOKEN: AtomicUsize = AtomicUsize::new(1);
+    static BYTES_CONTEXTS: LazyLock<Mutex<HashMap<usize, BytesContext>>> =
+        LazyLock::new(|| Mutex::new(HashMap::new()));
+
+    extern "C" fn bytes_read_at(token: usize, offset: u64, len: usize) -> i64 {
+        let contexts = BYTES_CONTEXTS.lock().unwrap();
+        let data = &contexts.get(&token).expect("live BytesContext").data;
+        let offset = offset as usize;
+        if offset >= data.len() {
+            return 0;
+        }
+        let len = len.min(data.len() - offset);
+        if len > 0 {
+            crate::stage_callback_chunk(&data[offset..offset + len]);
+        }
+        len as i64
+    }
+
+    extern "C" fn bytes_size(token: usize) -> i64 {
+        let contexts = BYTES_CONTEXTS.lock().unwrap();
+        contexts.get(&token).expect("live BytesContext").data.len() as i64
+    }
+
+    extern "C" fn bytes_release(token: usize) {
+        BYTES_CONTEXTS.lock().unwrap().remove(&token).expect("BytesContext released once");
+    }
+
+    fn bytes_context(data: Vec<u8>) -> usize {
+        let token = NEXT_BYTES_TOKEN.fetch_add(1, Ordering::Relaxed);
+        BYTES_CONTEXTS.lock().unwrap().insert(token, BytesContext { data });
+        token
+    }
+
+    #[gtest]
+    fn test_callback_archive_rejects_a_clone_reader_of_a_different_length() {
+        let data = create_test_zip().as_slice().to_vec();
+        let archive = CallbackZipArchive::new_from_callbacks(
+            bytes_read_at,
+            bytes_size,
+            bytes_release,
+            bytes_context(data.clone()),
+        )
+        .unwrap();
+
+        // A reader over the same bytes is accepted, serves the entries, and can
+        // itself be cloned via both `try_clone` and `try_clone_with_callbacks`.
+        let mut same = archive
+            .try_clone_with_callbacks(
+                bytes_read_at,
+                bytes_size,
+                bytes_release,
+                bytes_context(data.clone()),
+            )
+            .unwrap();
+        let mut same_clone = same.try_clone().unwrap();
+        let mut same_replaced = same
+            .try_clone_with_callbacks(
+                bytes_read_at,
+                bytes_size,
+                bytes_release,
+                bytes_context(data.clone()),
+            )
+            .unwrap();
+        {
+            let mut file = same.get_file_by_index(0).unwrap();
+            expect_eq!(file.get_file_data().unwrap().as_slice(), b"Hello, world!");
+        }
+        {
+            let mut file = same_clone.get_file_by_index(1).unwrap();
+            expect_eq!(file.get_file_data().unwrap().as_slice(), b"Second file content");
+        }
+        {
+            let mut file = same_replaced.get_file_by_index(0).unwrap();
+            expect_eq!(file.get_file_data().unwrap().as_slice(), b"Hello, world!");
+        }
+
+        // One byte more and the new reader cannot be serving the archive the
+        // shared central directory describes, so it is rejected up front rather
+        // than yielding garbled entries later.
+        let mut longer = data.clone();
+        longer.push(b'x');
+        let err = archive
+            .try_clone_with_callbacks(
+                bytes_read_at,
+                bytes_size,
+                bytes_release,
+                bytes_context(longer),
+            )
+            .unwrap_err();
+        expect_eq!(err.code, ZipErrorCode::InvalidArgument);
+    }
+
+    #[gtest]
+    fn test_callback_archive_rejects_data_in_front_of_an_archive_without_entries() {
+        let empty =
+            BufferedZipWriter::new_from_data(VecU8::default(), false).unwrap().finish().unwrap();
+        let empty = empty.as_slice().to_vec();
+        let archive = CallbackZipArchive::new_from_callbacks(
+            bytes_read_at,
+            bytes_size,
+            bytes_release,
+            bytes_context(empty.clone()),
+        )
+        .unwrap();
+        expect_eq!(archive.get_length(), 0);
+
+        // An archive without entries has no central directory header that
+        // could be found missing at offset 0, so `zip` accepts it wherever it
+        // starts; the offset has to be checked on top.
+        let mut prefixed = b"self-extracting stub ".to_vec();
+        prefixed.extend_from_slice(&empty);
+        let token = bytes_context(prefixed);
+        let err =
+            CallbackZipArchive::new_from_callbacks(bytes_read_at, bytes_size, bytes_release, token)
+                .unwrap_err();
+        expect_eq!(err.code, ZipErrorCode::InvalidArgument);
+        expect_false!(err.is_reader_callback_failure());
+        // The rejected context is released all the same.
+        expect_false!(BYTES_CONTEXTS.lock().unwrap().contains_key(&token));
+    }
+
+    #[gtest]
+    fn test_callback_archive_try_clone_fails_when_not_open() {
+        let archive = CallbackZipArchive::new();
+        expect_eq!(archive.try_clone().unwrap_err().code, ZipErrorCode::FailedPrecondition);
+    }
+
+    #[gtest]
+    fn test_callback_archive_try_clone_with_callbacks_when_not_open_skips_size_and_releases() {
+        struct ProbeContext {
+            size_calls: Arc<AtomicUsize>,
+            release_calls: Arc<AtomicUsize>,
+        }
+
+        static NEXT_PROBE_TOKEN: AtomicUsize = AtomicUsize::new(1);
+        static PROBE_CONTEXTS: LazyLock<Mutex<HashMap<usize, ProbeContext>>> =
+            LazyLock::new(|| Mutex::new(HashMap::new()));
+
+        extern "C" fn probe_size(token: usize) -> i64 {
+            let probes = PROBE_CONTEXTS.lock().unwrap();
+            probes
+                .get(&token)
+                .expect("live ProbeContext")
+                .size_calls
+                .fetch_add(1, Ordering::Relaxed);
+            -1
+        }
+
+        extern "C" fn probe_release(token: usize) {
+            let probe =
+                PROBE_CONTEXTS.lock().unwrap().remove(&token).expect("ProbeContext released once");
+            probe.release_calls.fetch_add(1, Ordering::Relaxed);
+        }
+
+        let size_calls = Arc::new(AtomicUsize::new(0));
+        let release_calls = Arc::new(AtomicUsize::new(0));
+        let token = NEXT_PROBE_TOKEN.fetch_add(1, Ordering::Relaxed);
+        PROBE_CONTEXTS.lock().unwrap().insert(
+            token,
+            ProbeContext {
+                size_calls: Arc::clone(&size_calls),
+                release_calls: Arc::clone(&release_calls),
+            },
+        );
+
+        let archive = CallbackZipArchive::new();
+        let err = archive
+            .try_clone_with_callbacks(bytes_read_at, probe_size, probe_release, token)
+            .unwrap_err();
+
+        expect_eq!(err.code, ZipErrorCode::FailedPrecondition);
+        expect_eq!(size_calls.load(Ordering::Relaxed), 0);
+        expect_eq!(release_calls.load(Ordering::Relaxed), 1);
     }
 
     #[gtest]

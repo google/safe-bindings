@@ -69,7 +69,8 @@ class ZipWriterFileOptions {
 //   data). `WriteFileContent` validates and opens `path` before that check, so
 //   an empty, embedded-NUL or non-UTF-8 `path` still returns kInvalidArgument
 //   and an unreadable one its OS error (such as kNotFound or
-//   kPermissionDenied).
+//   kPermissionDenied). `WriteZipFileContent` returns the RandomAccessReader's
+//   own status if reading an entry of a FromReader archive fails.
 // - `SetComment(comment)` stores the archive comment that `Finish()` writes;
 //   `comment` must be at most 65535 bytes (the zip format's u16 limit),
 //   otherwise kInvalidArgument is returned and the previously set comment is
@@ -192,7 +193,9 @@ class ZipWriter final {
 // right after AddDirectory() (a directory entry takes no data).
 // WriteFileContent() validates and opens `path` before that check, so an empty,
 // embedded-NUL or non-UTF-8 `path` still returns kInvalidArgument and an
-// unreadable one its OS error.
+// unreadable one its OS error. WriteZipFileContent() returns the
+// RandomAccessReader's own status if reading an entry of a FromReader archive
+// fails.
 // Because the sink is not seekable, every entry is written with general
 // purpose bit 3 set, local-header CRC-32 and sizes zeroed, and the actual
 // CRC-32/sizes in a trailing data descriptor. Such an archive must be read
