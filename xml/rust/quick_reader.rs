@@ -10,7 +10,7 @@ use quick_xml::{
     reader::{NsReader, Reader as PlainReader},
     Error as QuickXmlError,
 };
-use std::{borrow::Cow, io, ops::Deref, str};
+use std::{io, ops::Deref, str};
 use crate::xml_util::is_valid_ncname;
 use xmlparser::XmlCharExt;
 
@@ -92,13 +92,26 @@ fn normalize_line_endings(mut input: &[u8]) -> Vec<u8> {
 /// It turns all whitespace into spaces. Interestingly, libxml2 does not seem to collapse those
 /// into a single space, so it's not done here either.
 fn normalize_whitespace(input: &[u8]) -> Vec<u8> {
-    let mut bytes = normalize_line_endings(input);
-    for byte in bytes.iter_mut() {
-        if byte.is_ascii_whitespace() {
-            *byte = b' ';
+    let mut output = Vec::with_capacity(input.len());
+    append_normalized_whitespace(input, &mut output);
+    output
+}
+
+/// Appends `input` to `output` with its whitespace normalized as by `normalize_whitespace`: each
+/// line break (CR LF, CR or LF) and each other whitespace character becomes a single space.
+fn append_normalized_whitespace(mut input: &[u8], output: &mut Vec<u8>) {
+    output.reserve(input.len());
+    while let Some((&byte, rest)) = input.split_first() {
+        input = rest;
+        if byte == b'\r' {
+            input = input.strip_prefix(b"\n").unwrap_or(input);
+            output.push(b' ');
+        } else if byte.is_ascii_whitespace() {
+            output.push(b' ');
+        } else {
+            output.push(byte);
         }
     }
-    bytes
 }
 
 /// Computes (local name is valid, prefix is valid) for a given `QName`.
@@ -183,22 +196,27 @@ fn expand(entity: &[u8]) -> anyhow::Result<Vec<u8>> {
     }
 }
 
-// Replaces all entity references in `attribute_value` using `expand` (above). If finding entities
-// fails, returns the original attribute value. If the attribute value contains a '<' (signalling an
-// invalid attribute value), returns an error.
-fn expand_entities_in_attribute_value(attribute_value: &[u8]) -> anyhow::Result<Cow<'_, [u8]>> {
+// Normalizes `attribute_value` as https://www.w3.org/TR/xml/#AVNormalize says: whitespace written
+// as such (including line breaks) becomes spaces (see `normalize_whitespace`), and references are
+// replaced by what they refer to, which is not normalized, so `&#10;` stays a line break.
+// References are replaced using `expand` (above). If finding references fails, returns the
+// original attribute value with its whitespace normalized. If the attribute value contains a '<'
+// (signalling an invalid attribute value), returns an error.
+fn normalize_attribute_value(attribute_value: &[u8]) -> anyhow::Result<Vec<u8>> {
     // Attribute values must not contain '<' (see https://www.w3.org/TR/xml/#NT-AttValue), so
     // parsing them as XML yields a sequence of Text and GeneralRef events only. This is exactly
-    // what is needed in this function: Text are passed through, entities are expanded.
+    // what is needed in this function: Text is normalized, entities are expanded.
     if attribute_value.contains(&b'<') {
         return Err(anyhow::anyhow!("Invalid attribute value: contains '<'"));
     }
     // Check for early exit to avoid running a nested parser. If there is no `&` in the attribute
     // value, then there are no entities to expand.
     if !attribute_value.contains(&b'&') {
-        return Ok(Cow::Borrowed(attribute_value));
+        return Ok(normalize_whitespace(attribute_value));
     }
-    let mut result = Vec::new();
+    // References are at least as long as what they are replaced by, so `result` never grows past
+    // this capacity.
+    let mut result = Vec::with_capacity(attribute_value.len());
     // `PlainReader` starts in `ParseState::Init`, which strips a single leading UTF-8 BOM
     // (`\u{FEFF}`) as if `attribute_value` were the start of an XML document. Preserve it here.
     let bom = "\u{FEFF}".as_bytes();
@@ -211,14 +229,16 @@ fn expand_entities_in_attribute_value(attribute_value: &[u8]) -> anyhow::Result<
         match reader.read_event() {
             Ok(event) => match event {
                 Event::Text(ref bytes_text) => {
-                    result.extend_from_slice(bytes_text.deref().as_bytes());
+                    append_normalized_whitespace(bytes_text.deref().as_bytes(), &mut result);
                 }
                 Event::GeneralRef(bytes_ref) => {
                     let entity_name = bytes_ref.deref().as_bytes();
                     let expanded = expand(entity_name)?;
                     if expanded.is_empty() {
+                        // Kept as written. quick-xml does not check that it is a valid name, so it
+                        // can contain whitespace (e.g. "&a b;"), which is normalized as text.
                         result.push(b'&');
-                        result.extend_from_slice(entity_name);
+                        append_normalized_whitespace(entity_name, &mut result);
                         result.push(b';');
                     } else {
                         result.extend_from_slice(&expanded);
@@ -227,10 +247,10 @@ fn expand_entities_in_attribute_value(attribute_value: &[u8]) -> anyhow::Result<
                 Event::Eof => break,
                 _ => {}
             },
-            Err(_) => return Ok(Cow::Borrowed(attribute_value)),
+            Err(_) => return Ok(normalize_whitespace(attribute_value)),
         }
     }
-    Ok(Cow::Owned(result))
+    Ok(result)
 }
 
 /// [Attributes] wraps `QuickAttributes` to allow bridging into C++.
@@ -261,8 +281,8 @@ impl<'a> Iterator for Attributes<'a> {
             let attr_result = inner.next()?;
             match attr_result {
                 Ok(attr) => {
-                    let expanded = match expand_entities_in_attribute_value(attr.value.as_bytes()) {
-                        Ok(expanded) => expanded,
+                    let value = match normalize_attribute_value(attr.value.as_bytes()) {
+                        Ok(value) => value,
                         Err(err) => return Some(Err(err.to_string().into())),
                     };
                     let (local_name_valid, prefix_valid) = compute_validity(&attr.key);
@@ -281,8 +301,7 @@ impl<'a> Iterator for Attributes<'a> {
                     }
                     return Some(Ok(Attribute {
                         key: attr.key.into_inner().into(),
-                        // https://www.w3.org/TR/xml/#AVNormalize says to expand entities before normalizing whitespace.
-                        value: normalize_whitespace(&expanded),
+                        value,
                         local_name_valid,
                         prefix_valid,
                     }));
