@@ -2,7 +2,7 @@
 // FsZipWriter, BufferedZipStreamWriter and FsZipStreamWriter are implemented
 // manually.
 
-use crate::{BufferedZipFile, FsZipFile, VecU8, ZipError};
+use crate::{BufferedZipFile, CallbackZipFile, FsZipFile, VecU8, ZipError};
 use std::fmt::{Debug, Formatter};
 use std::fs::{File, OpenOptions};
 use std::io::{copy, BufWriter, Cursor, Read, Seek, Write};
@@ -272,6 +272,15 @@ impl BufferedZipWriter {
         do_copy_impl(&mut self.writer, file)
     }
 
+    /// Writes file content from a `CallbackZipFile` to the current file in the
+    /// zip archive.
+    pub fn write_callback_zip_file_content(
+        &mut self,
+        file: &mut CallbackZipFile,
+    ) -> Result<(), ZipError> {
+        do_copy_impl(&mut self.writer, file)
+    }
+
     /// Writes file content from a path to the current file in the zip archive.
     pub fn write_file_content(&mut self, path: &[u8]) -> Result<(), ZipError> {
         write_file_content_impl(&mut self.writer, path)
@@ -398,6 +407,15 @@ impl FsZipWriter {
 
     /// Writes file content from a `FsZipFile` to the current file in the zip archive.
     pub fn write_fs_zip_file_content(&mut self, file: &mut FsZipFile) -> Result<(), ZipError> {
+        do_copy_impl(&mut self.writer, file)
+    }
+
+    /// Writes file content from a `CallbackZipFile` to the current file in the
+    /// zip archive.
+    pub fn write_callback_zip_file_content(
+        &mut self,
+        file: &mut CallbackZipFile,
+    ) -> Result<(), ZipError> {
         do_copy_impl(&mut self.writer, file)
     }
 
@@ -654,6 +672,15 @@ impl BufferedZipStreamWriter {
         do_copy_impl(&mut self.writer, file)
     }
 
+    /// Writes file content from a `CallbackZipFile` to the current file in the
+    /// zip archive.
+    pub fn write_callback_zip_file_content(
+        &mut self,
+        file: &mut CallbackZipFile,
+    ) -> Result<(), ZipError> {
+        do_copy_impl(&mut self.writer, file)
+    }
+
     /// Writes file content from a path to the current file in the zip archive.
     pub fn write_file_content(&mut self, path: &[u8]) -> Result<(), ZipError> {
         write_file_content_impl(&mut self.writer, path)
@@ -780,6 +807,15 @@ impl FsZipStreamWriter {
 
     /// Writes file content from a `FsZipFile` to the current file in the zip archive.
     pub fn write_fs_zip_file_content(&mut self, file: &mut FsZipFile) -> Result<(), ZipError> {
+        do_copy_impl(&mut self.writer, file)
+    }
+
+    /// Writes file content from a `CallbackZipFile` to the current file in the
+    /// zip archive.
+    pub fn write_callback_zip_file_content(
+        &mut self,
+        file: &mut CallbackZipFile,
+    ) -> Result<(), ZipError> {
         do_copy_impl(&mut self.writer, file)
     }
 

@@ -6,6 +6,7 @@
 
 #include "converters.h"
 #include "file.h"
+#include "reader_status.h"
 #include "crubit/rust.h"
 #include "absl/functional/overload.h"
 #include "absl/status/status.h"
@@ -20,14 +21,23 @@ struct ZipFileWriterPeer {
   template <typename RustWriter>
   static absl::Status WriteZipFileContent(RustWriter& writer, ZipFile& file) {
     return std::visit(
-        absl::Overload{[&](BufferedZipFile& file) {
-                         return FromRustResultUnit(
-                             writer.write_buffered_zip_file_content(file.zip_));
-                       },
-                       [&](FsZipFile& file) {
-                         return FromRustResultUnit(
-                             writer.write_fs_zip_file_content(file.zip_));
-                       }},
+        absl::Overload{
+            [&](BufferedZipFile& file) {
+              return FromRustResultUnit(
+                  writer.write_buffered_zip_file_content(file.zip_));
+            },
+            [&](FsZipFile& file) {
+              return FromRustResultUnit(
+                  writer.write_fs_zip_file_content(file.zip_));
+            },
+            [&](CallbackZipFile& file) {
+              // Reads through the caller's RandomAccessReader; see
+              // security/zip/reader_status.h for the status hand-off.
+              return internal::ThroughReader([&] {
+                return FromRustResultUnit(
+                    writer.write_callback_zip_file_content(file.zip_));
+              });
+            }},
         file.zip_);
   }
 };

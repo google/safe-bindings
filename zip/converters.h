@@ -110,6 +110,9 @@ absl::StatusOr<rust::BufferedZipArchive> FromRustBufferedZipArchive(
 absl::StatusOr<rust::FsZipArchive> FromRustFsZipArchive(
     rs_std::Result<rust::FsZipArchive, rust::ZipError>
         result_fs_zip_archive);
+absl::StatusOr<rust::CallbackZipArchive> FromRustCallbackZipArchive(
+    rs_std::Result<rust::CallbackZipArchive, rust::ZipError>
+        result_callback_zip_archive);
 
 absl::StatusOr<rust::BufferedZipFile> FromRustBufferedZipFile(
     rs_std::Result<rust::BufferedZipFile, rust::ZipError>
@@ -117,6 +120,10 @@ absl::StatusOr<rust::BufferedZipFile> FromRustBufferedZipFile(
 absl::StatusOr<rust::FsZipFile> FromRustFsZipFile(
     rs_std::Result<rust::FsZipFile, rust::ZipError>
         result_fs_zip_file);
+absl::StatusOr<rust::CallbackZipFile> FromRustCallbackZipFile(
+    rs_std::Result<rust::CallbackZipFile, rust::ZipError>
+        result_callback_zip_file);
+
 absl::StatusOr<rust::ZipEntryMetadata> FromRustZipEntryMetadata(
     rs_std::Result<rust::ZipEntryMetadata, rust::ZipError>
         result_zip_entry_metadata);
