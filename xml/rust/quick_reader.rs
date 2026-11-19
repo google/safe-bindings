@@ -206,10 +206,9 @@ fn expand_entities_in_attribute_value(attribute_value: &[u8]) -> anyhow::Result<
         result.extend_from_slice(bom);
     }
     let mut reader = PlainReader::from_reader(attribute_value);
-    let mut buf = Vec::new();
 
     loop {
-        match reader.read_event_into(&mut buf) {
+        match reader.read_event() {
             Ok(event) => match event {
                 Event::Text(ref bytes_text) => {
                     result.extend_from_slice(bytes_text.deref().as_bytes());
@@ -230,7 +229,6 @@ fn expand_entities_in_attribute_value(attribute_value: &[u8]) -> anyhow::Result<
             },
             Err(_) => return Ok(Cow::Borrowed(attribute_value)),
         }
-        buf.clear();
     }
     Ok(Cow::Owned(result))
 }
