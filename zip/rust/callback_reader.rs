@@ -2,15 +2,20 @@
 // a zip archive can be built on needs its own set of wrapper types. This module
 // provides the reader that delegates to caller-supplied C callbacks, which is
 // what lets C++ open an archive over storage this crate knows nothing about
-// (for example a remote object read in ranges). The archive and file types
-// built on it are added in a follow-up change.
+// (for example a remote object read in ranges). `CallbackZipArchive` and
+// `CallbackZipFile` are the archive and file types built on it.
 
+use crate::read::CloneSlot;
 use crate::ZipError;
 use std::cell::RefCell;
-use std::fmt::{Debug, Formatter};
+use std::fmt::{Debug, Display, Formatter};
 use std::io::{Error, ErrorKind, Read, Result as IoResult, Seek, SeekFrom};
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
+// NOTE(b/553659636): Evaluate replacing these callbacks, the `usize` context
+// token and the thread-local staging buffer with a Crubit callable (`rs::Fn`),
+// once that is confirmed to work with a `&mut [u8]` argument and with the OSS
+// Corrosion build in `safe_bindings`.
 pub(crate) type ReadAtCallback = extern "C" fn(usize, u64, usize) -> i64;
 pub(crate) type SizeCallback = extern "C" fn(usize) -> i64;
 pub(crate) type ReleaseCallback = extern "C" fn(usize);
@@ -48,12 +53,104 @@ fn clear_staged_read_bytes() {
 /// Stages the bytes read by the active `read_at` callback on the current thread
 /// so `CallbackReader::read` can copy them into its destination slice without
 /// passing raw pointers across FFI.
-pub(crate) fn stage_callback_chunk(data: &[u8]) {
+pub fn stage_callback_chunk(data: &[u8]) {
     STAGED_READ_BYTES.with(|cell| {
         let mut staged = cell.borrow_mut();
         staged.clear();
         staged.extend_from_slice(data);
     });
+}
+
+/// What can go wrong with one `read_at` call.
+#[derive(Clone, Copy, Debug)]
+enum ReadFault {
+    /// `read_at` reported a failure.
+    Failed,
+    /// `read_at` returned no bytes. It is only asked for bytes that `size` said
+    /// are there, so this is not the end of the input. Passing it on as the
+    /// end would make the input look shorter than it is, which not everything
+    /// that reads through the reader would notice: an entry read raw has no
+    /// checksum that could fail.
+    NoBytes,
+    /// `read_at` returned more bytes than it was asked for. Trusting that
+    /// would mean reporting bytes it never wrote.
+    TooManyBytes,
+    /// `read_at` staged a number of bytes other than the one it returned.
+    StagedCountMismatch,
+}
+
+/// The text of the error that a `read_at` call which returned no bytes is
+/// reported with.
+const NO_BYTES_MESSAGE: &str =
+    "The zip archive read callback returned no bytes before the end of the input";
+
+impl From<ReadFault> for Error {
+    fn from(fault: ReadFault) -> Self {
+        match fault {
+            ReadFault::Failed => Error::other(CallbackFailed),
+            ReadFault::NoBytes => Error::new(ErrorKind::UnexpectedEof, NO_BYTES_MESSAGE),
+            ReadFault::TooManyBytes => Error::new(
+                ErrorKind::InvalidData,
+                "The zip archive read callback reported reading more bytes than requested",
+            ),
+            ReadFault::StagedCountMismatch => Error::new(
+                ErrorKind::InvalidData,
+                "The zip archive read callback staged a byte count that does not match its return value",
+            ),
+        }
+    }
+}
+
+/// Keeps the opening of an archive from reading on after a read has gone
+/// wrong.
+///
+/// The `zip` crate does not propagate every error of a read: while it locates
+/// the central directory it treats some of them like data that is not what it
+/// expected and carries on, reading more. The open therefore watches the
+/// reader that it opens the archive through (`CallbackReader::watch`). From
+/// the first read of that reader that goes wrong (see `ReadFault`), every read
+/// of it that would call `read_at` fails the same way instead, so `zip` gives
+/// up at no further cost and that first fault stays the last thing the
+/// callbacks did. The watch then tells the open what went wrong, if anything
+/// did; see `CallbackZipArchive::new_from_callbacks`.
+///
+/// A read that goes wrong on a reader that is not watched has no effect on
+/// later ones. That is every reader but the one an archive is being opened
+/// through: a clone is never watched, and the archive that the open returns
+/// reads through a clone. A read of an open archive can therefore be retried.
+///
+/// The fault is written once and never cleared. It sits behind an `Arc`
+/// because the open still asks for it after `zip` has dropped the reader of an
+/// open that failed.
+#[derive(Clone, Debug, Default)]
+pub(crate) struct OpenWatch(Arc<OnceLock<ReadFault>>);
+
+impl OpenWatch {
+    /// If a read of the watched reader has gone wrong, returns the error that
+    /// the open fails with.
+    pub(crate) fn check(&self) -> Result<(), ZipError> {
+        match self.fault() {
+            None => Ok(()),
+            // Input that ends before its size says it does is not a valid
+            // archive, which is also what the open reports where `zip` itself
+            // finds the archive cut short.
+            Some(ReadFault::NoBytes) => Err(ZipError::invalid_argument(NO_BYTES_MESSAGE)),
+            Some(fault) => Err(ZipError::from_io_error(Error::from(fault))),
+        }
+    }
+
+    /// Records that a read went wrong. Does nothing once the watch holds an
+    /// earlier fault.
+    fn record(&self, fault: ReadFault) {
+        // Setting fails exactly when an earlier fault is held, which stays.
+        let _ = self.0.set(fault);
+    }
+
+    /// Returns what went wrong first, if anything has.
+    #[must_use]
+    fn fault(&self) -> Option<ReadFault> {
+        self.0.get().copied()
+    }
 }
 
 /// The callbacks and the opaque caller token they operate on.
@@ -78,19 +175,48 @@ impl Drop for CallbackContext {
     }
 }
 
+/// The payload of the `io::Error` that `CallbackReader::read` returns when
+/// `read_at` reports a failure, so that `ZipError::from_io_error` can tell a
+/// failed callback apart from any other I/O error the `zip` crate reports.
+///
+/// The distinction matters to the C++ side: a failed callback has left the
+/// reader's own status behind for the caller to pick up, whereas an error the
+/// archive raised on its own must be reported as is.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct CallbackFailed;
+
+/// The `Display` text of `CallbackFailed`. `ZipError::from_io_error` also
+/// recognises it by this text, because some code between `CallbackReader` and
+/// `from_io_error` rebuilds `io::Error`s from their `Display` output and so
+/// drops the `CallbackFailed` payload: `lzma_rust2`'s `StickyError` (every
+/// LZMA entry read past the decoder's first buffer fill) and
+/// `zip::result::ZipError::clone()`.
+pub(crate) const CALLBACK_FAILED_MESSAGE: &str = "The zip archive read callback failed";
+
+impl Display for CallbackFailed {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.write_str(CALLBACK_FAILED_MESSAGE)
+    }
+}
+
+impl std::error::Error for CallbackFailed {}
+
 /// A seekable reader whose bytes come from caller-supplied callbacks.
 ///
 /// Cloning is cheap and performs no I/O: clones share one context and one
 /// cached length, and only the read position is per-clone. That is what lets
-/// the archive type built on it in a follow-up change offer a free
-/// `try_clone`, which in turn lets a caller hold one archive handle per
-/// concurrently open entry.
+/// `CallbackZipArchive::try_clone` be free, which in turn lets a caller hold
+/// one archive handle per concurrently open entry. A clone adopts whatever
+/// `CallbackReader` is staged in its `CloneSlot` instead, which is how
+/// `CallbackZipArchive::try_clone_with_callbacks` moves the parsed central
+/// directory onto a different set of callbacks.
 ///
 /// `pub(crate)` rather than `pub`: Crubit cannot bind the `Read`/`Seek` traits,
 /// so C++ only ever sees the archive wrappers built on top of this reader.
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub(crate) struct CallbackReader {
     context: Arc<CallbackContext>,
+    clone_slot: Arc<CloneSlot<CallbackReader>>,
     /// Total number of bytes available.
     ///
     /// Queried once at construction rather than per seek. The input is
@@ -102,6 +228,28 @@ pub(crate) struct CallbackReader {
     /// Offset the next `read` starts at. May exceed `len`, in which case reads
     /// report end of input.
     pos: u64,
+    /// The watch that the opening of an archive keeps over this reader, if it
+    /// is the reader of an open in progress. See `OpenWatch`.
+    open_watch: Option<OpenWatch>,
+}
+
+impl Clone for CallbackReader {
+    fn clone(&self) -> Self {
+        // A clone is never watched, whichever reader it comes from. Only the
+        // open of an archive wants its reader watched, and once it is over it
+        // keeps a clone of what it opened; that is how the reads of an open
+        // archive come to be free of the watch. See `OpenWatch`.
+        if let Some(replacement) = self.clone_slot.take_staged() {
+            return Self { open_watch: None, ..replacement };
+        }
+        Self {
+            context: Arc::clone(&self.context),
+            clone_slot: Arc::clone(&self.clone_slot),
+            len: self.len,
+            pos: self.pos,
+            open_watch: None,
+        }
+    }
 }
 
 impl CallbackReader {
@@ -111,12 +259,13 @@ impl CallbackReader {
     /// `read_at` must read up to `len` bytes from `context` starting at
     /// `offset`, stage exactly the bytes it read with a single call to
     /// [`stage_callback_chunk`] (which replaces anything staged before), and
-    /// return their count; it must return 0 only at end of input, and a
-    /// negative value if the read failed. It may return fewer bytes than
-    /// requested. `size` must return the total number of bytes available, or a
-    /// negative value on failure. `release` is called with `context` exactly
-    /// once: after the last clone of the reader is dropped, or before this
-    /// function returns an error.
+    /// return their count, or a negative value if the read failed. It may
+    /// return fewer bytes than requested, but not 0: it is only asked for
+    /// bytes that `size` said are there, so a count of 0 is reported as
+    /// truncated input. `size` must return the total number of bytes
+    /// available, or a negative value on failure. `release` is called with
+    /// `context` exactly once: after the last clone of the reader is dropped,
+    /// or before this function returns an error.
     ///
     /// Because clones of this reader share `context` and may be used from
     /// different threads at once (one archive handle per concurrently open
@@ -136,9 +285,22 @@ impl CallbackReader {
         // `size` is only ever called here, so it is not kept.
         let len = size(context.context);
         if len < 0 {
-            return Err(ZipError::internal("Failed to determine the size of the zip archive"));
+            return Err(ZipError::internal("Failed to determine the size of the zip archive")
+                .caused_by_reader_callback());
         }
-        Ok(Self { context, len: len as u64, pos: 0 })
+        Ok(Self {
+            context,
+            clone_slot: Arc::new(CloneSlot::default()),
+            len: len as u64,
+            pos: 0,
+            open_watch: None,
+        })
+    }
+
+    /// The slot a replacement reader is staged in for `clone` to adopt.
+    #[must_use]
+    pub(crate) fn clone_slot(&self) -> Arc<CloneSlot<CallbackReader>> {
+        Arc::clone(&self.clone_slot)
     }
 
     /// Returns the total number of bytes available, as reported by `size` when
@@ -147,13 +309,20 @@ impl CallbackReader {
     pub(crate) fn len(&self) -> u64 {
         self.len
     }
-}
 
-impl Read for CallbackReader {
-    fn read(&mut self, buf: &mut [u8]) -> IoResult<usize> {
-        if buf.is_empty() || self.pos >= self.len {
-            return Ok(0);
-        }
+    /// Puts this reader, which an archive is about to be opened through, under
+    /// a watch and returns that watch. See `OpenWatch`.
+    #[must_use]
+    pub(crate) fn watch(&mut self) -> OpenWatch {
+        let open_watch = OpenWatch::default();
+        self.open_watch = Some(open_watch.clone());
+        open_watch
+    }
+
+    /// Calls `read_at` for the bytes at the current position, which must be
+    /// before the end, and copies what it staged into `buf`, which must not be
+    /// empty. Returns how many bytes that is. Does not move the position.
+    fn call_read_at(&self, buf: &mut [u8]) -> Result<usize, ReadFault> {
         // Never ask for more than what remains. The caller's `read_at` is also
         // expected to stop at the end, but clamping here means a caller that
         // clamps differently still cannot make this reader advance past `len`.
@@ -171,36 +340,66 @@ impl Read for CallbackReader {
             .min(MAX_READ_CHUNK_SIZE);
         clear_staged_read_bytes();
         let read = (self.context.read_at)(self.context.context, self.pos, len);
-        if read < 0 {
-            clear_staged_read_bytes();
-            return Err(Error::other("The zip archive read callback failed"));
-        }
-        let read = read as u64;
-        if read > len as u64 {
-            clear_staged_read_bytes();
-            // Trusting this would mean reporting bytes the callback never wrote.
-            return Err(Error::new(
-                ErrorKind::InvalidData,
-                "The zip archive read callback reported reading more bytes than requested",
-            ));
-        }
-        let read = read as usize;
-        // A count of 0 (end of input) is checked like any other: nothing may
-        // have been staged for it either.
         STAGED_READ_BYTES.with(|cell| {
             let mut staged = cell.borrow_mut();
-            if staged.len() != read {
-                clear_staged_vec(&mut staged);
-                return Err(Error::new(
-                    ErrorKind::InvalidData,
-                    "The zip archive read callback staged a byte count that does not match its return value",
-                ));
-            }
-            buf[..read].copy_from_slice(&staged[..read]);
+            let copied = copy_staged_bytes(read, &staged, &mut buf[..len]);
+            // Whatever became of the read, its bytes are not kept around.
             clear_staged_vec(&mut staged);
-            self.pos += read as u64;
-            Ok(read)
+            copied
         })
+    }
+}
+
+/// Copies the bytes that a `read_at` call staged (`staged`) into `buf`, whose
+/// length is what the call was asked for, and returns how many bytes that is,
+/// which is never 0.
+///
+/// Returns the `ReadFault` instead, and copies nothing, if what the call
+/// returned (`read`) is negative, exceeds what it was asked for, differs from
+/// the number of bytes it staged, or is 0.
+fn copy_staged_bytes(read: i64, staged: &[u8], buf: &mut [u8]) -> Result<usize, ReadFault> {
+    if read < 0 {
+        return Err(ReadFault::Failed);
+    }
+    let read = read as u64;
+    if read > buf.len() as u64 {
+        return Err(ReadFault::TooManyBytes);
+    }
+    let read = read as usize;
+    // A count of 0 is checked like any other: nothing may have been staged for
+    // it either.
+    if staged.len() != read {
+        return Err(ReadFault::StagedCountMismatch);
+    }
+    if read == 0 {
+        return Err(ReadFault::NoBytes);
+    }
+    buf[..read].copy_from_slice(staged);
+    Ok(read)
+}
+
+impl Read for CallbackReader {
+    fn read(&mut self, buf: &mut [u8]) -> IoResult<usize> {
+        if buf.is_empty() || self.pos >= self.len {
+            return Ok(0);
+        }
+        if let Some(fault) = self.open_watch.as_ref().and_then(OpenWatch::fault) {
+            // A read has gone wrong during the open in progress, which must
+            // not read on; see `OpenWatch`.
+            return Err(fault.into());
+        }
+        match self.call_read_at(buf) {
+            Ok(read) => {
+                self.pos += read as u64;
+                Ok(read)
+            }
+            Err(fault) => {
+                if let Some(open_watch) = &self.open_watch {
+                    open_watch.record(fault);
+                }
+                Err(fault.into())
+            }
+        }
     }
 }
 
@@ -235,19 +434,18 @@ mod tests {
     use crate::ZipErrorCode;
     use googletest::prelude::*;
     use std::collections::HashMap;
-    use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::{LazyLock, Mutex};
 
     /// Test context backed by an in-memory buffer, which records the length of
     /// every `read_at` request and whether it was released.
     ///
     /// Shared between concurrently used clones of the reader, so all mutable
-    /// state is behind atomics or a `Mutex`.
+    /// state is behind a `Mutex`.
     struct TestContext {
         data: Vec<u8>,
         /// The `len` argument of every `read_at` call, in order.
         requested_lens: Mutex<Vec<usize>>,
-        released: Arc<AtomicUsize>,
+        released: Arc<Mutex<usize>>,
         /// What `size` reports. Lets tests under-report the available bytes.
         reported_size: i64,
         /// Largest number of bytes any single `read_at` will serve, so tests can
@@ -255,6 +453,9 @@ mod tests {
         max_read: usize,
         /// When true, `read_at` fails instead of serving bytes.
         fail_reads: bool,
+        /// How many more `read_at` calls fail before bytes are served again, so
+        /// tests can let a read fail and a later one succeed.
+        failing_reads_left: Mutex<usize>,
         /// When true, `read_at` claims to have read more than it was asked for.
         overreport: bool,
         /// When true, `read_at` returns a positive count without staging bytes.
@@ -267,19 +468,26 @@ mod tests {
         stage_oversized: bool,
     }
 
-    static NEXT_TEST_TOKEN: AtomicUsize = AtomicUsize::new(1);
-    static TEST_CONTEXTS: LazyLock<Mutex<HashMap<usize, Arc<TestContext>>>> =
-        LazyLock::new(|| Mutex::new(HashMap::new()));
+    /// The live test contexts by token, and the token that the next one gets.
+    struct TestContexts {
+        next_token: usize,
+        contexts: HashMap<usize, Arc<TestContext>>,
+    }
+
+    static TEST_CONTEXTS: LazyLock<Mutex<TestContexts>> =
+        LazyLock::new(|| Mutex::new(TestContexts { next_token: 1, contexts: HashMap::new() }));
 
     fn register_context(context: TestContext) -> (usize, Arc<TestContext>) {
-        let token = NEXT_TEST_TOKEN.fetch_add(1, Ordering::Relaxed);
         let context = Arc::new(context);
-        TEST_CONTEXTS.lock().unwrap().insert(token, Arc::clone(&context));
+        let mut test_contexts = TEST_CONTEXTS.lock().unwrap();
+        let token = test_contexts.next_token;
+        test_contexts.next_token += 1;
+        test_contexts.contexts.insert(token, Arc::clone(&context));
         (token, context)
     }
 
     fn lookup_context(token: usize) -> Arc<TestContext> {
-        TEST_CONTEXTS.lock().unwrap().get(&token).cloned().expect("live test context")
+        TEST_CONTEXTS.lock().unwrap().contexts.get(&token).cloned().expect("live test context")
     }
 
     extern "C" fn test_read_at(token: usize, offset: u64, len: usize) -> i64 {
@@ -290,6 +498,13 @@ mod tests {
         }
         if context.fail_reads {
             return -1;
+        }
+        {
+            let mut failing_reads_left = context.failing_reads_left.lock().unwrap();
+            if *failing_reads_left > 0 {
+                *failing_reads_left -= 1;
+                return -1;
+            }
         }
         if context.overreport {
             return len as i64 + 1;
@@ -322,8 +537,9 @@ mod tests {
     }
 
     extern "C" fn test_release(token: usize) {
-        let context = TEST_CONTEXTS.lock().unwrap().remove(&token).expect("context released once");
-        context.released.fetch_add(1, Ordering::Relaxed);
+        let context =
+            TEST_CONTEXTS.lock().unwrap().contexts.remove(&token).expect("context released once");
+        *context.released.lock().unwrap() += 1;
     }
 
     /// Builds a reader over `context`. Returns the reader and the shared test
@@ -339,9 +555,10 @@ mod tests {
             reported_size: data.len() as i64,
             data,
             requested_lens: Mutex::new(Vec::new()),
-            released: Arc::new(AtomicUsize::new(0)),
+            released: Arc::new(Mutex::new(0)),
             max_read: usize::MAX,
             fail_reads: false,
+            failing_reads_left: Mutex::new(0),
             overreport: false,
             skip_staging: false,
             stage_but_report_zero: false,
@@ -403,9 +620,9 @@ mod tests {
     fn test_premature_end_of_input_is_reported_as_truncation() {
         let mut context = context_for(b"01234".to_vec());
         // `size` promised more than `read_at` can serve, so `read_at` returns
-        // 0 while the reader still expects bytes. The reader passes the 0
-        // through as end of input without advancing, and `read_exact` (what
-        // `zip` uses for headers) then reports the input as truncated.
+        // 0 while the reader still expects bytes. Taken for the end of the
+        // input, that would silently shorten whatever is being read, so the
+        // reader reports the input as truncated instead, without advancing.
         context.reported_size = 10;
         let (mut reader, context) = make_reader(context);
         expect_eq!(reader.len(), 10);
@@ -413,11 +630,16 @@ mod tests {
         let mut buf = [0u8; 10];
         expect_eq!(reader.read(&mut buf).unwrap(), 5);
         expect_eq!(&buf[..5], b"01234");
-        expect_eq!(reader.read(&mut buf).unwrap(), 0);
+        expect_eq!(reader.read(&mut buf).unwrap_err().kind(), ErrorKind::UnexpectedEof);
         expect_eq!(reader.stream_position().unwrap(), 5, "a 0-byte read must not advance");
         expect_eq!(reader.read_exact(&mut buf[..1]).unwrap_err().kind(), ErrorKind::UnexpectedEof);
         // Each of the three reads consulted the callback: nothing is cached.
         expect_eq!(requested_lens(&context), vec![10, 5, 1]);
+
+        // This is the archive's own error, not a failure of the callback.
+        let zip_error = ZipError::from_io_error(reader.read(&mut buf).unwrap_err());
+        expect_eq!(zip_error.code, ZipErrorCode::Internal);
+        expect_false!(zip_error.is_reader_callback_failure());
     }
 
     #[gtest]
@@ -601,8 +823,125 @@ mod tests {
         context.fail_reads = true;
         let (mut reader, _) = make_reader(context);
         let mut buf = [0u8; 4];
-        expect_eq!(reader.read(&mut buf).unwrap_err().kind(), ErrorKind::Other);
+        let err = reader.read(&mut buf).unwrap_err();
+        expect_eq!(err.kind(), ErrorKind::Other);
         expect_eq!(reader.stream_position().unwrap(), 0, "a failed read must not advance");
+
+        // The error identifies itself as a failed callback all the way into a
+        // `ZipError`, which is what lets the C++ side substitute the reader's
+        // own status for it and only for it.
+        expect_true!(err.get_ref().is_some_and(|inner| inner.is::<CallbackFailed>()));
+        let zip_error = ZipError::from_io_error(err);
+        expect_eq!(zip_error.code, ZipErrorCode::Internal);
+        expect_true!(zip_error.is_reader_callback_failure());
+        expect_true!(zip_error.with_context("context").is_reader_callback_failure());
+    }
+
+    #[gtest]
+    fn test_watched_reader_is_not_called_again_after_a_failure() {
+        let mut context = context_for(b"0123456789".to_vec());
+        context.failing_reads_left = Mutex::new(1);
+        let (mut reader, context) = make_reader(context);
+        let watch = reader.watch();
+
+        // Only the first `read_at` fails, but while the reader is watched the
+        // next read fails the same way, and without calling back.
+        let mut buf = [0u8; 4];
+        let failed = reader.read(&mut buf).unwrap_err();
+        expect_true!(failed.get_ref().is_some_and(|inner| inner.is::<CallbackFailed>()));
+        let refused = reader.read(&mut buf).unwrap_err();
+        expect_true!(refused.get_ref().is_some_and(|inner| inner.is::<CallbackFailed>()));
+        expect_eq!(requested_lens(&context), vec![4], "the second read must not call back");
+        // Where no callback would be made anyway, nothing fails.
+        expect_eq!(reader.read(&mut []).unwrap(), 0);
+
+        // The watch reports the failure. A clone of the reader is not watched,
+        // so its reads go through again.
+        let open_error = watch.check().unwrap_err();
+        expect_eq!(open_error.code, ZipErrorCode::Internal);
+        expect_true!(open_error.is_reader_callback_failure());
+        let mut clone = reader.clone();
+        expect_eq!(clone.read(&mut buf).unwrap(), 4);
+        expect_eq!(&buf, b"0123");
+        expect_eq!(requested_lens(&context), vec![4, 4]);
+    }
+
+    #[gtest]
+    fn test_watched_reader_is_not_called_again_after_a_breach_of_the_read_at_contract() {
+        // `size` promises bytes that `read_at` then does not have.
+        let mut no_bytes = context_for(Vec::new());
+        no_bytes.reported_size = 10;
+        let mut too_many_bytes = context_for(b"0123456789".to_vec());
+        too_many_bytes.overreport = true;
+        let mut nothing_staged = context_for(b"0123456789".to_vec());
+        nothing_staged.skip_staging = true;
+        let cases = [
+            (
+                "returned no bytes",
+                no_bytes,
+                ErrorKind::UnexpectedEof,
+                ZipErrorCode::InvalidArgument,
+            ),
+            ("over-reported", too_many_bytes, ErrorKind::InvalidData, ZipErrorCode::Internal),
+            ("staged nothing", nothing_staged, ErrorKind::InvalidData, ZipErrorCode::Internal),
+        ];
+        for (name, context, expected_kind, expected_code) in cases {
+            let (mut reader, context) = make_reader(context);
+            let watch = reader.watch();
+
+            // The second read fails like the first, and without calling back.
+            let mut buf = [0u8; 4];
+            expect_eq!(reader.read(&mut buf).unwrap_err().kind(), expected_kind, "{}", name);
+            expect_eq!(reader.read(&mut buf).unwrap_err().kind(), expected_kind, "{}", name);
+            expect_eq!(requested_lens(&context), vec![4], "{}", name);
+
+            // The open fails with the archive's own error: no callback
+            // reported a failure.
+            let open_error = watch.check().unwrap_err();
+            expect_eq!(open_error.code, expected_code, "{}", name);
+            expect_eq!(open_error.is_reader_callback_failure(), false, "{}", name);
+        }
+    }
+
+    #[gtest]
+    fn test_unwatched_reader_is_called_again_after_a_failure() {
+        let mut context = context_for(b"0123456789".to_vec());
+        context.failing_reads_left = Mutex::new(1);
+        let (mut reader, context) = make_reader(context);
+
+        // On a reader that is not watched a failed read is over once it has
+        // been reported, so that a caller may retry it.
+        let mut buf = [0u8; 4];
+        expect_eq!(reader.read(&mut buf).unwrap_err().kind(), ErrorKind::Other);
+        expect_eq!(reader.read(&mut buf).unwrap(), 4);
+        expect_eq!(&buf, b"0123");
+        expect_eq!(requested_lens(&context), vec![4, 4]);
+
+        // Nor is it held against a watch that begins later.
+        let watch = reader.watch();
+        expect_eq!(reader.read(&mut buf).unwrap(), 4);
+        expect_eq!(watch.check(), Ok(()));
+    }
+
+    #[gtest]
+    fn test_other_io_errors_are_not_reader_callback_failures() {
+        let eof = ZipError::from_io_error(Error::new(ErrorKind::UnexpectedEof, "truncated"));
+        expect_eq!(eof.code, ZipErrorCode::Internal);
+        expect_false!(eof.is_reader_callback_failure());
+        let other = ZipError::from_io_error(Error::other("some other failure"));
+        expect_eq!(other.code, ZipErrorCode::Internal);
+        expect_false!(other.is_reader_callback_failure());
+        expect_false!(ZipError::internal("archive error").is_reader_callback_failure());
+    }
+
+    #[gtest]
+    fn test_failing_size_is_a_reader_callback_failure() {
+        let context = context_for(b"0123456789".to_vec());
+        let (token, _) = register_context(context);
+        let err = CallbackReader::try_new(test_read_at, test_size_fails, test_release, token)
+            .unwrap_err();
+        expect_eq!(err.code, ZipErrorCode::Internal);
+        expect_true!(err.is_reader_callback_failure());
     }
 
     #[gtest]
@@ -658,18 +997,14 @@ mod tests {
         let (reader, context) = make_reader(context_for(b"0123456789".to_vec()));
         let clone = reader.clone();
         let another = clone.clone();
-        expect_eq!(context.released.load(Ordering::Relaxed), 0);
+        expect_eq!(*context.released.lock().unwrap(), 0);
 
         drop(reader);
         drop(clone);
-        expect_eq!(
-            context.released.load(Ordering::Relaxed),
-            0,
-            "context released while a clone was live"
-        );
+        expect_eq!(*context.released.lock().unwrap(), 0, "context released while a clone was live");
 
         drop(another);
-        expect_eq!(context.released.load(Ordering::Relaxed), 1);
+        expect_eq!(*context.released.lock().unwrap(), 1);
     }
 
     #[gtest]
@@ -707,13 +1042,9 @@ mod tests {
 
         expect_eq!(got, data);
         expect_eq!(got_on_worker, data);
-        expect_eq!(
-            context.released.load(Ordering::Relaxed),
-            0,
-            "the main-thread reader is still live"
-        );
+        expect_eq!(*context.released.lock().unwrap(), 0, "the main-thread reader is still live");
         drop(reader);
-        expect_eq!(context.released.load(Ordering::Relaxed), 1);
+        expect_eq!(*context.released.lock().unwrap(), 1);
     }
 
     #[gtest]
@@ -725,6 +1056,6 @@ mod tests {
 
         expect_eq!(reader.unwrap_err().code, ZipErrorCode::Internal);
         // Ownership transfers on call, so a failed construction must not leak.
-        expect_eq!(released.load(Ordering::Relaxed), 1);
+        expect_eq!(*released.lock().unwrap(), 1);
     }
 }

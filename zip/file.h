@@ -309,7 +309,6 @@ class BufferedZipFile final {
  private:
   friend struct internal::ZipFileWriterPeer;
 
-  absl::Status CheckNone() const;
   rust::BufferedZipFile zip_;
 };
 
@@ -433,8 +432,63 @@ class FsZipFile final {
  private:
   friend struct internal::ZipFileWriterPeer;
 
-  absl::Status CheckNone() const;
   rust::FsZipFile zip_;
+};
+
+// An entry of an archive opened through a RandomAccessReader
+// (CallbackZipArchive). Its header fields were read when the entry was opened;
+// its bytes are read through the RandomAccessReader as they are requested.
+//
+// Each method has the contract of the ZipFile method of the same name and is
+// documented there; a comment below only says what differs for this backend.
+// Every accessor returns `absl::StatusCode::kInternal` on a moved-from entry
+// (`IsNone() == true`), and the methods that read the entry's bytes
+// (GetFileData(), ReadBytes(), ReadInto() and Skip()) return the
+// RandomAccessReader's own status if it fails.
+class CallbackZipFile final {
+ public:
+  explicit CallbackZipFile(rust::CallbackZipFile zip)
+      : zip_(std::move(zip)) {}
+  CallbackZipFile(CallbackZipFile&&) noexcept = default;
+  // Drops the previous entry and leaves `other` empty; see
+  // internal::MoveAssignRustHandle. Nothing is read: unlike an entry of a
+  // stream reader, an entry of an archive is not drained when it is dropped.
+  CallbackZipFile& operator=(CallbackZipFile&& other) noexcept {
+    if (this != &other) {
+      internal::MoveAssignRustHandle(zip_, std::move(other.zip_));
+    }
+    return *this;
+  }
+  absl::StatusOr<bool> IsFile() const;
+  absl::StatusOr<bool> IsDir() const;
+  [[nodiscard]] bool IsNone() const;
+  absl::StatusOr<std::string> GetFileName() const;
+  absl::StatusOr<CompressionMethod> GetCompressionMethod() const;
+  absl::StatusOr<std::string> GetComment() const;
+  absl::StatusOr<uint64_t> GetUncompressedSize() const;
+  absl::StatusOr<uint64_t> GetCompressedSize() const;
+  absl::StatusOr<uint32_t> GetCrc32() const;
+  absl::StatusOr<uint16_t> GetLastModifiedDate() const;
+  absl::StatusOr<uint16_t> GetLastModifiedTime() const;
+  absl::StatusOr<uint32_t> GetUnixMode() const;
+  absl::StatusOr<RustVecU8Wrapper> GetExtraData() const;
+  // Always meaningful for this backend: a CallbackZipFile only ever comes from
+  // a CallbackZipArchive, never from a stream reader.
+  absl::StatusOr<uint64_t> GetHeaderStart() const;
+  // Always known for this backend: the local file header is parsed when the
+  // archive opens the entry, which is the only way a CallbackZipFile is made.
+  absl::StatusOr<uint64_t> GetDataStart() const;
+
+  absl::StatusOr<RustVecU8Wrapper> GetFileData();
+  absl::StatusOr<RustVecU8Wrapper> ReadBytes(size_t max_bytes);
+  absl::StatusOr<size_t> ReadInto(absl::Span<char> buf);
+  absl::StatusOr<uint64_t> Skip(uint64_t max_bytes);
+  absl::StatusOr<RustVecU8Wrapper> GetFileData(size_t max_size);
+
+ private:
+  friend struct internal::ZipFileWriterPeer;
+
+  rust::CallbackZipFile zip_;
 };
 
 class ZipFile final {
@@ -463,6 +517,11 @@ class ZipFile final {
   static ZipFile FromBuffer(rust::BufferedZipFile zip,
                             internal::ActiveEntryGuard guard) {
     return ZipFile(BufferedZipFile(std::move(zip)), std::move(guard));
+  }
+
+  static ZipFile FromCallback(rust::CallbackZipFile zip,
+                              internal::ActiveEntryGuard guard) {
+    return ZipFile(CallbackZipFile(std::move(zip)), std::move(guard));
   }
 
   absl::StatusOr<bool> IsFile() const;
@@ -538,6 +597,9 @@ class ZipFile final {
   // `GetFileData(size_t max_size)` below to cap memory allocation and defend
   // against zip bomb memory exhaustion (OOM) attacks, or read the entry
   // incrementally with `ReadBytes()`.
+  //
+  // Propagates underlying I/O error codes (for an entry of a FromReader
+  // archive, the RandomAccessReader's own status).
   absl::StatusOr<RustVecU8Wrapper> GetFileData();
 
   // Reads up to `max_bytes` decompressed bytes from the entry, advancing the
@@ -547,7 +609,8 @@ class ZipFile final {
   // rather than assuming a short non-empty read means end of entry
   // (`ReadBytes(0)` returns an empty buffer immediately without advancing the
   // entry). Returns `absl::StatusCode::kInternal` on a moved-from entry or
-  // decompression/CRC errors, or propagates underlying I/O error codes.
+  // decompression/CRC errors, or propagates underlying I/O error codes (for an
+  // entry of a FromReader archive, the RandomAccessReader's own status).
   //
   // WARNING: Chunks returned before the terminating empty read are not yet
   // verified against the entry's CRC-32: zip-rs checks it only on the read that
@@ -558,8 +621,8 @@ class ZipFile final {
   absl::StatusOr<RustVecU8Wrapper> ReadBytes(size_t max_bytes);
   // Reads into `buf` (decompressing unless the entry was opened raw) and
   // returns how many bytes were written, which is less than `buf.size()` only
-  // at end of entry. This is the full contract; BufferedZipFile::ReadInto()
-  // and FsZipFile::ReadInto() behave identically.
+  // at end of entry. This is the full contract; BufferedZipFile::ReadInto(),
+  // FsZipFile::ReadInto() and CallbackZipFile::ReadInto() behave identically.
   //
   // Unlike ReadBytes(), nothing is allocated and the bytes are not copied
   // again on the way out, so this is what a caller reading an entry of any
@@ -571,13 +634,15 @@ class ZipFile final {
   // (GetFileByIndexRaw) are never CRC-checked.
   //
   // Returns `absl::StatusCode::kInternal` on a moved-from entry or
-  // decompression/CRC errors, or propagates underlying I/O error codes. On
+  // decompression/CRC errors, or propagates underlying I/O error codes (for an
+  // entry of a FromReader archive, the RandomAccessReader's own status). On
   // error, the contents of `buf` and the position within the entry are
   // unspecified.
   absl::StatusOr<size_t> ReadInto(absl::Span<char> buf);
   // Discards up to `max_bytes` and returns how many were discarded, which is
   // less than `max_bytes` only at end of entry. This is the full contract;
-  // BufferedZipFile::Skip() and FsZipFile::Skip() behave identically.
+  // BufferedZipFile::Skip(), FsZipFile::Skip() and CallbackZipFile::Skip()
+  // behave identically.
   //
   // A zip entry is a forward-only stream, so this is how a caller seeks
   // within one. Nothing is allocated, whatever the distance.
@@ -588,17 +653,19 @@ class ZipFile final {
   // CRC-checked.
   //
   // Returns `absl::StatusCode::kInternal` on a moved-from entry or
-  // decompression/CRC errors, or propagates underlying I/O error codes. On
+  // decompression/CRC errors, or propagates underlying I/O error codes (for an
+  // entry of a FromReader archive, the RandomAccessReader's own status). On
   // error, the position within the entry is unspecified.
   absl::StatusOr<uint64_t> Skip(uint64_t max_bytes);
 
   // Decompresses at most `max_size` bytes from the entry, returning
   // `absl::StatusCode::kOutOfRange` if the decompressed size exceeds
-  // `max_size`.
+  // `max_size`. Propagates underlying I/O error codes (for an entry of a
+  // FromReader archive, the RandomAccessReader's own status).
   absl::StatusOr<RustVecU8Wrapper> GetFileData(size_t max_size);
 
  private:
-  using BackendType = std::variant<BufferedZipFile, FsZipFile>;
+  using BackendType = std::variant<BufferedZipFile, FsZipFile, CallbackZipFile>;
   friend struct internal::ZipFileWriterPeer;
 
   ZipFile(BackendType b, internal::ActiveEntryGuard guard)

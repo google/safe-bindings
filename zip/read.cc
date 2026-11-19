@@ -1,21 +1,29 @@
 #include "read.h"
 
+#include <algorithm>
+#include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <memory>
 #include <optional>
 #include <string>
 #include <utility>
 #include <variant>
+#include <vector>
 
 #include "crubit_helpers/string_conversions.h"
 #include "converters.h"
 #include "file.h"
+#include "reader.h"
+#include "reader_status.h"
 #include "crubit/rust.h"
 #include "absl/functional/overload.h"
 #include "absl/status/status.h"
 #include "absl/status/status_macros.h"
 #include "absl/status/statusor.h"
+#include "absl/strings/str_cat.h"
 #include "absl/strings/string_view.h"
+#include "absl/types/span.h"
 
 namespace security::zip {
 
@@ -42,8 +50,8 @@ absl::Status CheckNoActiveEntry(const std::shared_ptr<bool>& active_entry) {
 }
 
 // The archive backends differ only in the Rust archive type they wrap
-// (rust::{Buffered,Fs}ZipArchive), so the methods whose bodies would
-// otherwise be identical share the following helpers.
+// (rust::{Buffered,Fs,Callback}ZipArchive), so the methods whose bodies
+// would otherwise be identical share the following helpers.
 template <typename RustArchive>
 absl::StatusOr<uintptr_t> GetLengthImpl(const RustArchive& archive) {
   ABSL_RETURN_IF_ERROR(CheckArchiveOpen(archive));
@@ -106,6 +114,84 @@ absl::StatusOr<std::optional<ZipFile>> ReadNextFileImpl(
     return std::nullopt;
   }
   return wrap(std::move(file), internal::ActiveEntryGuard(active_entry));
+}
+
+// The three callbacks the Rust archive reads through. `context` is always the
+// RandomAccessReader the archive reads through (encoded as an opaque
+// `uintptr_t` token so the Rust crate needs no raw pointers or `unsafe`), whose
+// ownership passed to the Rust archive; ReleaseReader is what eventually
+// destroys it.
+//
+// They are plain C++ functions, not `extern "C"`: Crubit lowers the Rust side's
+// `extern "C" fn` parameters to ordinary function-reference types, and their
+// signatures use only C-ABI-compatible scalar types.
+//
+// They are noexcept because an exception unwinding into Rust is undefined
+// behavior. A RandomAccessReader is not expected to throw, so this only turns
+// a contract violation somewhere in a reader implementation into a crash
+// instead of silent corruption.
+//
+// A failing callback records the reader's status in the per-thread slot and
+// returns -1. internal::ThroughReader, which wraps every operation that may
+// call back, clears the slot before and after the operation and only reports
+// the recorded status when the Rust error says a callback failed; see
+// security/zip/reader_status.h for why that distinction matters.
+
+int64_t ReadFromReader(uintptr_t context, uint64_t offset,
+                       uintptr_t length) noexcept {
+  auto* reader = reinterpret_cast<RandomAccessReader*>(context);
+  // Reads of up to this size use a buffer on the stack; larger ones allocate.
+  // NOMUTANTS -- Only moves that threshold; the bytes read are the same.
+  constexpr size_t kStackBufferSize = 8 * 1024;
+  char stack_buffer[kStackBufferSize];
+  std::vector<char> heap_buffer;
+  absl::Span<char> buffer;
+  if (length <= kStackBufferSize) {
+    // Zeroed like `heap_buffer` below, so that a reader which reports more
+    // bytes than it wrote passes on zeros, not what an earlier read left here.
+    std::fill_n(stack_buffer, length, '\0');
+    buffer = absl::MakeSpan(stack_buffer, length);
+  } else {
+    heap_buffer.resize(length);
+    buffer = absl::MakeSpan(heap_buffer);
+  }
+  absl::StatusOr<size_t> bytes_read = reader->ReadAt(offset, buffer);
+  if (!bytes_read.ok()) {
+    internal::SetReaderStatus(std::move(bytes_read).status());
+    return -1;
+  }
+  if (*bytes_read > length) {
+    // Passing this on would hand the archive bytes that were never written.
+    internal::SetReaderStatus(absl::InternalError(
+        absl::StrCat("RandomAccessReader::ReadAt reported reading ",
+                     *bytes_read, " bytes into a buffer of ", length)));
+    return -1;
+  }
+  if (*bytes_read > 0) {
+    rust::stage_callback_chunk(
+        ToByteSpan(absl::string_view(buffer.data(), *bytes_read)));
+  }
+  return static_cast<int64_t>(*bytes_read);
+}
+
+int64_t SizeOfReader(uintptr_t context) noexcept {
+  auto* reader = reinterpret_cast<RandomAccessReader*>(context);
+  absl::StatusOr<uint64_t> size = reader->Size();
+  if (!size.ok()) {
+    internal::SetReaderStatus(std::move(size).status());
+    return -1;
+  }
+  if (*size > static_cast<uint64_t>(std::numeric_limits<int64_t>::max())) {
+    internal::SetReaderStatus(absl::OutOfRangeError(
+        absl::StrCat("RandomAccessReader::Size reported ", *size,
+                     " bytes, which does not fit in an int64")));
+    return -1;
+  }
+  return static_cast<int64_t>(*size);
+}
+
+void ReleaseReader(uintptr_t context) noexcept {
+  delete reinterpret_cast<RandomAccessReader*>(context);
 }
 
 }  // namespace
@@ -189,6 +275,87 @@ absl::StatusOr<ZipEntryMetadata> FsZipArchive::GetEntryMetadata(
 
 bool FsZipArchive::IsNone() const { return archive_.is_none(); }
 
+absl::StatusOr<CallbackZipArchive> CallbackZipArchive::NewFromReader(
+    std::unique_ptr<RandomAccessReader> reader) {
+  if (reader == nullptr) {
+    return absl::InvalidArgumentError("Reader must not be null");
+  }
+  // Ownership moves to the Rust archive here, which calls ReleaseReader exactly
+  // once -- including when this call fails, so releasing `reader` is safe even
+  // on the error path.
+  ABSL_ASSIGN_OR_RETURN(
+      rust::CallbackZipArchive archive, internal::ThroughReader([&] {
+        return FromRustCallbackZipArchive(
+            rust::CallbackZipArchive::new_from_callbacks(
+                ReadFromReader, SizeOfReader, ReleaseReader,
+                reinterpret_cast<uintptr_t>(reader.release())));
+      }));
+  return CallbackZipArchive(std::move(archive));
+}
+
+absl::Status CallbackZipArchive::CheckNone() const {
+  return CheckArchiveOpen(archive_);
+}
+
+absl::StatusOr<CallbackZipArchive> CallbackZipArchive::TryClone() const {
+  ABSL_RETURN_IF_ERROR(CheckNone());
+  ABSL_RETURN_IF_ERROR(CheckNoActiveEntry(active_entry_));
+  ABSL_ASSIGN_OR_RETURN(rust::CallbackZipArchive archive,
+                        FromRustCallbackZipArchive(archive_.try_clone()));
+  return CallbackZipArchive(std::move(archive));
+}
+
+absl::StatusOr<CallbackZipArchive> CallbackZipArchive::TryCloneWithReader(
+    std::unique_ptr<RandomAccessReader> reader) const {
+  if (reader == nullptr) {
+    return absl::InvalidArgumentError("Reader must not be null");
+  }
+  ABSL_RETURN_IF_ERROR(CheckNone());
+  // Checked before `reader` is handed over, so that a refused reader is simply
+  // destroyed without being asked for its size.
+  ABSL_RETURN_IF_ERROR(CheckNoActiveEntry(active_entry_));
+  // As in NewFromReader, ownership moves to the Rust archive, which releases it
+  // even if this call fails.
+  ABSL_ASSIGN_OR_RETURN(
+      rust::CallbackZipArchive archive, internal::ThroughReader([&] {
+        return FromRustCallbackZipArchive(archive_.try_clone_with_callbacks(
+            ReadFromReader, SizeOfReader, ReleaseReader,
+            reinterpret_cast<uintptr_t>(reader.release())));
+      }));
+  return CallbackZipArchive(std::move(archive));
+}
+
+absl::StatusOr<uintptr_t> CallbackZipArchive::GetLength() const {
+  return GetLengthImpl(archive_);
+}
+
+absl::StatusOr<std::string> CallbackZipArchive::GetComment() const {
+  return GetCommentImpl(archive_);
+}
+
+absl::StatusOr<ZipFile> CallbackZipArchive::GetFileByIndex(uintptr_t index) {
+  // Opening an entry reads its local file header through the reader, so a
+  // failure here may be the reader's rather than the archive's.
+  return internal::ThroughReader([&] {
+    return GetFileByIndexImpl(archive_, active_entry_, index, /*raw=*/false,
+                              FromRustCallbackZipFile, ZipFile::FromCallback);
+  });
+}
+
+absl::StatusOr<ZipFile> CallbackZipArchive::GetFileByIndexRaw(uintptr_t index) {
+  return internal::ThroughReader([&] {
+    return GetFileByIndexImpl(archive_, active_entry_, index, /*raw=*/true,
+                              FromRustCallbackZipFile, ZipFile::FromCallback);
+  });
+}
+
+absl::StatusOr<ZipEntryMetadata> CallbackZipArchive::GetEntryMetadata(
+    uintptr_t index) const {
+  return GetEntryMetadataImpl(archive_, index);
+}
+
+bool CallbackZipArchive::IsNone() const { return archive_.is_none(); }
+
 absl::StatusOr<ZipArchive> ZipArchive::FromFile(absl::string_view path) {
   ABSL_ASSIGN_OR_RETURN(FsZipArchive archive, FsZipArchive::NewFromPath(path));
   return ZipArchive(std::move(archive));
@@ -197,6 +364,13 @@ absl::StatusOr<ZipArchive> ZipArchive::FromFile(absl::string_view path) {
 absl::StatusOr<ZipArchive> ZipArchive::FromBuffer(absl::string_view data) {
   ABSL_ASSIGN_OR_RETURN(BufferedZipArchive archive,
                         BufferedZipArchive::NewFromData(data));
+  return ZipArchive(std::move(archive));
+}
+
+absl::StatusOr<ZipArchive> ZipArchive::FromReader(
+    std::unique_ptr<RandomAccessReader> reader) {
+  ABSL_ASSIGN_OR_RETURN(CallbackZipArchive archive,
+                        CallbackZipArchive::NewFromReader(std::move(reader)));
   return ZipArchive(std::move(archive));
 }
 
@@ -210,8 +384,26 @@ absl::StatusOr<ZipArchive> ZipArchive::TryClone() const {
           [](const FsZipArchive& archive) -> absl::StatusOr<ZipArchive> {
             ABSL_ASSIGN_OR_RETURN(FsZipArchive clone, archive.TryClone());
             return ZipArchive(std::move(clone));
+          },
+          [](const CallbackZipArchive& archive) -> absl::StatusOr<ZipArchive> {
+            ABSL_ASSIGN_OR_RETURN(CallbackZipArchive clone, archive.TryClone());
+            return ZipArchive(std::move(clone));
           }),
       archive_);
+}
+
+absl::StatusOr<ZipArchive> ZipArchive::TryCloneWithReader(
+    std::unique_ptr<RandomAccessReader> reader) const {
+  const auto* callback_archive = std::get_if<CallbackZipArchive>(&archive_);
+  if (callback_archive == nullptr) {
+    return absl::UnimplementedError(
+        "TryCloneWithReader is only supported for archives opened from a "
+        "reader");
+  }
+  ABSL_ASSIGN_OR_RETURN(
+      CallbackZipArchive clone,
+      callback_archive->TryCloneWithReader(std::move(reader)));
+  return ZipArchive(std::move(clone));
 }
 
 absl::StatusOr<uintptr_t> ZipArchive::GetLength() const {
