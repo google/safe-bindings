@@ -1,4 +1,6 @@
+#include <algorithm>
 #include <cstdint>
+#include <numeric>
 #include <optional>
 #include <string>
 #include <type_traits>
@@ -473,6 +475,256 @@ TEST(RoaringBitmap32Test, AddOffsetBoundary) {
   RoaringBitmap32 max_neg = bm.AddOffset(-int64_t{UINT32_MAX});
   EXPECT_EQ(max_neg.len(), 1);
   EXPECT_TRUE(max_neg.Contains(0));
+}
+
+TEST(RoaringBitmap32Test, FirstAtOrAfter) {
+  RoaringBitmap32 bm;
+  EXPECT_EQ(bm.FirstAtOrAfter(0), std::nullopt);
+  EXPECT_EQ(bm.FirstAtOrAfter(UINT32_MAX), std::nullopt);
+
+  // An array container, a run container, a bitmap container, and the last
+  // possible value, with container key 2 left empty.
+  bm.InsertMany(std::vector<uint32_t>{10, 20});
+  bm.InsertRange(uint32_t{1} << 16, (uint32_t{1} << 16) + 100);
+  // Fills the bitmap container with every even value of container key 3.
+  for (uint32_t value = uint32_t{3} << 16; value < (uint32_t{4} << 16);
+       value += 2) {
+    bm.Insert(value);
+  }
+  bm.Insert(UINT32_MAX);
+  bm.Optimize();
+
+  // Array container: exact hits and the next value in the same container.
+  EXPECT_THAT(bm.FirstAtOrAfter(0), Optional(10));
+  EXPECT_THAT(bm.FirstAtOrAfter(10), Optional(10));
+  EXPECT_THAT(bm.FirstAtOrAfter(11), Optional(20));
+  EXPECT_THAT(bm.FirstAtOrAfter(21), Optional(uint32_t{1} << 16));
+
+  // Run container: inside the run, and past its end into the empty key 2.
+  EXPECT_THAT(bm.FirstAtOrAfter((uint32_t{1} << 16) + 50),
+              Optional((uint32_t{1} << 16) + 50));
+  EXPECT_THAT(bm.FirstAtOrAfter((uint32_t{1} << 16) + 100),
+              Optional(uint32_t{3} << 16));
+  EXPECT_THAT(bm.FirstAtOrAfter(uint32_t{2} << 16),
+              Optional(uint32_t{3} << 16));
+
+  // Bitmap container: an exact hit, the next value, and its last odd value.
+  EXPECT_THAT(bm.FirstAtOrAfter((uint32_t{3} << 16) + 2),
+              Optional((uint32_t{3} << 16) + 2));
+  EXPECT_THAT(bm.FirstAtOrAfter((uint32_t{3} << 16) + 3),
+              Optional((uint32_t{3} << 16) + 4));
+  EXPECT_THAT(bm.FirstAtOrAfter((uint32_t{4} << 16) - 1), Optional(UINT32_MAX));
+
+  // An absent container key, and the last possible value.
+  EXPECT_THAT(bm.FirstAtOrAfter(uint32_t{1} << 20), Optional(UINT32_MAX));
+  EXPECT_THAT(bm.FirstAtOrAfter(UINT32_MAX), Optional(UINT32_MAX));
+
+  bm.Remove(UINT32_MAX);
+  EXPECT_EQ(bm.FirstAtOrAfter((uint32_t{4} << 16) - 1), std::nullopt);
+}
+
+TEST(RoaringBitmap32Test, CopyValuesFromReadsInBatches) {
+  RoaringBitmap32 bm;
+  bm.InsertRange(100, 200);
+  bm.InsertMany(std::vector<uint32_t>{70000, UINT32_MAX});
+
+  // A full batch stops in the middle of the first run.
+  std::vector<uint32_t> buffer(64, 42);
+  ASSERT_EQ(bm.CopyValuesFrom(0, absl::MakeSpan(buffer)), 64);
+  std::vector<uint32_t> expected(64);
+  std::iota(expected.begin(), expected.end(), 100);
+  EXPECT_EQ(buffer, expected);
+
+  // Resuming one past the last value copied returns the remaining 38 values
+  // and leaves the rest of the buffer untouched.
+  std::fill(buffer.begin(), buffer.end(), 42);
+  ASSERT_EQ(bm.CopyValuesFrom(164, absl::MakeSpan(buffer)), 38);
+  expected.assign(64, 42);
+  std::iota(expected.begin(), expected.begin() + 36, 164);
+  expected[36] = 70000;
+  expected[37] = UINT32_MAX;
+  EXPECT_EQ(buffer, expected);
+
+  // A start past the last value of its container, and a start in an absent
+  // container key, both continue with the next container.
+  std::fill(buffer.begin(), buffer.end(), 42);
+  ASSERT_EQ(bm.CopyValuesFrom(1000, absl::MakeSpan(buffer)), 2);
+  EXPECT_EQ(buffer[0], 70000);
+  EXPECT_EQ(buffer[1], UINT32_MAX);
+  EXPECT_EQ(buffer[2], 42);
+  ASSERT_EQ(bm.CopyValuesFrom(uint32_t{2} << 16, absl::MakeSpan(buffer)), 1);
+  EXPECT_EQ(buffer[0], UINT32_MAX);
+
+  EXPECT_EQ(bm.CopyValuesFrom(UINT32_MAX, absl::MakeSpan(buffer)), 1);
+  EXPECT_EQ(buffer[0], UINT32_MAX);
+
+  // A start past the maximum copies nothing.
+  bm.Remove(UINT32_MAX);
+  std::fill(buffer.begin(), buffer.end(), 42);
+  EXPECT_EQ(bm.CopyValuesFrom(70001, absl::MakeSpan(buffer)), 0);
+  EXPECT_EQ(buffer, std::vector<uint32_t>(64, 42));
+
+  std::vector<uint32_t> empty_buffer;
+  EXPECT_EQ(bm.CopyValuesFrom(0, absl::MakeSpan(empty_buffer)), 0);
+  EXPECT_EQ(RoaringBitmap32().CopyValuesFrom(0, absl::MakeSpan(buffer)), 0);
+}
+
+TEST(RoaringBitmap32Test, CopyValuesFromReadsEveryContainerType) {
+  RoaringBitmap32 bm;
+
+  // Array container.
+  bm.InsertMany(std::vector<uint32_t>{1, 5, 9, 1000});
+
+  // Run container that covers part of its block.
+  bm.InsertRange((uint32_t{2} << 16) + 10, (uint32_t{2} << 16) + 5000);
+
+  // Fills a bitmap container with every even value of container key 3.
+  for (uint32_t value = uint32_t{3} << 16; value < (uint32_t{4} << 16);
+       value += 2) {
+    bm.Insert(value);
+  }
+  bm.Insert(UINT32_MAX);
+  bm.Optimize();
+
+  std::vector<uint32_t> values;
+  std::vector<uint32_t> buffer(7);
+  uint32_t start = 0;
+  // Reads the whole bitmap in batches of an odd size, so batch edges fall
+  // inside every kind of container, resuming one past the last value read
+  // until a short batch or UINT32_MAX shows that no values remain.
+  while (true) {
+    const auto count = bm.CopyValuesFrom(start, absl::MakeSpan(buffer));
+    values.insert(values.end(), buffer.begin(), buffer.begin() + count);
+    if (count < buffer.size() || values.back() == UINT32_MAX) {
+      break;
+    }
+    start = values.back() + 1;
+  }
+
+  // The per-value iterator is an independent reference for the full contents.
+  std::vector<uint32_t> expected;
+  for (const uint32_t value : bm) {
+    expected.push_back(value);
+  }
+  EXPECT_EQ(values, expected);
+}
+
+TEST(RoaringBitmap32Test, CopyRunsFrom) {
+  RoaringBitmap32 bm;
+  bm.InsertRange(100, 200);
+  bm.Insert(300);
+  // A run that crosses the boundary between the first two containers.
+  bm.InsertRange(65530, 65546);
+  bm.InsertRangeClosed(UINT32_MAX - 1, UINT32_MAX);
+
+  std::vector<uint32_t> mins(8, 42);
+  std::vector<uint32_t> maxes(8, 42);
+  ASSERT_EQ(bm.CopyRunsFrom(0, absl::MakeSpan(mins), absl::MakeSpan(maxes)), 4);
+  EXPECT_EQ(mins, (std::vector<uint32_t>{100, 300, 65530, UINT32_MAX - 1, 42,
+                                         42, 42, 42}));
+  EXPECT_EQ(maxes, (std::vector<uint32_t>{199, 300, 65545, UINT32_MAX, 42, 42,
+                                          42, 42}));
+
+  // A start inside a run truncates only the first run.
+  std::fill(mins.begin(), mins.end(), 42);
+  std::fill(maxes.begin(), maxes.end(), 42);
+  ASSERT_EQ(bm.CopyRunsFrom(150, absl::MakeSpan(mins), absl::MakeSpan(maxes)),
+            4);
+  EXPECT_EQ(mins, (std::vector<uint32_t>{150, 300, 65530, UINT32_MAX - 1, 42,
+                                         42, 42, 42}));
+  EXPECT_EQ(maxes, (std::vector<uint32_t>{199, 300, 65545, UINT32_MAX, 42, 42,
+                                          42, 42}));
+
+  // A start in a gap begins at the next run.
+  std::fill(mins.begin(), mins.end(), 42);
+  std::fill(maxes.begin(), maxes.end(), 42);
+  ASSERT_EQ(bm.CopyRunsFrom(201, absl::MakeSpan(mins), absl::MakeSpan(maxes)),
+            3);
+  EXPECT_EQ(mins, (std::vector<uint32_t>{300, 65530, UINT32_MAX - 1, 42, 42, 42,
+                                         42, 42}));
+  EXPECT_EQ(maxes, (std::vector<uint32_t>{300, 65545, UINT32_MAX, 42, 42, 42,
+                                          42, 42}));
+
+  // The capacity is the shorter of the two buffers, and the longer buffer is
+  // untouched past it.
+  std::fill(mins.begin(), mins.end(), 42);
+  std::vector<uint32_t> short_maxes(2, 42);
+  ASSERT_EQ(
+      bm.CopyRunsFrom(0, absl::MakeSpan(mins), absl::MakeSpan(short_maxes)), 2);
+  EXPECT_EQ(mins, (std::vector<uint32_t>{100, 300, 42, 42, 42, 42, 42, 42}));
+  EXPECT_EQ(short_maxes, (std::vector<uint32_t>{199, 300}));
+
+  std::fill(mins.begin(), mins.end(), 42);
+  std::fill(maxes.begin(), maxes.end(), 42);
+  EXPECT_EQ(RoaringBitmap32().CopyRunsFrom(0, absl::MakeSpan(mins),
+                                           absl::MakeSpan(maxes)),
+            0);
+  EXPECT_EQ(mins, std::vector<uint32_t>(8, 42));
+  EXPECT_EQ(maxes, std::vector<uint32_t>(8, 42));
+}
+
+TEST(RoaringBitmap32Test, CopyRunsFromAtContainerBoundaries) {
+  RoaringBitmap32 crossing;
+  crossing.InsertRange(65530, 65546);
+  std::vector<uint32_t> mins(2, 42);
+  std::vector<uint32_t> maxes(2, 42);
+
+  // Starts inside a run that crosses a container boundary, on either side of
+  // the boundary.
+  ASSERT_EQ(
+      crossing.CopyRunsFrom(65533, absl::MakeSpan(mins), absl::MakeSpan(maxes)),
+      1);
+  EXPECT_EQ(mins, (std::vector<uint32_t>{65533, 42}));
+  EXPECT_EQ(maxes, (std::vector<uint32_t>{65545, 42}));
+  ASSERT_EQ(
+      crossing.CopyRunsFrom(65536, absl::MakeSpan(mins), absl::MakeSpan(maxes)),
+      1);
+  EXPECT_EQ(mins, (std::vector<uint32_t>{65536, 42}));
+  EXPECT_EQ(maxes, (std::vector<uint32_t>{65545, 42}));
+
+  // A run that ends at the last value of a container does not merge with a
+  // next container that lacks its first value.
+  RoaringBitmap32 gap_after_boundary;
+  gap_after_boundary.InsertMany(std::vector<uint32_t>{65535, 65537});
+  std::fill(mins.begin(), mins.end(), 42);
+  std::fill(maxes.begin(), maxes.end(), 42);
+  ASSERT_EQ(gap_after_boundary.CopyRunsFrom(0, absl::MakeSpan(mins),
+                                            absl::MakeSpan(maxes)),
+            2);
+  EXPECT_EQ(mins, (std::vector<uint32_t>{65535, 65537}));
+  EXPECT_EQ(maxes, (std::vector<uint32_t>{65535, 65537}));
+
+  // Nor does it merge across an absent container key.
+  RoaringBitmap32 missing_key;
+  missing_key.InsertRange((uint32_t{2} << 16) - 5, uint32_t{2} << 16);
+  missing_key.Insert(uint32_t{3} << 16);
+  ASSERT_EQ(
+      missing_key.CopyRunsFrom(0, absl::MakeSpan(mins), absl::MakeSpan(maxes)),
+      2);
+  EXPECT_EQ(mins, (std::vector<uint32_t>{(uint32_t{2} << 16) - 5,
+                                         uint32_t{3} << 16}));
+  EXPECT_EQ(maxes, (std::vector<uint32_t>{(uint32_t{2} << 16) - 1,
+                                          uint32_t{3} << 16}));
+}
+
+TEST(RoaringBitmap32Test, CopyRunsFromMergesFullContainers) {
+  // Three full containers form a single run.
+  RoaringBitmap32 bm;
+  bm.InsertRange(0, uint32_t{3} << 16);
+  bm.Optimize();
+
+  std::vector<uint32_t> mins(2, 42);
+  std::vector<uint32_t> maxes(2, 42);
+  ASSERT_EQ(bm.CopyRunsFrom(0, absl::MakeSpan(mins), absl::MakeSpan(maxes)), 1);
+  EXPECT_EQ(mins, (std::vector<uint32_t>{0, 42}));
+  EXPECT_EQ(maxes, (std::vector<uint32_t>{(uint32_t{3} << 16) - 1, 42}));
+
+  // The full value range is a single run that ends at UINT32_MAX.
+  ASSERT_EQ(RoaringBitmap32::Full().CopyRunsFrom(0, absl::MakeSpan(mins),
+                                                 absl::MakeSpan(maxes)),
+            1);
+  EXPECT_EQ(mins, (std::vector<uint32_t>{0, 42}));
+  EXPECT_EQ(maxes, (std::vector<uint32_t>{UINT32_MAX, 42}));
 }
 
 TEST(RoaringBitmap64Test, AddOffsetLargeValues) {
