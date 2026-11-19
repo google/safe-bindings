@@ -1,5 +1,6 @@
 use crate::vec_u8::VecU8;
 use saphyr::{LoadableYamlNode, ScalarOwned, YamlOwned};
+use std::panic::{self, AssertUnwindSafe};
 
 /// Converts a YAML byte slice into a JSON string encoded as `VecU8`.
 ///
@@ -15,19 +16,29 @@ pub fn convert_yaml_to_json(input: &[u8], recursion_depth_limit: i32) -> Result<
         Ok(s) => s,
         Err(_) => return Err(VecU8::from("Input is not valid UTF-8")),
     };
-    let docs = match YamlOwned::load_from_str(input_str) {
-        Ok(docs) => docs,
-        Err(err) => return Err(VecU8::from(err.to_string())),
-    };
-    if docs.is_empty() {
-        return Err(VecU8::from("Undefined YAML Node Type"));
+    // Defense-in-depth at the C++ FFI boundary: UTF-8, allocation reservation,
+    // and recursion depth are checked explicitly without relying on unwinding,
+    // and `catch_unwind` prevents unexpected `saphyr` panics from crossing
+    // `extern "C"`.
+    match panic::catch_unwind(AssertUnwindSafe(|| {
+        let docs = match YamlOwned::load_from_str(input_str) {
+            Ok(docs) => docs,
+            Err(err) => return Err(VecU8::from(err.to_string())),
+        };
+        if docs.is_empty() {
+            return Err(VecU8::from("Undefined YAML Node Type"));
+        }
+        if docs.len() > 1 {
+            return Err(VecU8::from("Multiple YAML documents are not supported"));
+        }
+        let mut out = String::new();
+        let _ = out.try_reserve(input.len().saturating_mul(2));
+        append_json_from_yaml_node(&docs[0], &mut out, 1, recursion_depth_limit)?;
+        Ok(VecU8::from(out))
+    })) {
+        Ok(result) => result,
+        Err(_) => Err(VecU8::from("Internal panic while converting YAML to JSON")),
     }
-    if docs.len() > 1 {
-        return Err(VecU8::from("Multiple YAML documents are not supported"));
-    }
-    let mut out = String::with_capacity(input.len() * 2);
-    append_json_from_yaml_node(&docs[0], &mut out, 1, recursion_depth_limit)?;
-    Ok(VecU8::from(out))
 }
 
 fn append_json_escaped_string(s: &str, out: &mut String) {
@@ -105,7 +116,7 @@ fn append_json_from_yaml_node(
                 if i > 0 {
                     out.push(',');
                 }
-                append_json_from_yaml_node(elem, out, depth + 1, limit)?;
+                append_json_from_yaml_node(elem, out, depth.saturating_add(1), limit)?;
             }
             out.push(']');
         }
@@ -121,12 +132,12 @@ fn append_json_from_yaml_node(
                 }
                 append_json_escaped_string(key_str, out);
                 out.push(':');
-                append_json_from_yaml_node(val, out, depth + 1, limit)?;
+                append_json_from_yaml_node(val, out, depth.saturating_add(1), limit)?;
             }
             out.push('}');
         }
         YamlOwned::Tagged(_, inner) => {
-            append_json_from_yaml_node(inner, out, depth, limit)?;
+            append_json_from_yaml_node(inner, out, depth.saturating_add(1), limit)?;
         }
         YamlOwned::Alias(_) | YamlOwned::Representation(..) | YamlOwned::BadValue => {
             return Err(VecU8::from("Undefined YAML Node Type"));
