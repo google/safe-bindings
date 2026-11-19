@@ -1,7 +1,10 @@
 #include "pixel_bridge.h"
 
+#include <algorithm>
 #include <array>
+#include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <optional>
 #include <string>
 #include <utility>
@@ -89,23 +92,6 @@ absl::string_view StringViewFromSpanU8(absl::Span<const uint8_t> data) {
                            data.size());
 }
 
-absl::StatusOr<std::optional<std::string>> GetMetadata(
-    rs_std::Result<rs_std::Option<rust::vec_u8::VecU8>,
-                   rust::vec_u8::VecU8>
-        result_stat) {
-  if (!result_stat.has_value()) {
-    // NOTE: b/351976355 - Find a better error code for this Rust error.
-    return absl::InternalError(
-        StringViewFromVecU8(std::move(result_stat).err()));
-  }
-  std::optional<rust::vec_u8::VecU8> result_opt =
-      std::move(result_stat).value();
-  if (!result_opt.has_value()) {
-    return std::nullopt;
-  }
-  return std::string(StringViewFromVecU8(std::move(result_opt).value()));
-}
-
 std::string FormatToString(Format format) {
   switch (format) {
     case Format::kPng:
@@ -125,6 +111,65 @@ std::string FormatToString(Format format) {
     case Format::kJxl:
       return "jxl";
   }
+}
+
+absl::StatusOr<std::optional<std::string>> GetMetadata(
+    rs_std::Result<rs_std::Option<rust::vec_u8::VecU8>,
+                   rust::vec_u8::VecU8>
+        result_stat,
+    Format format) {
+  if (!result_stat.has_value()) {
+    rust::vec_u8::VecU8 err_msg_vec = std::move(result_stat).err();
+    absl::string_view err_msg = StringViewFromVecU8(err_msg_vec);
+    static_cast<void>(format);
+    if (absl::StartsWith(err_msg, "Failed to decode image: Limits(")) {
+      return absl::InvalidArgumentError(err_msg);
+    }
+    // NOTE: b/351976355 - Find a better error code for this Rust error.
+    return absl::InternalError(err_msg);
+  }
+  std::optional<rust::vec_u8::VecU8> result_opt =
+      std::move(result_stat).value();
+  if (!result_opt.has_value()) {
+    return std::nullopt;
+  }
+  return std::string(StringViewFromVecU8(std::move(result_opt).value()));
+}
+
+constexpr uint64_t NumChannels(ColorType color_type) {
+  switch (color_type) {
+    case ColorType::kL:
+      return 1;
+    case ColorType::kLa:
+      return 2;
+    case ColorType::kRgb:
+      return 3;
+    case ColorType::kRgba:
+      return 4;
+  }
+}
+
+constexpr uint64_t BytesPerSample(PixelType pixel_type) {
+  switch (pixel_type) {
+    case PixelType::kUint8:
+      return sizeof(uint8_t);
+    case PixelType::kUint16:
+      return sizeof(uint16_t);
+    case PixelType::kFloat32:
+      return sizeof(float);
+  }
+}
+
+// Upper bound on allocations while parsing headers and metadata in
+// `ImageReader::IntoDecoder()` (e.g. PNG iCCP decompression), regardless of the
+// limit set by the caller.
+constexpr uint64_t kMaxHeaderAlloc = uint64_t{64} * 1024 * 1024;
+
+constexpr std::optional<uint64_t> CheckedMulU64(uint64_t lhs, uint64_t rhs) {
+  if (lhs != 0 && rhs > std::numeric_limits<uint64_t>::max() / lhs) {
+    return std::nullopt;
+  }
+  return lhs * rhs;
 }
 
 inline absl::Status ToStatus(rust::image::Status status) {
@@ -162,33 +207,87 @@ std::optional<Frame> Frames::GetCurrentFrameAndAdvance() {
 ImageDecoder::ImageDecoder(rust::image::ImageDecoder decoder)
     : decoder_(std::move(decoder)) {}
 
-uint64_t ImageDecoder::GetWidth() { return decoder_.width(); }
+absl::Status ImageDecoder::CheckUsable() const {
+  if (!decoder_.has_value()) {
+    return absl::FailedPreconditionError(
+        "ImageDecoder was moved from or already consumed");
+  }
+  return limits_error_;
+}
 
-uint64_t ImageDecoder::GetHeight() { return decoder_.height(); }
+rust::image::ImageDecoder ImageDecoder::TakeDecoder() {
+  rust::image::ImageDecoder decoder = *std::move(decoder_);
+  decoder_.reset();
+  return decoder;
+}
+
+uint64_t ImageDecoder::GetWidth() const {
+  if (!decoder_.has_value()) return 0;
+  return decoder_->width();
+}
+
+uint64_t ImageDecoder::GetHeight() const {
+  if (!decoder_.has_value()) return 0;
+  return decoder_->height();
+}
 
 absl::StatusOr<ImageDecoder::Samples> ImageDecoder::ReadSamples() && {
+  if (absl::Status s = CheckUsable(); !s.ok()) return s;
+
+  absl::Status limit_status = ToStatus(decoder_->check_read_limits());
+  if (!limit_status.ok()) {
+    return limit_status;
+  }
+
+  const uint64_t width = GetWidth();
+  const uint64_t height = GetHeight();
+  const PixelType pixel_type = GetPixelType();
+  const uint64_t channels = NumChannels(GetColorType());
+  const uint64_t bytes_per_sample = BytesPerSample(pixel_type);
+
+  const std::optional<uint64_t> pixel_count = CheckedMulU64(width, height);
+  const std::optional<uint64_t> sample_count =
+      pixel_count.has_value() ? CheckedMulU64(*pixel_count, channels)
+                              : std::nullopt;
+  const std::optional<uint64_t> total_bytes =
+      sample_count.has_value() ? CheckedMulU64(*sample_count, bytes_per_sample)
+                               : std::nullopt;
+  if (!total_bytes.has_value() ||
+      *total_bytes >
+          static_cast<uint64_t>(std::numeric_limits<ptrdiff_t>::max()) ||
+      *total_bytes >
+          static_cast<uint64_t>(std::numeric_limits<size_t>::max())) {
+    return absl::InvalidArgumentError(
+        "Failed to decode image: image dimensions overflow buffer size");
+  }
+  if (max_alloc_.has_value() && *total_bytes > *max_alloc_) {
+    return absl::InvalidArgumentError(
+        "Failed to decode image: Limits(LimitError { kind: InsufficientMemory "
+        "})");
+  }
+
+  const size_t num_samples = static_cast<size_t>(*sample_count);
   absl::Status status;
-  switch (decoder_.pixel_type().tag) {
-    case rust::image::PixelType::Tag::U8: {
-      std::vector<uint8_t> result(decoder_.total_bytes());
+
+  switch (pixel_type) {
+    case PixelType::kUint8: {
+      std::vector<uint8_t> result(num_samples);
       status = std::move(*this).ReadSamplesInto(absl::MakeSpan(result));
       if (!status.ok()) {
         return status;
       }
       return result;
     }
-    case rust::image::PixelType::Tag::U16: {
-      // This is a uint16_t vector, respect that when calculating the size.
-      std::vector<uint16_t> result(decoder_.total_bytes() / sizeof(uint16_t));
+    case PixelType::kUint16: {
+      std::vector<uint16_t> result(num_samples);
       status = std::move(*this).ReadSamplesInto(absl::MakeSpan(result));
       if (!status.ok()) {
         return status;
       }
       return result;
     }
-    case rust::image::PixelType::Tag::F32: {
-      // This is a float vector, respect that when calculating the size.
-      std::vector<float> result(decoder_.total_bytes() / sizeof(float));
+    case PixelType::kFloat32: {
+      std::vector<float> result(num_samples);
       status = std::move(*this).ReadSamplesInto(absl::MakeSpan(result));
       if (!status.ok()) {
         return status;
@@ -199,35 +298,44 @@ absl::StatusOr<ImageDecoder::Samples> ImageDecoder::ReadSamples() && {
 }
 
 absl::Status ImageDecoder::ReadSamplesIntoRaw(absl::Span<uint8_t> buffer) && {
-  Format format = GetFormat();
-  absl::Status status = ToStatus(std::move(decoder_).read_u8_slice(buffer));
+  if (absl::Status s = CheckUsable(); !s.ok()) return s;
+  absl::Status status = ToStatus(TakeDecoder().read_u8_slice(buffer));
   return status;
 }
 
 absl::Status ImageDecoder::ReadSamplesInto(absl::Span<uint8_t> buffer) && {
-  CHECK_EQ(decoder_.pixel_type().tag,
+  if (absl::Status s = CheckUsable(); !s.ok()) return s;
+  CHECK_EQ(decoder_->pixel_type().tag,
            rust::image::PixelType::Tag::U8);
-  Format format = GetFormat();
-  absl::Status status = ToStatus(std::move(decoder_).read_u8_slice(buffer));
+  absl::Status status = ToStatus(TakeDecoder().read_u8_slice(buffer));
   return status;
 }
+
 absl::Status ImageDecoder::ReadSamplesInto(absl::Span<uint16_t> buffer) && {
-  CHECK_EQ(decoder_.pixel_type().tag,
+  if (absl::Status s = CheckUsable(); !s.ok()) return s;
+  if (reinterpret_cast<uintptr_t>(buffer.data()) % alignof(uint16_t) != 0) {
+    return absl::InvalidArgumentError("Buffer is not aligned for uint16_t");
+  }
+  CHECK_EQ(decoder_->pixel_type().tag,
            rust::image::PixelType::Tag::U16);
-  Format format = GetFormat();
-  absl::Status status = ToStatus(std::move(decoder_).read_u16_slice(buffer));
+  absl::Status status = ToStatus(TakeDecoder().read_u16_slice(buffer));
   return status;
 }
+
 absl::Status ImageDecoder::ReadSamplesInto(absl::Span<float> buffer) && {
-  CHECK_EQ(decoder_.pixel_type().tag,
+  if (absl::Status s = CheckUsable(); !s.ok()) return s;
+  if (reinterpret_cast<uintptr_t>(buffer.data()) % alignof(float) != 0) {
+    return absl::InvalidArgumentError("Buffer is not aligned for float");
+  }
+  CHECK_EQ(decoder_->pixel_type().tag,
            rust::image::PixelType::Tag::F32);
-  Format format = GetFormat();
-  absl::Status status = ToStatus(std::move(decoder_).read_f32_slice(buffer));
+  absl::Status status = ToStatus(TakeDecoder().read_f32_slice(buffer));
   return status;
 }
 
 void ImageDecoder::SetBackgroundColor(std::array<uint8_t, 4> color_8bit,
                                       std::array<uint16_t, 4> color_16bit) {
+  if (!decoder_.has_value()) return;
   uint32_t color_8_bit = (static_cast<uint32_t>(color_8bit[3]) << 24) |
                          (static_cast<uint32_t>(color_8bit[2]) << 16) |
                          (static_cast<uint32_t>(color_8bit[1]) << 8) |
@@ -236,31 +344,42 @@ void ImageDecoder::SetBackgroundColor(std::array<uint8_t, 4> color_8bit,
                           (static_cast<uint64_t>(color_16bit[2]) << 32) |
                           (static_cast<uint64_t>(color_16bit[1]) << 16) |
                           (static_cast<uint64_t>(color_16bit[0]));
-
-  decoder_.set_background_sustitution(color_8_bit, color_16_bit);
+  decoder_->set_background_sustitution(color_8_bit, color_16_bit);
 }
 
 void ImageDecoder::SetLimits(uint64_t max_alloc) {
-  static_cast<void>(decoder_.set_limits(max_alloc));
+  max_alloc_ = max_alloc;
+  if (!decoder_.has_value()) return;
+  absl::Status status = ToStatus(decoder_->set_limits(max_alloc));
+  limits_error_ = std::move(status);
 }
 
-bool ImageDecoder::IsAnimated() const { return decoder_.is_animated(); }
+bool ImageDecoder::IsAnimated() const {
+  if (!decoder_.has_value()) return false;
+  return decoder_->is_animated();
+}
 
 absl::StatusOr<Frames> ImageDecoder::GetAllFrames() && {
-  Format format = GetFormat();
+  if (absl::Status s = CheckUsable(); !s.ok()) return s;
   rs_std::Result<rust::image::Frames, rust::vec_u8::VecU8>
-      result = std::move(decoder_).all_frames();
+      result = TakeDecoder().all_frames();
+
   if (!result.has_value()) {
     rust::vec_u8::VecU8 err_msg_vec = std::move(result).err();
     absl::string_view err_msg = StringViewFromVecU8(err_msg_vec);
-    return absl::InternalError(err_msg);
+    if (absl::StartsWith(err_msg, "Rust panic caught") ||
+        absl::StartsWith(err_msg, "Decoder is in invalid")) {
+      return absl::InternalError(err_msg);
+    }
+    return absl::InvalidArgumentError(err_msg);
   }
 
   return Frames(std::move(result).value());
 }
 
-PixelType ImageDecoder::GetPixelType() {
-  switch (decoder_.pixel_type().tag) {
+PixelType ImageDecoder::GetPixelType() const {
+  if (!decoder_.has_value()) return PixelType::kUint8;
+  switch (decoder_->pixel_type().tag) {
     case rust::image::PixelType::Tag::U8:
       return PixelType::kUint8;
     case rust::image::PixelType::Tag::U16:
@@ -270,8 +389,9 @@ PixelType ImageDecoder::GetPixelType() {
   }
 }
 
-ColorType ImageDecoder::GetColorType() {
-  switch (decoder_.color_type().tag) {
+ColorType ImageDecoder::GetColorType() const {
+  if (!decoder_.has_value()) return ColorType::kRgb;
+  switch (decoder_->color_type().tag) {
     case rust::image::ColorType::Tag::L:
       return ColorType::kL;
     case rust::image::ColorType::Tag::La:
@@ -283,8 +403,9 @@ ColorType ImageDecoder::GetColorType() {
   }
 }
 
-Strides ImageDecoder::GetStrides() {
-  rust::image::Strides strides = decoder_.strides();
+Strides ImageDecoder::GetStrides() const {
+  if (!decoder_.has_value()) return Strides{0, 0, 0};
+  rust::image::Strides strides = decoder_->strides();
   return Strides{
       .width = strides.width,
       .height = strides.height,
@@ -293,31 +414,43 @@ Strides ImageDecoder::GetStrides() {
 }
 
 Format ImageDecoder::GetFormat() const {
-  return FromRustFormat(decoder_.format());
+  if (!decoder_.has_value()) return Format::kPng;
+  return FromRustFormat(decoder_->format());
 }
 
-bool ImageDecoder::IsCmyk() const { return decoder_.is_cmyk(); }
+bool ImageDecoder::IsCmyk() const {
+  if (!decoder_.has_value()) return false;
+  return decoder_->is_cmyk();
+}
 
-bool ImageDecoder::HasPalette() const { return decoder_.has_palette(); }
+bool ImageDecoder::HasPalette() const {
+  if (!decoder_.has_value()) return false;
+  return decoder_->has_palette();
+}
 
 std::optional<uint8_t> ImageDecoder::GetInputBitDepth() const {
-  return decoder_.bit_depth();
+  if (!decoder_.has_value()) return std::nullopt;
+  return decoder_->bit_depth();
 }
 
 absl::StatusOr<std::optional<std::string>> ImageDecoder::GetIccProfile() {
-  return GetMetadata(decoder_.icc_profile());
+  if (absl::Status s = CheckUsable(); !s.ok()) return s;
+  return GetMetadata(decoder_->icc_profile(), GetFormat());
 }
 
 absl::StatusOr<std::optional<std::string>> ImageDecoder::GetExifMetadata() {
-  return GetMetadata(decoder_.exif_metadata());
+  if (absl::Status s = CheckUsable(); !s.ok()) return s;
+  return GetMetadata(decoder_->exif_metadata(), GetFormat());
 }
 
 absl::StatusOr<std::optional<std::string>> ImageDecoder::GetXmpMetadata() {
-  return GetMetadata(decoder_.xmp_metadata());
+  if (absl::Status s = CheckUsable(); !s.ok()) return s;
+  return GetMetadata(decoder_->xmp_metadata(), GetFormat());
 }
 
 absl::StatusOr<std::optional<std::string>> ImageDecoder::GetIptcMetadata() {
-  return GetMetadata(decoder_.iptc_metadata());
+  if (absl::Status s = CheckUsable(); !s.ok()) return s;
+  return GetMetadata(decoder_->iptc_metadata(), GetFormat());
 }
 
 absl::StatusOr<ImageReader> ImageReader::NewFromFile(
@@ -354,15 +487,27 @@ void ImageReader::SetFormat(Format format) {
   reader_.set_format(ToRustFormat(format));
 }
 
+void ImageReader::SetLimits(uint64_t max_alloc) { max_alloc_ = max_alloc; }
+
 absl::StatusOr<ImageDecoder> ImageReader::IntoDecoder() && {
+  reader_.set_limits(
+      std::min(max_alloc_.value_or(kMaxHeaderAlloc), kMaxHeaderAlloc));
   rs_std::Result<rust::image::ImageDecoder,
                  rust::vec_u8::VecU8>
-      decoder = std::move(reader_).into_decoder();
-  if (!decoder.has_value()) {
-    return absl::InvalidArgumentError(
-        StringViewFromVecU8(std::move(decoder).err()));
+      decoder_or = std::move(reader_).into_decoder();
+  if (!decoder_or.has_value()) {
+    rust::vec_u8::VecU8 err_msg_vec = std::move(decoder_or).err();
+    absl::string_view err_msg = StringViewFromVecU8(err_msg_vec);
+    if (absl::StartsWith(err_msg, "Rust panic caught")) {
+      return absl::InternalError(err_msg);
+    }
+    return absl::InvalidArgumentError(err_msg);
   }
-  return ImageDecoder(std::move(decoder).value());
+  ImageDecoder decoder(std::move(decoder_or).value());
+  if (max_alloc_.has_value()) {
+    decoder.SetLimits(*max_alloc_);
+  }
+  return decoder;
 }
 
 }  // namespace security::pixel_bridge

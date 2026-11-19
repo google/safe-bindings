@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <optional>
 #include <string>
+#include <utility>
 #include <variant>
 #include <vector>
 
@@ -116,9 +117,21 @@ class ImageDecoder final {
  public:
   using Samples = std::variant<std::vector<uint8_t>, std::vector<uint16_t>,
                                std::vector<float>>;
-  // ImageDecoder is movable.
-  ImageDecoder(ImageDecoder&&) noexcept = default;
-  ImageDecoder& operator=(ImageDecoder&&) noexcept = default;
+  // ImageDecoder is movable. A moved-from decoder holds no Rust decoder: its
+  // fallible methods return `FailedPreconditionError` and its other getters
+  // return empty values.
+  ImageDecoder(ImageDecoder&& other) noexcept
+      : decoder_(std::exchange(other.decoder_, std::nullopt)),
+        max_alloc_(other.max_alloc_),
+        limits_error_(std::move(other.limits_error_)) {}
+  ImageDecoder& operator=(ImageDecoder&& other) noexcept {
+    if (this != &other) {
+      decoder_ = std::exchange(other.decoder_, std::nullopt);
+      max_alloc_ = other.max_alloc_;
+      limits_error_ = std::move(other.limits_error_);
+    }
+    return *this;
+  }
 
   // ImageDecoder is not copyable.
   ImageDecoder(const ImageDecoder&) = delete;
@@ -141,15 +154,15 @@ class ImageDecoder final {
   // The buffer must be the correct size and match the pixel type of the image.
   absl::Status ReadSamplesInto(absl::Span<float> buffer) &&;
   // Returns the width of the image in this buffer.
-  uint64_t GetWidth();
+  uint64_t GetWidth() const;
   // Returns the height of the image in this buffer.
-  uint64_t GetHeight();
+  uint64_t GetHeight() const;
   // Returns the pixel type of the image data produced by this decoder.
-  PixelType GetPixelType();
+  PixelType GetPixelType() const;
   // Returns the color type of the image data produced by this decoder.
-  ColorType GetColorType();
+  ColorType GetColorType() const;
   // Returns the stride information of the image data produced by this decoder.
-  Strides GetStrides();
+  Strides GetStrides() const;
   // Returns the format of the image.
   Format GetFormat() const;
   // Whether the image is originally a CMYK image (this class will convert
@@ -191,7 +204,8 @@ class ImageDecoder final {
   // channel is present.
   void SetBackgroundColor(std::array<uint8_t, 4> color_8bit,
                           std::array<uint16_t, 4> color_16bit);
-  // Sets the memory limit for the decoder.
+  // Sets the memory limit for decoding pixel data and metadata. To also bound
+  // header parsing, use `ImageReader::SetLimits()` instead.
   void SetLimits(uint64_t max_alloc);
   // Whether this decoder is able to return a series of animated frames.
   bool IsAnimated() const;
@@ -201,8 +215,20 @@ class ImageDecoder final {
 
  private:
   friend class ImageReader;
-  explicit ImageDecoder(rust::image::ImageDecoder);
-  rust::image::ImageDecoder decoder_;
+  explicit ImageDecoder(rust::image::ImageDecoder decoder);
+  // Returns `FailedPreconditionError` if moved from or consumed, else the
+  // error (if any) from the last `SetLimits()` call.
+  absl::Status CheckUsable() const;
+  // Takes the Rust decoder out for a consuming call, leaving `decoder_` empty.
+  // REQUIRES: `decoder_.has_value()`.
+  rust::image::ImageDecoder TakeDecoder();
+
+  // Empty once moved from or consumed by a `&&` method.
+  std::optional<rust::image::ImageDecoder> decoder_;
+  std::optional<uint64_t> max_alloc_;
+  // Error from applying `SetLimits()` to the Rust decoder, returned by later
+  // decoding and metadata calls so that limits are never silently dropped.
+  absl::Status limits_error_;
 };
 
 // A multi-format image reader.
@@ -227,14 +253,20 @@ class ImageReader final {
 
   // Supply the format as which to interpret the read image.
   void SetFormat(Format format);
+  // Sets the memory limit for header and metadata parsing in `IntoDecoder()`
+  // and for the returned decoder (see `ImageDecoder::SetLimits()`). Header
+  // parsing is additionally capped at 64 MiB.
+  void SetLimits(uint64_t max_alloc);
   // Convert the reader into a decoder.
   //
   // Guesses the format and constructs the correct decoder for the format.
+  // Fails if the image header cannot be parsed within the memory limit.
   absl::StatusOr<ImageDecoder> IntoDecoder() &&;
 
  private:
   explicit ImageReader(rust::reader::ImageReader reader);
   rust::reader::ImageReader reader_;
+  std::optional<uint64_t> max_alloc_;
 };
 
 }  // namespace security::pixel_bridge

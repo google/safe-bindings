@@ -1,16 +1,18 @@
-use crate::{
-    reader::{Format, ReadSeek},
-    vec_u8::VecU8,
-};
+use crate::reader::{Format, ReadSeek};
+use crate::vec_u8::VecU8;
+use image::codecs::bmp::BmpDecoder as RustBmpDecoder;
+use image::codecs::gif::GifDecoder as RustGifDecoder;
+use image::codecs::ico::IcoDecoder as RustIcoDecoder;
+use image::codecs::jpeg::JpegDecoder as RustJpegDecoder;
+use image::codecs::png::PngDecoder as RustPngDecoder;
+use image::codecs::tiff::TiffDecoder as RustTiffDecoder;
+use image::codecs::webp::WebPDecoder as RustWebPDecoder;
+use image::flat::SampleLayout as RustSampleLayout;
 use image::{
-    codecs::bmp::BmpDecoder as RustBmpDecoder, codecs::gif::GifDecoder as RustGifDecoder,
-    codecs::ico::IcoDecoder as RustIcoDecoder, codecs::jpeg::JpegDecoder as RustJpegDecoder,
-    codecs::png::PngDecoder as RustPngDecoder, codecs::tiff::TiffDecoder as RustTiffDecoder,
-    codecs::webp::WebPDecoder as RustWebPDecoder, flat::SampleLayout as RustSampleLayout,
     AnimationDecoder, ColorType as RustColorType, ExtendedColorType as RustExtendedColorType,
-    Frame as RustFrame, ImageBuffer as RustImageBuffer, ImageDecoder as RustImageDecoder,
-    Rgba as RustRgba,
+    Frame as RustFrame, ImageDecoder as RustImageDecoder, Rgba as RustRgba,
 };
+
 #[cfg(feature = "jxl")]
 use jxl_image_rs_integration::JxlDecoder as RustJxlDecoder;
 use std::collections::VecDeque;
@@ -23,6 +25,7 @@ pub(crate) enum GenericImageDecoder {
     Tiff(Box<RustTiffDecoder<Box<dyn ReadSeek>>>),
     Bmp(Box<RustBmpDecoder<Box<dyn ReadSeek>>>),
     Ico(Box<RustIcoDecoder<Box<dyn ReadSeek>>>),
+
     #[cfg(feature = "jxl")]
     Jxl(Box<RustJxlDecoder<Box<dyn ReadSeek>>>),
 }
@@ -37,6 +40,7 @@ macro_rules! call_generic_decoder {
             &GenericImageDecoder::Tiff(ref $decoder) => $expr,
             &GenericImageDecoder::Bmp(ref $decoder) => $expr,
             &GenericImageDecoder::Ico(ref $decoder) => $expr,
+
             #[cfg(feature = "jxl")]
             &GenericImageDecoder::Jxl(ref $decoder) => $expr,
         }
@@ -53,6 +57,7 @@ macro_rules! call_generic_decoder_mut {
             &mut GenericImageDecoder::Tiff(ref mut $decoder) => $expr,
             &mut GenericImageDecoder::Bmp(ref mut $decoder) => $expr,
             &mut GenericImageDecoder::Ico(ref mut $decoder) => $expr,
+
             #[cfg(feature = "jxl")]
             &mut GenericImageDecoder::Jxl(ref mut $decoder) => $expr,
         }
@@ -69,6 +74,7 @@ macro_rules! call_generic_decoder_owned {
             GenericImageDecoder::Tiff($decoder) => $expr,
             GenericImageDecoder::Bmp($decoder) => $expr,
             GenericImageDecoder::Ico($decoder) => $expr,
+
             #[cfg(feature = "jxl")]
             GenericImageDecoder::Jxl($decoder) => $expr,
         }
@@ -134,9 +140,9 @@ pub struct ImageDecoder {
     sample_layout: Option<RustSampleLayout>,
     background_subs: Option<(RustRgba<u8>, RustRgba<u16>)>,
     pub(crate) should_premultiply: bool,
+    max_alloc: Option<u64>,
 }
 
-#[cfg(debug_assertions)]
 impl std::fmt::Debug for ImageDecoder {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "ImageDecoder")
@@ -262,14 +268,15 @@ impl Frame {
 
     /// Delay of the current frame in ms.
     pub fn curr_delay_ms(&self) -> u64 {
-        match self.inner {
+        run_catching_panics(|| match self.inner {
             Some(ref frame) => {
                 let delay = std::time::Duration::from(frame.delay());
                 delay.as_millis() as u64
             }
             // We are in a moved out state, return an arbitrary value.
             None => 0,
-        }
+        })
+        .unwrap_or(0)
     }
 
     /// Get a reference to the underlying data. The reference will be living as
@@ -312,7 +319,7 @@ fn format_panic(err: Box<dyn std::any::Any + Send>) -> String {
     format!("Rust panic caught: {}\nBacktrace:\n{}", msg, backtrace)
 }
 
-fn run_catching_panics<F, T>(f: F) -> Result<T, String>
+pub(crate) fn run_catching_panics<F, T>(f: F) -> Result<T, String>
 where
     F: FnOnce() -> T,
 {
@@ -326,17 +333,6 @@ where
     }
 }
 
-fn run_read_image<F>(f: F) -> Result<(), Status>
-where
-    F: FnOnce() -> image::ImageResult<()>,
-{
-    match run_catching_panics(f) {
-        Ok(Ok(())) => Ok(()),
-        Ok(Err(err)) => Err(invalid_argument_error(format!("Failed to decode image: {:?}", err))),
-        Err(formatted_error) => Err(internal_error(formatted_error)),
-    }
-}
-
 fn run_fallible_result<F>(f: F) -> Result<Frames, VecU8>
 where
     F: FnOnce() -> Result<Frames, VecU8>,
@@ -347,6 +343,31 @@ where
     }
 }
 
+#[derive(Copy, Clone, PartialEq, Eq)]
+enum DestinationAlignment {
+    Aligned,
+    Unaligned,
+}
+
+fn checked_row_major_packed(channels: u8, width: u32, height: u32) -> Option<RustSampleLayout> {
+    let width_usize = usize::try_from(width).ok()?;
+    usize::from(channels).checked_mul(width_usize)?;
+    Some(RustSampleLayout::row_major_packed(channels, width, height))
+}
+
+fn blend_pixels_in_place<P>(samples: &mut [P::Subpixel], background: P)
+where
+    P: image::Pixel,
+{
+    let channels = usize::from(P::CHANNEL_COUNT);
+    for pixel_slice in samples.chunks_exact_mut(channels) {
+        let pixel = P::from_slice_mut(pixel_slice);
+        let mut blended = background;
+        blended.blend(pixel);
+        *pixel = blended;
+    }
+}
+
 impl ImageDecoder {
     /// Creates a new `ImageDecoder`.
     pub(crate) fn new(rust_decoder: GenericImageDecoder) -> Self {
@@ -354,125 +375,216 @@ impl ImageDecoder {
         Self {
             sample_layout: match &rust_decoder.color_type() {
                 RustColorType::L16 | RustColorType::L8 => {
-                    Some(RustSampleLayout::row_major_packed(1, width, height))
+                    checked_row_major_packed(1, width, height)
                 }
                 RustColorType::La16 | RustColorType::La8 => {
-                    Some(RustSampleLayout::row_major_packed(2, width, height))
+                    checked_row_major_packed(2, width, height)
                 }
                 RustColorType::Rgb32F | RustColorType::Rgb16 | RustColorType::Rgb8 => {
-                    Some(RustSampleLayout::row_major_packed(3, width, height))
+                    checked_row_major_packed(3, width, height)
                 }
                 RustColorType::Rgba32F | RustColorType::Rgba16 | RustColorType::Rgba8 => {
-                    Some(RustSampleLayout::row_major_packed(4, width, height))
+                    checked_row_major_packed(4, width, height)
                 }
                 _ => None,
             },
             inner: Some(rust_decoder),
             background_subs: None,
             should_premultiply: false,
+            max_alloc: None,
+        }
+    }
+
+    fn insufficient_memory_message() -> String {
+        format!(
+            "Failed to decode image: {:?}",
+            image::ImageError::Limits(image::error::LimitError::from_kind(
+                image::error::LimitErrorKind::InsufficientMemory,
+            ))
+        )
+    }
+
+    fn compute_required_bytes(
+        inner: &GenericImageDecoder,
+        alignment: DestinationAlignment,
+    ) -> Result<(usize, u128), Status> {
+        let (width, height) = inner.dimensions();
+        let color_type = inner.color_type();
+        let bytes_per_pixel = u128::from(color_type.bytes_per_pixel());
+        let pixel_count = u128::from(width) * u128::from(height);
+        let output_bytes_u128 = pixel_count * bytes_per_pixel;
+
+        let Ok(output_bytes_usize) = usize::try_from(output_bytes_u128) else {
+            return Err(invalid_argument_error(Self::insufficient_memory_message()));
+        };
+        if output_bytes_usize > isize::MAX as usize {
+            return Err(invalid_argument_error(Self::insufficient_memory_message()));
+        }
+
+        let required_u128 = match inner {
+            GenericImageDecoder::Tiff(tiff_decoder) => {
+                let tiff_bpp = match tiff_decoder.original_color_type() {
+                    RustExtendedColorType::Cmyk8 => 4u128,
+                    RustExtendedColorType::Cmyk16 => 8u128,
+                    _ => bytes_per_pixel,
+                };
+                output_bytes_u128.max(pixel_count * tiff_bpp)
+            }
+            GenericImageDecoder::WebP(webp_decoder) if webp_decoder.has_animation() => {
+                output_bytes_u128.max(pixel_count * 4)
+            }
+
+            #[cfg(feature = "jxl")]
+            GenericImageDecoder::Jxl(_) => {
+                let channel_count = usize::from(color_type.channel_count()).max(1);
+                let bytes_per_sample = usize::from(color_type.bytes_per_pixel()) / channel_count;
+                if alignment == DestinationAlignment::Unaligned && bytes_per_sample > 1 {
+                    output_bytes_u128 * 2
+                } else {
+                    output_bytes_u128
+                }
+            }
+            _ => {
+                let _ = alignment;
+                output_bytes_u128
+            }
+        };
+
+        Ok((output_bytes_usize, required_u128))
+    }
+
+    fn validate_read_limits(&self, alignment: DestinationAlignment) -> Result<usize, Status> {
+        let Some(ref inner) = self.inner else {
+            return Err(internal_error("ImageDecoder is in invalid, moved out state"));
+        };
+        let (output_bytes, required_bytes) = Self::compute_required_bytes(inner, alignment)?;
+        if let Some(max_alloc) = self.max_alloc
+            && required_bytes > u128::from(max_alloc)
+        {
+            return Err(invalid_argument_error(Self::insufficient_memory_message()));
+        }
+        Ok(output_bytes)
+    }
+
+    /// Validates that the decoder has not been moved from and that the output
+    /// image fits within the configured memory limits and platform bounds.
+    pub fn check_read_limits(&self) -> Status {
+        match run_catching_panics(|| {
+            match self.validate_read_limits(DestinationAlignment::Aligned) {
+                Ok(_) => ok(),
+                Err(status) => status,
+            }
+        }) {
+            Ok(status) => status,
+            Err(formatted_error) => internal_error(formatted_error),
+        }
+    }
+
+    fn decode_and_postprocess(self, byte_buf: &mut [u8]) -> Status {
+        match run_catching_panics(move || {
+            let Some(ref inner_ref) = self.inner else {
+                return internal_error("ImageDecoder is in invalid, moved out state");
+            };
+            let color_type = inner_ref.color_type();
+            let channel_count = usize::from(color_type.channel_count()).max(1);
+            let bytes_per_sample = usize::from(color_type.bytes_per_pixel()) / channel_count;
+            let alignment = if bytes_per_sample > 1
+                && bytes_per_sample.is_power_of_two()
+                && byte_buf.as_ptr().align_offset(bytes_per_sample) != 0
+            {
+                DestinationAlignment::Unaligned
+            } else {
+                DestinationAlignment::Aligned
+            };
+
+            let expected_bytes = match self.validate_read_limits(alignment) {
+                Ok(expected) => expected,
+                Err(status) => return status,
+            };
+            if byte_buf.len() != expected_bytes {
+                return invalid_argument_error(format!(
+                    "Failed to decode image: output buffer length ({}) does not match expected byte size ({expected_bytes})",
+                    byte_buf.len(),
+                ));
+            }
+
+            let Some(inner) = self.inner else {
+                return internal_error("ImageDecoder is in invalid, moved out state");
+            };
+            if let Err(err) = inner.read_image(byte_buf) {
+                return invalid_argument_error(format!("Failed to decode image: {:?}", err));
+            }
+            if let Some(background_subs) = self.background_subs
+                && let Err(status) =
+                    Self::perform_color_correction(byte_buf, background_subs, color_type)
+            {
+                return status;
+            }
+            if self.should_premultiply
+                && let Err(status) = Self::premultiply_alpha_bytes(byte_buf, color_type)
+            {
+                return status;
+            }
+            ok()
+        }) {
+            Ok(status) => status,
+            Err(formatted_error) => internal_error(formatted_error),
         }
     }
 
     /// Read the raw u8 image data into `buf`.
     pub fn read_u8_slice(self, buf: &mut [u8]) -> Status {
-        let Some(inner) = self.inner else {
-            return internal_error("ImageDecoder is in invalid, moved out state");
-        };
-        let (width, height) = inner.dimensions();
-        let color_type = inner.color_type();
-
-        match run_read_image(|| inner.read_image(buf)) {
-            Ok(()) => {
-                if let Some(background_subs) = self.background_subs {
-                    Self::perform_color_correction(buf, background_subs, color_type, width, height);
-                }
-                if self.should_premultiply {
-                    match color_type {
-                        RustColorType::Rgba8 => pic_scale_safe::premultiply_rgba8(buf),
-                        RustColorType::La8 => pic_scale_safe::premultiply_la8(buf),
-                        _ => {}
-                    }
-                }
-                ok()
-            }
-            Err(status) => status,
-        }
+        self.decode_and_postprocess(buf)
     }
 
     /// Read the raw u16 image data into `buf`.
     pub fn read_u16_slice(self, buf: &mut [u16]) -> Status {
-        let Some(inner) = self.inner else {
-            return internal_error("ImageDecoder is in invalid, moved out state");
-        };
-        let (width, height) = inner.dimensions();
-        let color_type = inner.color_type();
         let byte_buf: &mut [u8] = bytemuck::cast_slice_mut(buf);
-
-        match run_read_image(|| inner.read_image(byte_buf)) {
-            Ok(()) => {
-                if let Some(background_subs) = self.background_subs {
-                    Self::perform_color_correction(
-                        byte_buf,
-                        background_subs,
-                        color_type,
-                        width,
-                        height,
-                    );
-                }
-                if self.should_premultiply {
-                    match color_type {
-                        RustColorType::Rgba16 => pic_scale_safe::premultiply_rgba16(buf, 16),
-                        RustColorType::La16 => pic_scale_safe::premultiply_la16(buf, 16),
-                        _ => {}
-                    }
-                }
-                ok()
-            }
-            Err(status) => status,
-        }
+        self.decode_and_postprocess(byte_buf)
     }
 
     /// Read the raw f32 image data into `buf`.
     pub fn read_f32_slice(self, buf: &mut [f32]) -> Status {
-        let Some(inner) = self.inner else {
-            return internal_error("ImageDecoder is in invalid, moved out state");
-        };
-        let color_type = inner.color_type();
         let byte_buf: &mut [u8] = bytemuck::cast_slice_mut(buf);
-
-        match run_read_image(|| inner.read_image(byte_buf)) {
-            Ok(()) => {
-                if self.should_premultiply && color_type == RustColorType::Rgba32F {
-                    pic_scale_safe::premultiply_rgba_f32(buf);
-                }
-                ok()
-            }
-            Err(status) => status,
-        }
+        self.decode_and_postprocess(byte_buf)
     }
 
+    /// Returns the total byte size of the decoded image, or 0 if moved from.
     pub fn total_bytes(&self) -> u64 {
-        self.inner.as_ref().map_or(0, |inner| inner.total_bytes())
+        run_catching_panics(|| self.inner.as_ref().map_or(0, |inner| inner.total_bytes()))
+            .unwrap_or(0)
     }
 
     /// Returns the width of the image data produced by this decoder.
     pub fn width(&self) -> usize {
-        self.inner.as_ref().map_or(0, |inner| inner.dimensions().0 as usize)
+        run_catching_panics(|| self.inner.as_ref().map_or(0, |inner| inner.dimensions().0 as usize))
+            .unwrap_or(0)
     }
 
     /// Returns the height of the image data produced by this decoder.
     pub fn height(&self) -> usize {
-        self.inner.as_ref().map_or(0, |inner| inner.dimensions().1 as usize)
+        run_catching_panics(|| self.inner.as_ref().map_or(0, |inner| inner.dimensions().1 as usize))
+            .unwrap_or(0)
     }
 
     /// Returns the color type of the image data produced by this decoder.
     pub fn color_type(&self) -> ColorType {
-        self.inner.as_ref().map_or(Default::default(), |inner| ColorType::from(inner.color_type()))
+        run_catching_panics(|| {
+            self.inner
+                .as_ref()
+                .map_or_else(ColorType::default, |inner| ColorType::from(inner.color_type()))
+        })
+        .unwrap_or_default()
     }
 
     /// Returns the PixelType of the image data produced by this decoder.
     pub fn pixel_type(&self) -> PixelType {
-        self.inner.as_ref().map_or(Default::default(), |inner| PixelType::from(inner.color_type()))
+        run_catching_panics(|| {
+            self.inner
+                .as_ref()
+                .map_or_else(PixelType::default, |inner| PixelType::from(inner.color_type()))
+        })
+        .unwrap_or_default()
     }
 
     /// Returns the format of the image.
@@ -490,6 +602,7 @@ impl ImageDecoder {
             GenericImageDecoder::Tiff(_) => Format::Tiff,
             GenericImageDecoder::Bmp(_) => Format::Bmp,
             GenericImageDecoder::Ico(_) => Format::Ico,
+
             #[cfg(feature = "jxl")]
             GenericImageDecoder::Jxl(_) => Format::Jxl,
         }
@@ -498,14 +611,17 @@ impl ImageDecoder {
     /// Whether the image is originally a CMYK image (this class will convert
     /// it and return an RGB anyways).
     pub fn is_cmyk(&self) -> bool {
-        self.inner.as_ref().is_some_and(|inner| {
-            // The zune_image lib returns YCCK for a lot of images that are CMYK in libjpeg_turbo.
-            // For YCCK, it returns `ExtendedColorType::Unknown(253)`.
-            matches!(
-                inner.original_color_type(),
-                RustExtendedColorType::Cmyk8 | RustExtendedColorType::Cmyk16
-            )
+        run_catching_panics(|| {
+            self.inner.as_ref().is_some_and(|inner| {
+                // The zune_image lib returns YCCK for a lot of images that are CMYK in
+                // libjpeg_turbo. For YCCK, it returns `ExtendedColorType::Unknown(253)`.
+                matches!(
+                    inner.original_color_type(),
+                    RustExtendedColorType::Cmyk8 | RustExtendedColorType::Cmyk16
+                )
+            })
         })
+        .unwrap_or(false)
     }
 
     /// Whether the image originally used an indexed color palette.
@@ -513,12 +629,13 @@ impl ImageDecoder {
     /// Note: This is currently only relevant for PNG images, where the `image` crate uses
     /// `ExtendedColorType::Unknown(u8)` to represent indexed color types.
     pub fn has_palette(&self) -> bool {
-        match self.format() {
+        run_catching_panics(|| match self.format() {
             Format::Png => self.inner.as_ref().is_some_and(|inner| {
                 matches!(inner.original_color_type(), RustExtendedColorType::Unknown(_))
             }),
             _ => false,
-        }
+        })
+        .unwrap_or(false)
     }
 
     /// Returns the bit depth of an image. Note that this only indicates the depth as
@@ -528,17 +645,20 @@ impl ImageDecoder {
     /// Returns `None` if this cannot be determined for a given image (does not mean the
     /// image is invalid).
     pub fn bit_depth(&self) -> Option<u8> {
-        self.inner.as_ref().and_then(|inner| {
-            let color_type = inner.original_color_type();
-            let channel_count = color_type.channel_count();
-            if channel_count == 0 {
-                return None;
-            }
-            let bits_per_pixel = color_type.bits_per_pixel();
-            // Perform division before casting to u8 to prevent overflow.
-            let bit_depth = bits_per_pixel / (channel_count as u16);
-            u8::try_from(bit_depth).ok()
+        run_catching_panics(|| {
+            self.inner.as_ref().and_then(|inner| {
+                let color_type = inner.original_color_type();
+                let channel_count = color_type.channel_count();
+                if channel_count == 0 {
+                    return None;
+                }
+                let bits_per_pixel = color_type.bits_per_pixel();
+                // Perform division before casting to u8 to prevent overflow.
+                let bit_depth = bits_per_pixel / (channel_count as u16);
+                u8::try_from(bit_depth).ok()
+            })
         })
+        .unwrap_or(None)
     }
 
     /// Returns the strides of the image data produced by this decoder.
@@ -553,26 +673,68 @@ impl ImageDecoder {
         matches!(self.inner, Some(GenericImageDecoder::Gif(_) | GenericImageDecoder::WebP(_)))
     }
 
+    fn collect_bounded_frames<I>(frames_iter: I, max_alloc: Option<u64>) -> Result<Frames, VecU8>
+    where
+        I: Iterator<Item = image::ImageResult<RustFrame>>,
+    {
+        let mut collected_frames: Vec<RustFrame> = Vec::new();
+        let mut accumulated_bytes: u128 = 0;
+        for frame_result in frames_iter {
+            let frame = frame_result.map_err(|err| VecU8::from(err.to_string()))?;
+            let frame_bytes = frame.buffer().as_raw().len() as u128;
+            accumulated_bytes = accumulated_bytes.saturating_add(frame_bytes);
+            if let Some(limit) = max_alloc
+                && accumulated_bytes > u128::from(limit)
+            {
+                return Err(VecU8::from(Self::insufficient_memory_message()));
+            }
+            collected_frames.push(frame);
+        }
+        Ok(Frames::new(collected_frames))
+    }
+
     /// Returns all animated frames of the image. This only returns data for decoders, where
     /// `is_animated` returns true.
     pub fn all_frames(self) -> Result<Frames, VecU8> {
-        run_fallible_result(move || match self.inner {
-            Some(GenericImageDecoder::Gif(gif_decoder)) => {
-                match gif_decoder.into_frames().collect_frames() {
-                    Ok(frames) => Ok(Frames::new(frames)),
-                    Err(err) => Err(err.to_string().into()),
+        let max_alloc = self.max_alloc;
+        run_fallible_result(move || {
+            let Some(inner) = self.inner else {
+                return Err(VecU8::from("Decoder is in invalid, moved out state"));
+            };
+            if !matches!(inner, GenericImageDecoder::Gif(_) | GenericImageDecoder::WebP(_)) {
+                return Err(VecU8::from(
+                    "Trying to get animated data on a codec that does not support animation",
+                ));
+            }
+            let (width, height) = inner.dimensions();
+            let canvas_bytes = u128::from(width) * u128::from(height) * 4;
+            if usize::try_from(canvas_bytes).is_err() || canvas_bytes > isize::MAX as u128 {
+                return Err(VecU8::from(Self::insufficient_memory_message()));
+            }
+            if let Some(limit) = max_alloc
+                && canvas_bytes > u128::from(limit)
+            {
+                return Err(VecU8::from(Self::insufficient_memory_message()));
+            }
+
+            match inner {
+                GenericImageDecoder::Gif(mut gif_decoder) => {
+                    if let Some(limit) = max_alloc {
+                        let mut full_limits = image::Limits::default();
+                        full_limits.max_alloc = Some(limit);
+                        gif_decoder.set_limits(full_limits).map_err(|err| {
+                            VecU8::from(format!("Failed to decode image: {:?}", err))
+                        })?;
+                    }
+                    Self::collect_bounded_frames(gif_decoder.into_frames(), max_alloc)
                 }
-            }
-            Some(GenericImageDecoder::WebP(webp_decoder)) => {
-                match webp_decoder.into_frames().collect_frames() {
-                    Ok(frames) => Ok(Frames::new(frames)),
-                    Err(err) => Err(err.to_string().into()),
+                GenericImageDecoder::WebP(webp_decoder) => {
+                    Self::collect_bounded_frames(webp_decoder.into_frames(), max_alloc)
                 }
+                _ => Err(VecU8::from(
+                    "Trying to get animated data on a codec that does not support animation",
+                )),
             }
-            Some(_) => {
-                Err("Trying to get animated data on a codec that does not support animation".into())
-            }
-            None => Err("Decoder is in invalid, moved out state".into()),
         })
     }
 
@@ -580,14 +742,27 @@ impl ImageDecoder {
     where
         F: FnOnce(&mut GenericImageDecoder) -> image::ImageResult<Option<Vec<u8>>>,
     {
-        let Some(ref mut inner) = self.inner else {
-            return Err("Reader in illegal moved-out state".into());
-        };
+        let max_alloc = self.max_alloc;
+        match run_catching_panics(|| {
+            let Some(ref mut inner) = self.inner else {
+                return Err(VecU8::from("Reader in illegal moved-out state"));
+            };
 
-        match metadata_fn(inner) {
-            Ok(Some(metadata)) => Ok(Some(metadata.into())),
-            Ok(None) => Ok(None),
-            Err(err) => Err(err.to_string().into()),
+            match metadata_fn(inner) {
+                Ok(Some(metadata)) => {
+                    if let Some(limit) = max_alloc
+                        && (metadata.len() as u64) > limit
+                    {
+                        return Err(VecU8::from(Self::insufficient_memory_message()));
+                    }
+                    Ok(Some(metadata.into()))
+                }
+                Ok(None) => Ok(None),
+                Err(err) => Err(VecU8::from(err.to_string())),
+            }
+        }) {
+            Ok(result) => result,
+            Err(formatted_error) => Err(formatted_error.into()),
         }
     }
 
@@ -641,60 +816,205 @@ impl ImageDecoder {
         self.background_subs = Some((color_u8, color_u16));
     }
 
+    /// Sets the maximum allocation limit in bytes for decoding operations.
     pub fn set_limits(&mut self, max_alloc: u64) -> Status {
-        let mut limits = image::Limits::default();
-        limits.max_alloc = Some(max_alloc);
+        self.max_alloc = Some(max_alloc);
+        match run_catching_panics(|| {
+            let Some(inner) = &mut self.inner else {
+                return internal_error("ImageDecoder is in invalid, moved out state");
+            };
 
-        if let Some(inner) = &mut self.inner
-            && let Err(e) = inner.set_limits(limits)
-        {
-            return invalid_argument_error(format!("Failed to set limits: {:?}", e));
+            let (width, height) = inner.dimensions();
+            let bytes_per_pixel = u64::from(inner.color_type().bytes_per_pixel()).max(1);
+            let output_bytes = u128::from(width) * u128::from(height) * u128::from(bytes_per_pixel);
+
+            let mut limits = image::Limits::default();
+            match inner {
+                GenericImageDecoder::Gif(_) => {
+                    let remaining = u128::from(max_alloc).saturating_sub(output_bytes);
+                    limits.max_alloc = Some(u64::try_from(remaining).unwrap_or(0));
+                }
+                GenericImageDecoder::Jpeg(_) => {
+                    limits.max_alloc = Some(max_alloc);
+                    if width == 0 && height == 0 {
+                        let max_dim = (max_alloc / bytes_per_pixel).min(u64::from(u32::MAX)) as u32;
+                        limits.max_image_width = Some(max_dim);
+                        limits.max_image_height = Some(max_dim);
+                    } else if height == 0 {
+                        let denom = u128::from(width) * u128::from(bytes_per_pixel);
+                        let max_height =
+                            (u128::from(max_alloc) / denom).min(u128::from(u32::MAX)) as u32;
+                        limits.max_image_height = Some(max_height);
+                    } else if width == 0 {
+                        let denom = u128::from(height) * u128::from(bytes_per_pixel);
+                        let max_width =
+                            (u128::from(max_alloc) / denom).min(u128::from(u32::MAX)) as u32;
+                        limits.max_image_width = Some(max_width);
+                    }
+                }
+                _ => {
+                    limits.max_alloc = Some(max_alloc);
+                }
+            }
+
+            if let Err(err) = inner.set_limits(limits) {
+                return invalid_argument_error(format!("Failed to set limits: {:?}", err));
+            }
+            ok()
+        }) {
+            Ok(status) => status,
+            Err(formatted_error) => internal_error(formatted_error),
         }
-        ok()
     }
 
-    /// Performs the actual color correction.
+    fn for_each_u16_pixel_chunk_mut<F>(
+        buf: &mut [u8],
+        channels: usize,
+        mut callback: F,
+    ) -> Result<(), Status>
+    where
+        F: FnMut(&mut [u16]),
+    {
+        let bytes_per_pixel = channels * std::mem::size_of::<u16>();
+        if !buf.len().is_multiple_of(bytes_per_pixel) {
+            return Err(invalid_argument_error(format!(
+                "Pixel buffer length ({}) is not a multiple of {bytes_per_pixel}",
+                buf.len(),
+            )));
+        }
+        if buf.is_empty() {
+            return Ok(());
+        }
+        match bytemuck::try_cast_slice_mut::<u8, u16>(buf) {
+            Ok(aligned_slice) => {
+                callback(aligned_slice);
+                Ok(())
+            }
+            Err(bytemuck::PodCastError::TargetAlignmentGreaterAndInputNotAligned) => {
+                const CHUNK_U16S: usize = 256;
+                debug_assert!(
+                    CHUNK_U16S.is_multiple_of(channels),
+                    "256 u16 samples must be divisible by pixel channel count ({channels})"
+                );
+                let mut scratch = [0u16; CHUNK_U16S];
+                for byte_chunk in buf.chunks_mut(CHUNK_U16S * std::mem::size_of::<u16>()) {
+                    let u16_len = byte_chunk.len() / std::mem::size_of::<u16>();
+                    let scratch_slice = &mut scratch[..u16_len];
+                    for (dst, src) in scratch_slice.iter_mut().zip(byte_chunk.chunks_exact(2)) {
+                        *dst = u16::from_ne_bytes([src[0], src[1]]);
+                    }
+                    callback(scratch_slice);
+                    for (dst, src) in byte_chunk.chunks_exact_mut(2).zip(scratch_slice.iter()) {
+                        dst.copy_from_slice(&src.to_ne_bytes());
+                    }
+                }
+                Ok(())
+            }
+            Err(err) => {
+                Err(invalid_argument_error(format!("Invalid u16 pixel buffer layout: {err}")))
+            }
+        }
+    }
+
+    fn for_each_f32_pixel_chunk_mut<F>(
+        buf: &mut [u8],
+        channels: usize,
+        mut callback: F,
+    ) -> Result<(), Status>
+    where
+        F: FnMut(&mut [f32]),
+    {
+        let bytes_per_pixel = channels * std::mem::size_of::<f32>();
+        if !buf.len().is_multiple_of(bytes_per_pixel) {
+            return Err(invalid_argument_error(format!(
+                "Pixel buffer length ({}) is not a multiple of {bytes_per_pixel}",
+                buf.len(),
+            )));
+        }
+        if buf.is_empty() {
+            return Ok(());
+        }
+        match bytemuck::try_cast_slice_mut::<u8, f32>(buf) {
+            Ok(aligned_slice) => {
+                callback(aligned_slice);
+                Ok(())
+            }
+            Err(bytemuck::PodCastError::TargetAlignmentGreaterAndInputNotAligned) => {
+                const CHUNK_F32S: usize = 128;
+                debug_assert!(
+                    CHUNK_F32S.is_multiple_of(channels),
+                    "128 f32 samples must be divisible by pixel channel count ({channels})"
+                );
+                let mut scratch = [0.0f32; CHUNK_F32S];
+                for byte_chunk in buf.chunks_mut(CHUNK_F32S * std::mem::size_of::<f32>()) {
+                    let f32_len = byte_chunk.len() / std::mem::size_of::<f32>();
+                    let scratch_slice = &mut scratch[..f32_len];
+                    for (dst, src) in scratch_slice.iter_mut().zip(byte_chunk.chunks_exact(4)) {
+                        *dst = f32::from_ne_bytes([src[0], src[1], src[2], src[3]]);
+                    }
+                    callback(scratch_slice);
+                    for (dst, src) in byte_chunk.chunks_exact_mut(4).zip(scratch_slice.iter()) {
+                        dst.copy_from_slice(&src.to_ne_bytes());
+                    }
+                }
+                Ok(())
+            }
+            Err(err) => {
+                Err(invalid_argument_error(format!("Invalid f32 pixel buffer layout: {err}")))
+            }
+        }
+    }
+
+    /// Performs background alpha blending on decoded pixel bytes.
     fn perform_color_correction(
         buf: &mut [u8],
         background_subs: (RustRgba<u8>, RustRgba<u16>),
         color_type: RustColorType,
-        width: u32,
-        height: u32,
-    ) {
+    ) -> Result<(), Status> {
         let (color_u8, color_u16) = background_subs;
         match color_type {
             RustColorType::Rgba8 => {
-                Self::perform_color_correction_inner(buf, color_u8, width, height);
+                blend_pixels_in_place(buf, color_u8);
+                Ok(())
             }
-            RustColorType::Rgba16 => {
-                let buf: &mut [u16] = bytemuck::cast_slice_mut(buf);
-                Self::perform_color_correction_inner(buf, color_u16, width, height);
-            }
+            RustColorType::Rgba16 => Self::for_each_u16_pixel_chunk_mut(buf, 4, |u16_chunk| {
+                blend_pixels_in_place(u16_chunk, color_u16);
+            }),
             RustColorType::La8 => {
                 let gray = image::LumaA([color_u8.0[1], color_u8.0[3]]);
-                Self::perform_color_correction_inner(buf, gray, width, height);
+                blend_pixels_in_place(buf, gray);
+                Ok(())
             }
             RustColorType::La16 => {
                 let gray = image::LumaA([color_u16.0[1], color_u16.0[3]]);
-                let buf: &mut [u16] = bytemuck::cast_slice_mut(buf);
-                Self::perform_color_correction_inner(buf, gray, width, height);
+                Self::for_each_u16_pixel_chunk_mut(buf, 2, |u16_chunk| {
+                    blend_pixels_in_place(u16_chunk, gray);
+                })
             }
-            _ => {}
+            _ => Ok(()),
         }
     }
 
-    fn perform_color_correction_inner<P, C>(buf: C, corrected_color: P, width: u32, height: u32)
-    where
-        P: image::Pixel,
-        C: std::ops::Deref<Target = [P::Subpixel]> + std::ops::DerefMut,
-    {
-        let Some(mut image_buffer) = RustImageBuffer::<P, C>::from_raw(width, height, buf) else {
-            return;
-        };
-        for pixel in image_buffer.pixels_mut() {
-            let mut blended = corrected_color;
-            blended.blend(pixel);
-            *pixel = blended;
+    fn premultiply_alpha_bytes(buf: &mut [u8], color_type: RustColorType) -> Result<(), Status> {
+        match color_type {
+            RustColorType::Rgba8 => {
+                pic_scale_safe::premultiply_rgba8(buf);
+                Ok(())
+            }
+            RustColorType::La8 => {
+                pic_scale_safe::premultiply_la8(buf);
+                Ok(())
+            }
+            RustColorType::Rgba16 => Self::for_each_u16_pixel_chunk_mut(buf, 4, |u16_chunk| {
+                pic_scale_safe::premultiply_rgba16(u16_chunk, 16);
+            }),
+            RustColorType::La16 => Self::for_each_u16_pixel_chunk_mut(buf, 2, |u16_chunk| {
+                pic_scale_safe::premultiply_la16(u16_chunk, 16);
+            }),
+            RustColorType::Rgba32F => Self::for_each_f32_pixel_chunk_mut(buf, 4, |f32_chunk| {
+                pic_scale_safe::premultiply_rgba_f32(f32_chunk);
+            }),
+            _ => Ok(()),
         }
     }
 }

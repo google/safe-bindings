@@ -1,15 +1,15 @@
-use crate::{
-    image::{GenericImageDecoder, ImageDecoder},
-    vec_u8::VecU8,
-};
+use crate::image::{run_catching_panics, GenericImageDecoder, ImageDecoder};
+use crate::vec_u8::VecU8;
 use image::{
     codecs::bmp::BmpDecoder as RustBmpDecoder, codecs::gif::GifDecoder as RustGifDecoder,
     codecs::ico::IcoDecoder as RustIcoDecoder, codecs::jpeg::JpegDecoder as RustJpegDecoder,
     codecs::png::PngDecoder as RustPngDecoder, codecs::tiff::TiffDecoder as RustTiffDecoder,
     codecs::webp::WebPDecoder as RustWebPDecoder, ImageFormat, ImageReader as RustImageReader,
 };
+
 #[cfg(feature = "jxl")]
-use jxl::api::{check_signature as check_jxl_signature, JxlSignature};
+use ::jxl::api::{check_signature as check_jxl_signature, JxlSignature};
+
 #[cfg(feature = "jxl")]
 use jxl_image_rs_integration::JxlDecoder as RustJxlDecoder;
 use std::fs::File;
@@ -29,6 +29,7 @@ impl ReadSeek for std::io::BufReader<File> {}
 pub struct ImageReader {
     inner: Option<Box<RustImageReader<Box<dyn ReadSeek>>>>,
     format: Option<Format>,
+    max_alloc: Option<u64>,
 }
 
 #[cfg(debug_assertions)]
@@ -79,25 +80,32 @@ impl ImageReader {
         Self {
             inner: Some(Box::new(RustImageReader::new(Box::new(bytes_reader)))),
             format: None,
+            max_alloc: None,
         }
     }
 
     /// Creates a new `ImageReader` reading from the provided file.
     pub fn new_from_file(path: &[u8]) -> Result<ImageReader, VecU8> {
-        let filepath = match std::str::from_utf8(path) {
-            Ok(path) => path,
-            Err(err) => return Err(err.to_string().into()),
-        };
-
-        match std::fs::File::open(filepath) {
-            Ok(file) => Ok(Self {
+        match run_catching_panics(|| {
+            let filepath = std::str::from_utf8(path).map_err(|err| VecU8::from(err.to_string()))?;
+            let file = std::fs::File::open(filepath).map_err(|err| VecU8::from(err.to_string()))?;
+            Ok(Self {
                 inner: Some(Box::new(RustImageReader::new(
                     Box::new(BufReader::new(file)) as Box<dyn ReadSeek>
                 ))),
                 format: None,
-            }),
-            Err(err) => Err(err.to_string().into()),
+                max_alloc: None,
+            })
+        }) {
+            Ok(result) => result,
+            Err(formatted_error) => Err(formatted_error.into()),
         }
+    }
+
+    /// Sets the maximum allocation in bytes while parsing the image header and
+    /// metadata in `into_decoder`. Currently only used by the PNG decoder.
+    pub fn set_limits(&mut self, max_alloc: u64) {
+        self.max_alloc = Some(max_alloc);
     }
 
     /// Supply the format as which to interpret the read image.
@@ -109,6 +117,13 @@ impl ImageReader {
     ///
     /// Uses the current format to construct the correct reader for the format.
     pub fn into_decoder(self) -> Result<ImageDecoder, VecU8> {
+        match run_catching_panics(move || self.into_decoder_inner()) {
+            Ok(result) => result,
+            Err(formatted_error) => Err(formatted_error.into()),
+        }
+    }
+
+    fn into_decoder_inner(self) -> Result<ImageDecoder, VecU8> {
         let Some(inner) = self.inner else {
             return Err("Reader in illegal moved-out state".into());
         };
@@ -151,7 +166,7 @@ impl ImageReader {
 
         // Delegate to non-inlined helper functions to reduce the stack frame size by 4k.
         match format {
-            Some(Format::Png) => png(inner),
+            Some(Format::Png) => png(inner, self.max_alloc),
             Some(Format::Jpeg) => jpeg(inner),
             Some(Format::WebP) => webp(inner),
             Some(Format::Gif) => gif(inner),
@@ -165,11 +180,21 @@ impl ImageReader {
     }
 }
 
+/// Default header and metadata allocation limit when none was set.
+const DEFAULT_HEADER_MAX_ALLOC: u64 = 64 * 1024 * 1024;
+
 #[inline(never)]
 fn png(
     d: RustImageReader<Box<dyn ReadSeek>>,
+    max_alloc: Option<u64>,
 ) -> Result<ImageDecoder, String> {
-    let decoder = RustPngDecoder::new(d.into_inner()).map_err(|e| e.to_string())?;
+    // Bound header and metadata allocations (e.g. iCCP decompression) to
+    // prevent zip bombs. The C++ wrapper always sets a limit of at most 64 MiB;
+    // fall back to that bound if none was set.
+    let max_alloc = Some(max_alloc.unwrap_or(DEFAULT_HEADER_MAX_ALLOC));
+    let mut limits = image::Limits::no_limits();
+    limits.max_alloc = max_alloc;
+    let decoder = RustPngDecoder::with_limits(d.into_inner(), limits).map_err(|e| e.to_string())?;
     Ok(ImageDecoder::new(GenericImageDecoder::Png(Box::new(decoder))))
 }
 
