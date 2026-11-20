@@ -56,7 +56,9 @@ impl UIntValue {
             Value::Byte(ref v) => v.get(index).map(|&x| x.into()),
             Value::Short(ref v) => v.get(index).map(|&x| x.into()),
             Value::Long(ref v) => v.get(index).copied(),
-            _ => panic!(),
+            // `ref_from` only hands out unsigned values, but `new` accepts any
+            // value, and a panic here would abort the C++ caller.
+            _ => None,
         }
     }
 }

@@ -50,8 +50,11 @@ impl<'a> Writer<'a> {
     /// ExifIFDPointer, GPSInfoIFDPointer, InteropIFDPointer,
     /// StripOffsets, StripByteCounts, TileOffsets, TileByteCounts,
     /// JPEGInterchangeFormat, and JPEGInterchangeFormatLength.
+    /// A moved-from `Field` holds no field and is ignored.
     pub fn push_field(&mut self, field: &'a Field) {
-        self.0.push_field(field.as_ref())
+        if let Some(field) = field.inner.as_ref() {
+            self.0.push_field(field)
+        }
     }
 
     /// Sets TIFF strips for the specified IFD.
