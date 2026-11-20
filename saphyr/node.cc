@@ -34,7 +34,7 @@ NodeView NodeView::operator[](size_t index) const {
   return NodeView(val.has_value() ? *val : rust::NodeView());
 }
 
-NodeView NodeView::operator[](rs_std::StrRef key) const {
+NodeView NodeView::operator[](rs::StrRef key) const {
   auto val = view_.get_at_key(key);
   return NodeView(val.has_value() ? *val : rust::NodeView());
 }
@@ -95,9 +95,9 @@ std::optional<absl::string_view> NodeView::as_optional<absl::string_view>()
 
 template <>
 std::optional<std::string> NodeView::as_optional<std::string>() const {
-  if (std::optional<rs_std::StrRef> sv = view_.as_str(); sv.has_value()) {
+  if (std::optional<rs::StrRef> sv = view_.as_str(); sv.has_value()) {
     // `*sv` is safe to dereference because `sv.has_value()` is true, and the
-    // `rs_std::StrRef` borrows from the node referenced by `view_`, which stays
+    // `rs::StrRef` borrows from the node referenced by `view_`, which stays
     // alive while `std::string` copies the referenced characters.
     return std::string(*sv);
   }
@@ -110,7 +110,7 @@ std::optional<double> NodeView::as_optional<double>() const {
 }
 
 absl::StatusOr<std::string> NodeView::Dump() const {
-  rs_std::Result<rust::vec_u8::VecU8, rust::vec_u8::VecU8> result =
+  rs::Result<rust::vec_u8::VecU8, rust::vec_u8::VecU8> result =
       rust::dump(view_);
   if (!result.has_value()) {
     return absl::InternalError(StringViewFromVecU8(std::move(result).err()));
@@ -135,7 +135,7 @@ size_t Node::size() const { return node_.len(); }
 bool Node::IsEmpty() const { return node_.is_empty(); }
 Node::operator bool() const { return IsDefined(); }
 
-NodeView Node::operator[](rs_std::StrRef key) const {
+NodeView Node::operator[](rs::StrRef key) const {
   auto val = node_.get_at_key(key);
   return NodeView(val.has_value() ? *val : rust::NodeView());
 }
@@ -150,7 +150,7 @@ std::optional<NodeView> Node::Get(size_t index) const {
   return std::nullopt;
 }
 
-std::optional<NodeView> Node::Get(rs_std::StrRef key) const {
+std::optional<NodeView> Node::Get(rs::StrRef key) const {
   if (auto val = node_.get_at_key(key); val.has_value()) {
     return std::make_optional(NodeView(*val));
   }
@@ -181,8 +181,8 @@ std::ostream& operator<<(std::ostream& out, const Node& node) {
 }
 
 // Load functions
-absl::StatusOr<Node> Load(rs_std::StrRef input) {
-  rs_std::Result<rust::NodeOwned, rust::vec_u8::VecU8> result =
+absl::StatusOr<Node> Load(rs::StrRef input) {
+  rs::Result<rust::NodeOwned, rust::vec_u8::VecU8> result =
       rust::load(input);
   if (!result.has_value()) {
     return absl::InvalidArgumentError(
@@ -209,12 +209,12 @@ rust::YamlOwned ToYaml(bool value) {
   return rust::yaml_owned_from_bool(value);
 }
 rust::YamlOwned ToYaml(const char* value) {
-  // Ideally, we want to use `rs_std::StrRef` at the function API to avoid
+  // Ideally, we want to use `rs::StrRef` at the function API to avoid
   // using FromUtf8Unchecked but the compiler does not prefer the user-defined
   // over the`bool` (built-in) conversion.
   //
   // So we have to use char* to provide exact match for string literals
-  return rust::yaml_owned_from_str(rs_std::StrRef::FromUtf8Unchecked(
+  return rust::yaml_owned_from_str(rs::StrRef::FromUtf8Unchecked(
       // Check for nullptr before passing into rust
       ABSL_DIE_IF_NULL(value)));
 }

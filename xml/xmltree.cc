@@ -25,11 +25,11 @@ namespace security::xml {
 
 namespace {
 
+using ::rs::Option;
+using ::rs::Result;
+using ::rs::SliceRef;
+using ::rs::StrRef;
 using ::rs::alloc::string::String;
-using ::rs_std::Option;
-using ::rs_std::Result;
-using ::rs_std::SliceRef;
-using ::rs_std::StrRef;
 using ::rust::xmltree_bindings::NodeId;
 using ::rust::xmltree_bindings::ParseError;
 using ::rust::xmltree_bindings::TreeError;
