@@ -115,6 +115,9 @@ enum DecoderState {
 /// 5. Optionally `decoder.decode_frame_header(data)` -> returns bytes consumed
 /// 6. `decoder.decode_frame(data, output)` -> returns bytes consumed
 /// 7. For animation: repeat steps 5-6 for each frame
+///
+/// To also decode the extra channels, use `set_pixel_layout_with_extra_channels` in step 4 and
+/// `decode_frame_with_extra_channels` in step 6.
 pub struct JxlBridgeDecoder {
     decoder: Box<JxlDecoder>,
     state: DecoderState,
@@ -299,6 +302,21 @@ impl JxlBridgeDecoder {
         data: &[u8],
         output: &mut [u8],
     ) -> StatusOr<JxlBridgeProcessResult> {
+        self.decode_frame_with_extra_channels(data, output, &mut [])
+    }
+
+    /// Like `decode_frame`, for a pixel layout set with `set_pixel_layout_with_extra_channels`:
+    /// additionally writes the extra channels to `extra_output`.
+    ///
+    /// `extra_output` holds one plane per extra channel, back to back in the order of
+    /// `JxlBridgeBasicInfo::extra_channels`. Each plane is `width * height` samples in row-major
+    /// order, in the sample format of the pixel layout.
+    pub fn decode_frame_with_extra_channels(
+        &mut self,
+        data: &[u8],
+        output: &mut [u8],
+        extra_output: &mut [u8],
+    ) -> StatusOr<JxlBridgeProcessResult> {
         let Some(pixel_format) = self.pixel_format.as_ref() else {
             return precondition_err("set_pixel_layout must be called before decode_frame");
         };
@@ -315,6 +333,8 @@ impl JxlBridgeDecoder {
             .ok_or_else(|| status::internal("No color data format set"))?;
         let samples_per_pixel = color_type.samples_per_pixel();
         let bytes_per_sample = data_format.bytes_per_sample();
+        let num_extra_planes =
+            pixel_format.extra_channel_format.iter().filter(|format| format.is_some()).count();
         let image_size = jxl_info.size;
 
         // Drive through frame header if needed, then decode the frame.
@@ -356,8 +376,32 @@ impl JxlBridgeDecoder {
             )));
         }
 
-        let output_buf = JxlOutputBuffer::new(output, height, row_bytes);
-        let mut output_bufs = [output_buf];
+        // Sizes cannot overflow: each is at most `required_bytes`.
+        let plane_row_bytes = width * bytes_per_sample;
+        let plane_bytes = height * plane_row_bytes;
+        let required_extra_bytes = num_extra_planes.checked_mul(plane_bytes).ok_or_else(|| {
+            status::internal(format!(
+                "Integer overflow: extra channels({num_extra_planes}) * plane_bytes({plane_bytes})"
+            ))
+        })?;
+        if extra_output.len() < required_extra_bytes {
+            return status::err(status::failed_precondition(format!(
+                "Extra channel buffer too small: need {required_extra_bytes} bytes \
+                 ({num_extra_planes} planes of {width}x{height}, \
+                 {bytes_per_sample} bytes/sample), got {}",
+                extra_output.len()
+            )));
+        }
+
+        let mut output_bufs = Vec::with_capacity(1 + num_extra_planes);
+        output_bufs.push(JxlOutputBuffer::new(output, height, row_bytes));
+        if required_extra_bytes > 0 {
+            output_bufs.extend(
+                extra_output[..required_extra_bytes]
+                    .chunks_exact_mut(plane_bytes)
+                    .map(|plane| JxlOutputBuffer::new(plane, height, plane_row_bytes)),
+            );
+        }
 
         // Use the remaining data after header consumption.
         let remaining_data = &data[header_consumed..];
@@ -455,6 +499,29 @@ impl JxlBridgeDecoder {
         channel_layout: JxlBridgeChannelLayout,
         sample_format: JxlBridgeSampleFormat,
     ) -> Status {
+        self.set_pixel_layout_impl(channel_layout, sample_format, false)
+    }
+
+    /// Like `set_pixel_layout_with_format`, but frames are decoded with
+    /// `decode_frame_with_extra_channels`, which also writes every extra channel of the image
+    /// (see `JxlBridgeBasicInfo::extra_channels`) to a plane of its own, in `sample_format`.
+    ///
+    /// This is independent of `channel_layout`: an alpha or black channel that the layout
+    /// interleaves with the color channels is written to its plane as well.
+    pub fn set_pixel_layout_with_extra_channels(
+        &mut self,
+        channel_layout: JxlBridgeChannelLayout,
+        sample_format: JxlBridgeSampleFormat,
+    ) -> Status {
+        self.set_pixel_layout_impl(channel_layout, sample_format, true)
+    }
+
+    fn set_pixel_layout_impl(
+        &mut self,
+        channel_layout: JxlBridgeChannelLayout,
+        sample_format: JxlBridgeSampleFormat,
+        decode_extra_channels: bool,
+    ) -> Status {
         if let Err(msg) = sample_format.validate() {
             return status::err(status::invalid_argument(msg));
         }
@@ -470,7 +537,12 @@ impl JxlBridgeDecoder {
         }
 
         let num_extra = jxl_info.extra_channels.len();
-        let pixel_format = types::build_pixel_format(&channel_layout, &sample_format, num_extra);
+        let pixel_format = types::build_pixel_format(
+            &channel_layout,
+            &sample_format,
+            num_extra,
+            decode_extra_channels,
+        );
 
         self.decoder.set_pixel_format(pixel_format).map_err(to_status)?;
         // Re-read from the decoder to capture any adjustments.
