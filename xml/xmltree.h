@@ -91,6 +91,11 @@ class XmlDocument {
   XmlDocument& operator=(XmlDocument&&) = default;
 
   // Parses an XML string into an `XmlDocument`.
+  //
+  // Returns an INVALID_ARGUMENT error for a document that declares entities
+  // (`<!ENTITY`) in its DTD, so that entity expansion cannot exhaust memory.
+  // `xml` is also rejected if `<!ENTITY` appears in a comment or CDATA section.
+  // `ParseFragment()` applies the same check.
   static absl::StatusOr<XmlDocument> Parse(absl::string_view xml,
                                            size_t max_depth = kDefaultMaxDepth);
 

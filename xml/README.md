@@ -34,3 +34,17 @@ Consumers migrating from `libxml2` to `xmltree` might implicitly depend on this
 "lax" behavior (Hyrum's Law). When migrating existing consumers, ensure their
 workloads do not rely on `libxml2`'s permissive parsing of these malformed
 namespace patterns.
+
+## Entity Declarations
+
+`XmlDocument::Parse()` and `XmlDocument::ParseFragment()` reject documents that
+declare entities in their DTD (`<!DOCTYPE r [<!ENTITY e "...">]>`), and return
+an `INVALID_ARGUMENT` error. The underlying `xml` crate does not bound the total
+size of entity expansion, so a document of a few hundred bytes could otherwise
+expand to gigabytes. The predefined entities (`&lt;`, `&amp;`, ...) and
+character references (`&#60;`) still work, and so do DTDs without entity
+declarations.
+
+The check looks for `<!ENTITY` anywhere in the input, so a document that
+contains it in a comment or CDATA section is rejected too. `QuickReader` does
+not expand user-defined entities either.
