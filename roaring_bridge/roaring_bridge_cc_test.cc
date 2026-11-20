@@ -1,4 +1,5 @@
 #include <algorithm>
+#include <cstddef>
 #include <cstdint>
 #include <numeric>
 #include <optional>
@@ -744,6 +745,103 @@ TEST(RoaringBitmap64Test, AddOffsetLargeValues) {
   EXPECT_TRUE(overflowed.Contains(120));
   EXPECT_TRUE(overflowed.Contains((uint64_t{1} << 32) + 20));
   EXPECT_FALSE(overflowed.Contains(UINT64_MAX - 10));  // overflowed and dropped
+}
+
+TEST(RoaringBitmap64Test, CopyValuesFromReadsInBatches) {
+  RoaringBitmap64 bm;
+  bm.InsertRange(100, 200);
+  constexpr uint64_t kBucket1Value = (uint64_t{1} << 32) + 70000;
+  constexpr uint64_t kSparseHighValue = (uint64_t{1} << 50) + 42;
+  bm.InsertMany(
+      std::vector<uint64_t>{kBucket1Value, kSparseHighValue, UINT64_MAX});
+
+  // A full batch stops in the middle of the first run.
+  std::vector<uint64_t> buffer(64, 42);
+  ASSERT_EQ(bm.CopyValuesFrom(0, absl::MakeSpan(buffer)), 64);
+  std::vector<uint64_t> expected(64);
+  std::iota(expected.begin(), expected.end(), 100);
+  EXPECT_EQ(buffer, expected);
+
+  // Resuming one past the last value copied returns the remaining 39 values
+  // across high-32-bit buckets and leaves the rest of the buffer untouched.
+  std::fill(buffer.begin(), buffer.end(), 42);
+  ASSERT_EQ(bm.CopyValuesFrom(164, absl::MakeSpan(buffer)), 39);
+  expected.assign(64, 42);
+  std::iota(expected.begin(), expected.begin() + 36, 164);
+  expected[36] = kBucket1Value;
+  expected[37] = kSparseHighValue;
+  expected[38] = UINT64_MAX;
+  EXPECT_EQ(buffer, expected);
+
+  // A start past the last value of its bucket, and a start in an absent
+  // high-32-bit bucket, both continue with the next present bucket.
+  std::fill(buffer.begin(), buffer.end(), 42);
+  ASSERT_EQ(bm.CopyValuesFrom(1000, absl::MakeSpan(buffer)), 3);
+  EXPECT_EQ(buffer[0], kBucket1Value);
+  EXPECT_EQ(buffer[1], kSparseHighValue);
+  EXPECT_EQ(buffer[2], UINT64_MAX);
+  EXPECT_EQ(buffer[3], 42);
+
+  ASSERT_EQ(bm.CopyValuesFrom(uint64_t{2} << 32, absl::MakeSpan(buffer)), 2);
+  EXPECT_EQ(buffer[0], kSparseHighValue);
+  EXPECT_EQ(buffer[1], UINT64_MAX);
+
+  EXPECT_EQ(bm.CopyValuesFrom(UINT64_MAX, absl::MakeSpan(buffer)), 1);
+  EXPECT_EQ(buffer[0], UINT64_MAX);
+
+  // A start past the maximum copies nothing.
+  bm.Remove(UINT64_MAX);
+  std::fill(buffer.begin(), buffer.end(), 42);
+  EXPECT_EQ(bm.CopyValuesFrom(kSparseHighValue + 1, absl::MakeSpan(buffer)), 0);
+  EXPECT_EQ(buffer, std::vector<uint64_t>(64, 42));
+
+  std::vector<uint64_t> empty_buffer;
+  EXPECT_EQ(bm.CopyValuesFrom(0, absl::MakeSpan(empty_buffer)), 0);
+  EXPECT_EQ(RoaringBitmap64().CopyValuesFrom(0, absl::MakeSpan(buffer)), 0);
+}
+
+TEST(RoaringBitmap64Test, CopyValuesFromReadsEveryContainerType) {
+  RoaringBitmap64 bm;
+
+  // Array container in bucket 0.
+  bm.InsertMany(std::vector<uint64_t>{1, 5, 9, 1000});
+
+  // Partial and full run containers in bucket 1.
+  constexpr uint64_t kBucket1 = uint64_t{1} << 32;
+  bm.InsertRange(kBucket1 + (uint64_t{1} << 16),
+                 kBucket1 + (uint64_t{2} << 16));
+  bm.InsertRange(kBucket1 + (uint64_t{2} << 16) + 10,
+                 kBucket1 + (uint64_t{2} << 16) + 5000);
+
+  // Bitmap container with every even value of a 16-bit block in a sparse high
+  // bucket.
+  constexpr uint64_t kHighBucket = uint64_t{100} << 32;
+  for (uint64_t value = kHighBucket; value < kHighBucket + (uint64_t{1} << 16);
+       value += 2) {
+    bm.Insert(value);
+  }
+  bm.Insert(UINT64_MAX);
+  bm.Optimize();
+
+  std::vector<uint64_t> values;
+  std::vector<uint64_t> buffer(7);
+  uint64_t start = 0;
+  // Reads the whole bitmap in batches of an odd size, so batch edges fall
+  // inside every kind of container and across bucket boundaries.
+  while (true) {
+    const size_t count = bm.CopyValuesFrom(start, absl::MakeSpan(buffer));
+    values.insert(values.end(), buffer.begin(), buffer.begin() + count);
+    if (count < buffer.size() || values.back() == UINT64_MAX) {
+      break;
+    }
+    start = values.back() + 1;
+  }
+
+  std::vector<uint64_t> expected;
+  for (const uint64_t value : bm) {
+    expected.push_back(value);
+  }
+  EXPECT_EQ(values, expected);
 }
 
 }  // namespace
