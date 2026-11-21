@@ -2,6 +2,7 @@
 #define SAFE_BINDINGS_PIXEL_BRIDGE_H_
 
 #include <array>
+#include <cstddef>
 #include <cstdint>
 #include <optional>
 #include <string>
@@ -18,22 +19,52 @@
 namespace security::pixel_bridge {
 
 // An enumeration over the types that back the value of a pixel.
-enum class PixelType {
-  kUint8,
-  kUint16,
-  kFloat32,
-};
+using PixelType = ::rust::image::PixelType;
 
 // An enumeration over supported color types.
-enum class ColorType {
-  // Luminance.
-  kL,
-  // Luminance with alpha channel.
-  kLa,
-  // Pixel contains R, G and B channels.
-  kRgb,
-  // Pixel contains R, G and B channels with an alpha channel.
-  kRgba,
+using ColorType = ::rust::image::ColorType;
+
+// Controls how 16-bit integer samples are narrowed to 8-bit integer samples:
+// - `DownscaleMode::kTruncateHighByte`: retains the most significant byte
+//   (`sample >> 8`), matching libpng's `png_set_strip_16`.
+// - `DownscaleMode::kRound`: rounds `sample * 255 / 65535` via
+//   `(sample + 128) / 257`, matching the Rust `image` crate's
+//   `DynamicImage::to_*8` conversions.
+using DownscaleMode = ::rust::image::DownscaleMode;
+
+// Target pixel layout for `ImageDecoder::ReadSamplesConverted` and
+// `ImageDecoder::ReadSamplesConvertedIntoRaw`.
+//
+// Supported conversions:
+// - `PixelType::kUint8` <-> `PixelType::kUint16` (`uint8_t` widens to
+//   `uint16_t` via `(v << 8) | v`; `uint16_t` narrows to `uint8_t` according
+//   to `downscale_mode`). `PixelType::kFloat32` is supported only when both
+//   the source and target pixel and color types match.
+// - Any `ColorType` (`kL`, `kLa`, `kRgb`, `kRgba`) to any `ColorType`:
+//   - Expanding `kL` / `kLa` to `kRgb` / `kRgba` replicates luminance across
+//     R, G, and B.
+//   - Adding alpha (`kL` -> `kLa`, `kL` -> `kRgba`, `kRgb` -> `kRgba`) sets
+//     alpha to the maximum representable sample value (`255` or `65535`).
+//   - Stripping alpha (`kLa` -> `kL`, `kLa` -> `kRgb`, `kRgba` -> `kRgb`)
+//     drops the alpha channel (after applying `SetBackgroundColor`, if set).
+//   - Narrowing `kRgb` / `kRgba` to `kL` / `kLa` computes rounded ITU-R
+//     BT.709 / sRGB luma `(2126 * r + 7152 * g + 722 * b + 5000) / 10000`.
+struct ConversionOptions final {
+  ColorType color_type = ColorType::kRgba;
+  PixelType pixel_type = PixelType::kUint8;
+  DownscaleMode downscale_mode = DownscaleMode::kTruncateHighByte;
+  // Byte stride between destination rows for `ReadSamplesConvertedIntoRaw`
+  // when `GetHeight() > 1` (ignored by `ReadSamplesConvertedIntoRaw` when
+  // `GetHeight() <= 1`). When 0, rows are tightly packed
+  // (`width * channels * sizeof(sample)`). When non-zero and
+  // `GetHeight() > 1`, must be at least the tightly packed row size.
+  // `ReadSamplesConverted` requires `row_bytes` to be 0 or equal to the
+  // tightly packed row size.
+  size_t row_bytes = 0;
+  // When true and `GetHeight() > 1`, writes source row 0 at destination row
+  // index `height - 1` and steps subsequent rows toward index 0 (supporting
+  // negative `row_bytes` bottom-up buffers in C++).
+  bool rows_bottom_up = false;
 };
 
 // An enumeration over all possible image formats.
@@ -140,6 +171,20 @@ class ImageDecoder final {
   // Read samples into the provided buffer.
   // The buffer must be the correct size and match the pixel type of the image.
   absl::Status ReadSamplesInto(absl::Span<float> buffer) &&;
+  // Reads and converts samples according to `options`, returning a tightly
+  // packed `std::vector<uint8_t>`, `std::vector<uint16_t>`, or
+  // `std::vector<float>` matching `options.pixel_type`.
+  absl::StatusOr<Samples> ReadSamplesConverted(
+      const ConversionOptions& options) &&;
+  // Reads and converts samples into `buffer` according to `options` (including
+  // optional `options.row_bytes` padding between rows and
+  // `options.rows_bottom_up` row ordering). Multi-byte samples are
+  // written in native-endian byte order without requiring `buffer` or
+  // `options.row_bytes` to be aligned to `sizeof(uint16_t)`. Prefer this
+  // overload with a pre-allocated buffer when decoding large images to avoid
+  // allocating and zero-initializing a fresh `std::vector` per call.
+  absl::Status ReadSamplesConvertedIntoRaw(absl::Span<uint8_t> buffer,
+                                           const ConversionOptions& options) &&;
   // Returns the width of the image in this buffer.
   uint64_t GetWidth();
   // Returns the height of the image in this buffer.

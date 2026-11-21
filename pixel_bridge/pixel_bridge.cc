@@ -1,7 +1,9 @@
 #include "pixel_bridge.h"
 
 #include <array>
+#include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <optional>
 #include <string>
 #include <utility>
@@ -15,6 +17,7 @@
 #include "absl/strings/match.h"
 #include "absl/strings/string_view.h"
 #include "absl/types/span.h"
+#include "support/rs_std/result.h"
 
 namespace security::pixel_bridge {
 
@@ -168,8 +171,8 @@ uint64_t ImageDecoder::GetHeight() { return decoder_.height(); }
 
 absl::StatusOr<ImageDecoder::Samples> ImageDecoder::ReadSamples() && {
   absl::Status status;
-  switch (decoder_.pixel_type().tag) {
-    case rust::image::PixelType::Tag::U8: {
+  switch (decoder_.pixel_type()) {
+    case PixelType::kUint8: {
       std::vector<uint8_t> result(decoder_.total_bytes());
       status = std::move(*this).ReadSamplesInto(absl::MakeSpan(result));
       if (!status.ok()) {
@@ -177,7 +180,7 @@ absl::StatusOr<ImageDecoder::Samples> ImageDecoder::ReadSamples() && {
       }
       return result;
     }
-    case rust::image::PixelType::Tag::U16: {
+    case PixelType::kUint16: {
       // This is a uint16_t vector, respect that when calculating the size.
       std::vector<uint16_t> result(decoder_.total_bytes() / sizeof(uint16_t));
       status = std::move(*this).ReadSamplesInto(absl::MakeSpan(result));
@@ -186,7 +189,7 @@ absl::StatusOr<ImageDecoder::Samples> ImageDecoder::ReadSamples() && {
       }
       return result;
     }
-    case rust::image::PixelType::Tag::F32: {
+    case PixelType::kFloat32: {
       // This is a float vector, respect that when calculating the size.
       std::vector<float> result(decoder_.total_bytes() / sizeof(float));
       status = std::move(*this).ReadSamplesInto(absl::MakeSpan(result));
@@ -196,6 +199,7 @@ absl::StatusOr<ImageDecoder::Samples> ImageDecoder::ReadSamples() && {
       return result;
     }
   }
+  return absl::InternalError("Unknown pixel type");
 }
 
 absl::Status ImageDecoder::ReadSamplesIntoRaw(absl::Span<uint8_t> buffer) && {
@@ -205,24 +209,86 @@ absl::Status ImageDecoder::ReadSamplesIntoRaw(absl::Span<uint8_t> buffer) && {
 }
 
 absl::Status ImageDecoder::ReadSamplesInto(absl::Span<uint8_t> buffer) && {
-  CHECK_EQ(decoder_.pixel_type().tag,
-           rust::image::PixelType::Tag::U8);
+  CHECK_EQ(decoder_.pixel_type(), PixelType::kUint8);
   Format format = GetFormat();
   absl::Status status = ToStatus(std::move(decoder_).read_u8_slice(buffer));
   return status;
 }
 absl::Status ImageDecoder::ReadSamplesInto(absl::Span<uint16_t> buffer) && {
-  CHECK_EQ(decoder_.pixel_type().tag,
-           rust::image::PixelType::Tag::U16);
+  CHECK_EQ(decoder_.pixel_type(), PixelType::kUint16);
   Format format = GetFormat();
   absl::Status status = ToStatus(std::move(decoder_).read_u16_slice(buffer));
   return status;
 }
 absl::Status ImageDecoder::ReadSamplesInto(absl::Span<float> buffer) && {
-  CHECK_EQ(decoder_.pixel_type().tag,
-           rust::image::PixelType::Tag::F32);
+  CHECK_EQ(decoder_.pixel_type(), PixelType::kFloat32);
   Format format = GetFormat();
   absl::Status status = ToStatus(std::move(decoder_).read_f32_slice(buffer));
+  return status;
+}
+
+absl::StatusOr<ImageDecoder::Samples> ImageDecoder::ReadSamplesConverted(
+    const ConversionOptions& options) && {
+  rs_std::Result<uint64_t, rust::vec_u8::VecU8> total_samples_res =
+      decoder_.converted_packed_samples(options.color_type, options.pixel_type,
+                                        options.downscale_mode,
+                                        options.row_bytes);
+  if (!total_samples_res.has_value()) {
+    return absl::InvalidArgumentError(
+        StringViewFromVecU8(std::move(total_samples_res).err()));
+  }
+  const size_t total_samples =
+      static_cast<size_t>(std::move(total_samples_res).value());
+
+  switch (options.pixel_type) {
+    case PixelType::kUint8: {
+      std::vector<uint8_t> result(total_samples);
+      absl::Status status = std::move(*this).ReadSamplesConvertedIntoRaw(
+          absl::MakeSpan(result), options);
+      if (!status.ok()) {
+        return status;
+      }
+      return result;
+    }
+    case PixelType::kUint16: {
+      std::vector<uint16_t> result(total_samples);
+      absl::Status status = std::move(*this).ReadSamplesConvertedIntoRaw(
+          absl::MakeSpan(reinterpret_cast<uint8_t*>(result.data()),
+                         result.size() * sizeof(uint16_t)),
+          options);
+      if (!status.ok()) {
+        return status;
+      }
+      return result;
+    }
+    case PixelType::kFloat32: {
+      std::vector<float> result(total_samples);
+      absl::Status status = std::move(*this).ReadSamplesConvertedIntoRaw(
+          absl::MakeSpan(reinterpret_cast<uint8_t*>(result.data()),
+                         result.size() * sizeof(float)),
+          options);
+      if (!status.ok()) {
+        return status;
+      }
+      return result;
+    }
+  }
+  return absl::InvalidArgumentError("Invalid pixel_type in ConversionOptions");
+}
+
+absl::Status ImageDecoder::ReadSamplesConvertedIntoRaw(
+    absl::Span<uint8_t> buffer, const ConversionOptions& options) && {
+  // Crubit `absl::Span` to Rust slice conversion panics if the slice byte
+  // length exceeds `isize::MAX` (`ptrdiff_t::max()`).
+  if (buffer.size() >
+      static_cast<size_t>(std::numeric_limits<ptrdiff_t>::max())) {
+    return absl::InvalidArgumentError(
+        "Destination buffer exceeds maximum supported slice size");
+  }
+
+  absl::Status status = ToStatus(std::move(decoder_).read_converted_u8_slice(
+      buffer, options.color_type, options.pixel_type, options.downscale_mode,
+      options.row_bytes, options.rows_bottom_up));
   return status;
 }
 
@@ -259,29 +325,9 @@ absl::StatusOr<Frames> ImageDecoder::GetAllFrames() && {
   return Frames(std::move(result).value());
 }
 
-PixelType ImageDecoder::GetPixelType() {
-  switch (decoder_.pixel_type().tag) {
-    case rust::image::PixelType::Tag::U8:
-      return PixelType::kUint8;
-    case rust::image::PixelType::Tag::U16:
-      return PixelType::kUint16;
-    case rust::image::PixelType::Tag::F32:
-      return PixelType::kFloat32;
-  }
-}
+PixelType ImageDecoder::GetPixelType() { return decoder_.pixel_type(); }
 
-ColorType ImageDecoder::GetColorType() {
-  switch (decoder_.color_type().tag) {
-    case rust::image::ColorType::Tag::L:
-      return ColorType::kL;
-    case rust::image::ColorType::Tag::La:
-      return ColorType::kLa;
-    case rust::image::ColorType::Tag::Rgb:
-      return ColorType::kRgb;
-    case rust::image::ColorType::Tag::Rgba:
-      return ColorType::kRgba;
-  }
-}
+ColorType ImageDecoder::GetColorType() { return decoder_.color_type(); }
 
 Strides ImageDecoder::GetStrides() {
   rust::image::Strides strides = decoder_.strides();
