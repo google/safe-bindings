@@ -52,6 +52,8 @@
 #include "array_layout.h"
 #include "fft_internal.h"
 #include "crubit/rust.h"
+#include "absl/base/attributes.h"
+#include "absl/log/check.h"
 #include "absl/status/status.h"
 #include "absl/status/status_macros.h"
 #include "absl/types/span.h"
@@ -69,6 +71,8 @@ enum class Normalization {
 // to run the transform along each axis.
 template <typename T, size_t N>
 class FftPlan {
+  static_assert(N > 0, "Dimension N must be greater than 0");
+
  public:
   // Creates an FFT plan for transforms of the given shape. The default
   // normalization, if used, matches scipy's default behavior. Otherwise no
@@ -80,11 +84,31 @@ class FftPlan {
                 std::make_index_sequence<N>{}) {}
 
   // Returns the shape as a Span that can be passed to the Rust functions.
-  absl::Span<const size_t> shape() const { return absl::MakeConstSpan(shape_); }
+  //
+  // Lifetime: the span is bound to this FftPlan instance and must not outlive
+  // it. The `const&&` overload is deleted and the accessor is
+  // ABSL_ATTRIBUTE_LIFETIME_BOUND, so Clang rejects (-Werror,-Wdangling)
+  // dangling *initializations*. Three things are NOT diagnosed and remain the
+  // caller's responsibility: assigning the span into an already-declared
+  // variable, letting it escape an inner scope, and laundering it through an
+  // intervening unannotated function call.
+  //     absl::Span<const size_t> s;
+  //     { FftPlan<double, 1> p({8}); s = p.shape(); }   // dangles, no warning
+  // In practice plans are named locals, so this is easy to avoid.
+  absl::Span<const size_t> shape() const& ABSL_ATTRIBUTE_LIFETIME_BOUND {
+    return absl::MakeConstSpan(shape_);
+  }
+  absl::Span<const size_t> shape() const&& = delete;
 
   // Returns the underlying Rust handler (FftHandlerF32 or FftHandlerF64) for
   // the i-th axis.
-  auto handler(size_t i) const { return handlers_[i].handler(); }
+  // Lifetime: bound to this FftPlan instance. See FftPlan::shape() for
+  // exactly what the compiler does and does not catch.
+  const auto& handler(size_t i) const& ABSL_ATTRIBUTE_LIFETIME_BOUND {
+    CHECK_LT(i, N);
+    return handlers_[i].handler();
+  }
+  const auto& handler(size_t i) const&& = delete;
 
  private:
   template <size_t... Is>
@@ -101,6 +125,8 @@ class FftPlan {
 // A plan for real-to-complex FFTs.
 template <typename T, size_t N>
 class R2cFftPlan {
+  static_assert(N > 0, "Dimension N must be greater than 0");
+
  public:
   // Creates an real-to-complex FFT plan for transforms of the given shape. The
   // default normalization, if used, matches scipy's default behavior. Otherwise
@@ -112,20 +138,37 @@ class R2cFftPlan {
                    std::make_index_sequence<N - 1>{}) {}
 
   // Returns the shape for the r2c step.
-  absl::Span<const size_t> shape_r2c() const {
+  // Lifetime: bound to this R2cFftPlan instance. See FftPlan::shape() for
+  // exactly what the compiler does and does not catch.
+  absl::Span<const size_t> shape_r2c() const& ABSL_ATTRIBUTE_LIFETIME_BOUND {
     return absl::MakeConstSpan(shape_r2c_);
   }
+  absl::Span<const size_t> shape_r2c() const&& = delete;
 
   // Returns the shape for the c2c steps.
-  absl::Span<const size_t> shape_c2c() const {
+  // Lifetime: bound to this R2cFftPlan instance. See FftPlan::shape() for
+  // exactly what the compiler does and does not catch.
+  absl::Span<const size_t> shape_c2c() const& ABSL_ATTRIBUTE_LIFETIME_BOUND {
     return absl::MakeConstSpan(shape_c2c_);
   }
+  absl::Span<const size_t> shape_c2c() const&& = delete;
 
   // Returns the Rust handler for the r2c step.
-  auto handler_r2c() const { return handler_r2c_.handler(); }
+  // Lifetime: bound to this R2cFftPlan instance. See FftPlan::shape() for
+  // exactly what the compiler does and does not catch.
+  const auto& handler_r2c() const& ABSL_ATTRIBUTE_LIFETIME_BOUND {
+    return handler_r2c_.handler();
+  }
+  const auto& handler_r2c() const&& = delete;
 
   // Returns the Rust handler for the i-th c2c step.
-  auto handler_c2c(size_t i) const { return handlers_c2c_[i].handler(); }
+  // Lifetime: bound to this R2cFftPlan instance. See FftPlan::shape() for
+  // exactly what the compiler does and does not catch.
+  const auto& handler_c2c(size_t i) const& ABSL_ATTRIBUTE_LIFETIME_BOUND {
+    CHECK_LT(i, N - 1);
+    return handlers_c2c_[i].handler();
+  }
+  const auto& handler_c2c(size_t i) const&& = delete;
 
  private:
   template <size_t... Is>
@@ -153,6 +196,8 @@ class R2cFftPlan {
 // A plan for real-to-real DCTs.
 template <typename T, size_t N>
 class DctPlan {
+  static_assert(N > 0, "Dimension N must be greater than 0");
+
  public:
   // Creates an real-to-complex DCT plan for transforms of the given shape. The
   // default normalization, if used, matches scipy's default behavior. Otherwise
@@ -164,11 +209,22 @@ class DctPlan {
                 std::make_index_sequence<N>{}) {}
 
   // Returns the shape as a Span that can be passed to the Rust functions.
-  absl::Span<const size_t> shape() const { return absl::MakeConstSpan(shape_); }
+  // Lifetime: bound to this DctPlan instance. See FftPlan::shape() for exactly
+  // what the compiler does and does not catch.
+  absl::Span<const size_t> shape() const& ABSL_ATTRIBUTE_LIFETIME_BOUND {
+    return absl::MakeConstSpan(shape_);
+  }
+  absl::Span<const size_t> shape() const&& = delete;
 
   // Returns the underlying Rust handler (FftHandlerF32 or FftHandlerF64) for
   // the i-th axis.
-  auto handler(size_t i) const { return handlers_[i].handler(); }
+  // Lifetime: bound to this DctPlan instance. See FftPlan::shape() for exactly
+  // what the compiler does and does not catch.
+  const auto& handler(size_t i) const& ABSL_ATTRIBUTE_LIFETIME_BOUND {
+    CHECK_LT(i, N);
+    return handlers_[i].handler();
+  }
+  const auto& handler(size_t i) const&& = delete;
 
  private:
   template <size_t... Is>

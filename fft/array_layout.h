@@ -33,15 +33,41 @@
 
 #include <cstddef>
 
+#include "absl/base/attributes.h"
+#include "absl/log/check.h"
 #include "absl/types/span.h"
 
 namespace security::fft {
 
 template <typename T>
 struct ArrayLayout {
-  explicit ArrayLayout(absl::Span<T> data, absl::Span<const size_t> nembed,
+  // `data` and `nembed` are stored as non-owning `absl::Span` views; both
+  // underlying buffers must outlive this `ArrayLayout` and every transform
+  // called with it. Both parameters are `ABSL_ATTRIBUTE_LIFETIME_BOUND`, so
+  // Clang rejects the common mistake of binding a temporary at the
+  // construction site:
+  //
+  //   ArrayLayout layout(absl::MakeSpan(buf), {4, 4}, 1);  // error: dangling
+  //
+  // Pass named containers instead:
+  //
+  //   std::array<size_t, 2> nembed = {4, 4};
+  //   ArrayLayout layout(absl::MakeSpan(buf), absl::MakeSpan(nembed), 1);
+  //
+  // The attribute only catches temporaries bound directly at the construction
+  // site. A span whose backing store dies later (for example one created in a
+  // scope that has since exited) remains the caller's responsibility.
+  //
+  // WARNING: `stride` must be positive (> 0). A zero stride causes multiple
+  // indices to alias the exact same memory element, violating uniqueness
+  // and causing undefined behavior during transforms.
+  explicit ArrayLayout(absl::Span<T> data ABSL_ATTRIBUTE_LIFETIME_BOUND,
+                       absl::Span<const size_t> nembed
+                           ABSL_ATTRIBUTE_LIFETIME_BOUND,
                        size_t stride)
-      : data(data), nembed(nembed), stride(stride) {}
+      : data(data), nembed(nembed), stride(stride) {
+    CHECK_GT(stride, 0);
+  }
 
   absl::Span<T> data;
   absl::Span<const size_t> nembed;
