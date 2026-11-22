@@ -211,7 +211,64 @@ impl RoaringBitmap32 {
 
     /// Collects all values into a vector.
     pub fn ToVec(&self) -> vector<u32> {
-        self.inner.iter().collect()
+        let mut v = vector::default();
+        v.resize(self.inner.len() as usize, 0);
+        let _ = self.inner.iter().next_many(&mut v);
+        v
+    }
+
+    /// Returns the smallest value that is >= `value`, or None if there is no such value.
+    ///
+    /// Locates the container holding `value` with a binary search, so the cost does not grow
+    /// with the number of values before `value`. Returns the same value that CRoaring's
+    /// `roaring_uint32_iterator_move_equalorlarger` moves an iterator to.
+    pub fn FirstAtOrAfter(&self, value: u32) -> Option<u32> {
+        self.inner.range(value..).next()
+    }
+
+    /// Copies the smallest values that are >= `start`, in ascending order, into `buffer`.
+    ///
+    /// Returns the number of values copied, which is the smaller of `buffer.len()` and the
+    /// number of values >= `start`. Elements of `buffer` past the returned count are left
+    /// untouched, and a count smaller than `buffer.len()` means that no values remain.
+    ///
+    /// To read the bitmap in batches, call this again with `start` set to one past the last
+    /// value copied, stopping once that value is `u32::MAX`. Each call locates `start` with a
+    /// binary search, so larger buffers spread that cost over more values. The values match
+    /// what CRoaring's `roaring_uint32_iterator_read` returns from an iterator positioned at
+    /// `start`.
+    pub fn CopyValuesFrom(&self, start: u32, buffer: &mut [u32]) -> usize {
+        self.inner.range(start..).next_many(buffer).len()
+    }
+
+    /// Copies the runs of consecutive values that are >= `start`, in ascending order.
+    ///
+    /// Run `i` covers the closed range [`mins[i]`, `maxes[i]`]; closed ranges let a run that ends
+    /// at `u32::MAX` be represented without overflow. `mins` and `maxes` MUST NOT overlap: the
+    /// generated C++ binding checks for aliasing and aborts the process if they do. Runs are
+    /// maximal, including across container boundaries, except that the first run begins at
+    /// `start` when `start` falls inside a run. A bitmap loaded with `DeserializeUnchecked` from
+    /// data with adjacent runs inside one container can yield those runs separately.
+    ///
+    /// Returns the number of runs copied, which is at most `min(mins.len(), maxes.len())`.
+    /// Elements past the returned count are left untouched, and a count smaller than that
+    /// capacity means that no runs remain. To read the runs in batches, call this again with
+    /// `start` set to one past the last copied `max`, stopping once that value is `u32::MAX`;
+    /// because runs are maximal, this never splits a run. The runs match what CRoaring's
+    /// `roaring_uint32_iterator_read_ranges` returns from an iterator positioned at `start`.
+    pub fn CopyRunsFrom(&self, start: u32, mins: &mut [u32], maxes: &mut [u32]) -> usize {
+        let mut iter = self.inner.range(start..);
+        let mut count = 0;
+        // Fills one (min, max) slot pair per run until either buffer is full or no runs remain.
+        for (min, max) in mins.iter_mut().zip(maxes.iter_mut()) {
+            let Some(run) = iter.next_range() else {
+                break;
+            };
+            *min = *run.start();
+            *max = *run.end();
+            count += 1;
+        }
+        count
     }
 
     /// Returns the serialized size in bytes.
@@ -511,6 +568,27 @@ impl RoaringBitmap64 {
     /// Collects all values into a vector.
     pub fn ToVec(&self) -> vector<u64> {
         self.inner.iter().collect()
+    }
+
+    /// Copies the smallest values that are >= `start`, in ascending order, into `buffer`.
+    ///
+    /// Returns the number of values copied, which is the smaller of `buffer.len()` and the
+    /// number of values >= `start`. Elements of `buffer` past the returned count are left
+    /// untouched, and a count smaller than `buffer.len()` means that no values remain.
+    ///
+    /// To read the bitmap in batches, call this again with `start` set to one past the last
+    /// value copied, stopping once that value is `u64::MAX`. Each call locates `start` by
+    /// seeking directly to its bucket and container without scanning earlier values, so
+    /// larger buffers spread that cost over more values.
+    pub fn CopyValuesFrom(&self, start: u64, buffer: &mut [u64]) -> usize {
+        let mut iter = self.inner.iter();
+        iter.advance_to(start);
+        let mut count = 0;
+        for (slot, value) in buffer.iter_mut().zip(iter) {
+            *slot = value;
+            count += 1;
+        }
+        count
     }
 
     /// Returns the serialized size in bytes.

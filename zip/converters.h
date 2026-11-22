@@ -99,6 +99,10 @@ absl::StatusOr<RustVecU8Wrapper> FromRustResultVecU8(
     rs_std::Result<rust::VecU8, rust::ZipError> result_vec_u8);
 absl::Status FromRustResultUnit(
     rs_std::Result<rs_std::unit_t, rust::ZipError> result_unit);
+// Converts a byte count, as returned by the reads that write into a buffer the
+// caller owns rather than returning one.
+absl::StatusOr<uint64_t> FromRustResultU64(
+    rs_std::Result<uint64_t, rust::ZipError> result_u64);
 
 absl::StatusOr<rust::BufferedZipArchive> FromRustBufferedZipArchive(
     rs_std::Result<rust::BufferedZipArchive, rust::ZipError>
@@ -106,6 +110,9 @@ absl::StatusOr<rust::BufferedZipArchive> FromRustBufferedZipArchive(
 absl::StatusOr<rust::FsZipArchive> FromRustFsZipArchive(
     rs_std::Result<rust::FsZipArchive, rust::ZipError>
         result_fs_zip_archive);
+absl::StatusOr<rust::CallbackZipArchive> FromRustCallbackZipArchive(
+    rs_std::Result<rust::CallbackZipArchive, rust::ZipError>
+        result_callback_zip_archive);
 
 absl::StatusOr<rust::BufferedZipFile> FromRustBufferedZipFile(
     rs_std::Result<rust::BufferedZipFile, rust::ZipError>
@@ -113,6 +120,13 @@ absl::StatusOr<rust::BufferedZipFile> FromRustBufferedZipFile(
 absl::StatusOr<rust::FsZipFile> FromRustFsZipFile(
     rs_std::Result<rust::FsZipFile, rust::ZipError>
         result_fs_zip_file);
+absl::StatusOr<rust::CallbackZipFile> FromRustCallbackZipFile(
+    rs_std::Result<rust::CallbackZipFile, rust::ZipError>
+        result_callback_zip_file);
+
+absl::StatusOr<rust::ZipEntryMetadata> FromRustZipEntryMetadata(
+    rs_std::Result<rust::ZipEntryMetadata, rust::ZipError>
+        result_zip_entry_metadata);
 
 absl::StatusOr<rust::BufferedZipWriter> FromRustBufferedZipWriter(
     rs_std::Result<rust::BufferedZipWriter, rust::ZipError>

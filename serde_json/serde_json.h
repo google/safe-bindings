@@ -20,7 +20,7 @@ struct tuple_size<::rust::Item>
 
 template <>
 struct tuple_element<0, ::rust::Item> {
-  using type = rs_std::StrRef;
+  using type = rs::StrRef;
 };
 
 template <>
@@ -34,7 +34,7 @@ struct tuple_size<::rust::ItemMut>
 
 template <>
 struct tuple_element<0, ::rust::ItemMut> {
-  using type = rs_std::StrRef;
+  using type = rs::StrRef;
 };
 
 template <>

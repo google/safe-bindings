@@ -19,6 +19,7 @@ include = [
     "README.md",
     "LICENSE",
     "rust/*.rs",
+    "rust/*.cc",
     "*.h",
     "*.cc",
     "CMakeLists.txt",

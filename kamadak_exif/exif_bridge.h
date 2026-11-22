@@ -1,5 +1,5 @@
-#ifndef SECURITY_EXIF_BRIDGE_EXIF_BRIDGE_H_
-#define SECURITY_EXIF_BRIDGE_EXIF_BRIDGE_H_
+#ifndef SAFE_BINDINGS_KAMADAK_EXIF_EXIF_BRIDGE_H_
+#define SAFE_BINDINGS_KAMADAK_EXIF_EXIF_BRIDGE_H_
 
 #include <cstddef>
 #include <cstdint>
@@ -10,6 +10,7 @@
 #include <vector>
 
 #include "crubit/rust.h"
+
 #include "absl/base/attributes.h"
 #include "absl/base/call_once.h"
 #include "absl/container/chunked_queue.h"
@@ -767,4 +768,4 @@ class Writer final {
 };
 
 }  // namespace security::exif_bridge
-#endif  // SECURITY_EXIF_BRIDGE_EXIF_BRIDGE_H_
+#endif  // SAFE_BINDINGS_KAMADAK_EXIF_EXIF_BRIDGE_H_

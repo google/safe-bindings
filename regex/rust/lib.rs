@@ -985,7 +985,7 @@ impl RegexSetBuilder {
 
 #[cfg(test)]
 mod tests {
-        use super::*;
+    use super::*;
     use googletest::prelude::*;
 
     macro_rules! check_parse_integer {

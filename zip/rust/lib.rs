@@ -6,11 +6,20 @@
 
 #![forbid(unsafe_code)]
 
+mod callback_reader;
+pub use callback_reader::stage_callback_chunk;
+
+mod entry_metadata;
+pub use entry_metadata::ZipEntryMetadata;
+
 mod file;
-pub use file::{BufferedZipFile, FsZipFile};
+pub use file::{BufferedZipFile, CallbackZipFile, FsZipFile};
 
 mod read;
-pub use read::{BufferedZipArchive, BufferedZipStreamReader, FsZipArchive, FsZipStreamReader};
+pub use read::{
+    BufferedZipArchive, BufferedZipStreamReader, CallbackZipArchive, FsZipArchive,
+    FsZipStreamReader,
+};
 
 mod write;
 pub use write::{

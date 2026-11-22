@@ -31,20 +31,28 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(absl)
 
+add_library(zip_reader INTERFACE reader.h)
+target_link_libraries(zip_reader INTERFACE absl::statusor absl::span)
+target_include_directories(zip_reader INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/..)
+
+add_library(zip_reader_status reader_status.cc reader_status.h)
+target_link_libraries(zip_reader_status PUBLIC absl::status PRIVATE absl::check absl::cord absl::strings)
+target_include_directories(zip_reader_status PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/..)
+
 add_library(zip_converters converters.cc converters.h)
-target_link_libraries(zip_converters PUBLIC rust absl::core_headers absl::status absl::statusor absl::strings absl::span)
+target_link_libraries(zip_converters PUBLIC rust absl::core_headers absl::status absl::statusor absl::strings absl::span PRIVATE zip_reader_status)
 
 # Include the root directory for crubit_helpers/string_conversions.h
 target_include_directories(zip_converters PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/..)
 
 add_library(zip_file file.cc file.h)
-target_link_libraries(zip_file PUBLIC zip_converters rust absl::status absl::statusor PRIVATE absl::status_macros)
+target_link_libraries(zip_file PUBLIC zip_converters rust absl::status absl::statusor absl::span PRIVATE zip_reader_status absl::status_macros)
 
 add_library(zip_read read.cc read.h)
-target_link_libraries(zip_read PUBLIC zip_converters zip_file rust absl::core_headers absl::status absl::statusor absl::strings PRIVATE absl::status_macros)
+target_link_libraries(zip_read PUBLIC zip_converters zip_file zip_reader rust absl::core_headers absl::status absl::statusor absl::strings PRIVATE zip_reader_status absl::overload absl::status_macros absl::span)
 
 add_library(zip_write write.cc write.h)
-target_link_libraries(zip_write PUBLIC zip_converters zip_file rust absl::status absl::statusor absl::strings PRIVATE absl::overload absl::status_macros)
+target_link_libraries(zip_write PUBLIC zip_converters zip_file rust absl::status absl::statusor absl::strings PRIVATE zip_reader_status absl::overload absl::status_macros)
 
 add_executable(zip_example main.cc)
-target_link_libraries(zip_example PRIVATE rust zip_converters zip_file zip_read zip_write absl::statusor absl::strings)
+target_link_libraries(zip_example PRIVATE rust zip_converters zip_reader zip_file zip_read zip_write absl::statusor absl::strings)

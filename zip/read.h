@@ -9,6 +9,7 @@
 #include <variant>
 
 #include "file.h"
+#include "reader.h"
 #include "crubit/rust.h"
 #include "absl/base/attributes.h"
 #include "absl/status/status.h"
@@ -17,19 +18,25 @@
 
 namespace security::zip {
 
-// Seekable archives. The contract below applies to all three classes.
+// Seekable archives. The contract below applies to all four classes.
 //
 // GetFileByIndex(index) / GetFileByIndexRaw(index): Return the entry at
 // `index`; the former decompresses when read, the latter returns the stored
 // bytes as-is. Only one entry may be open per archive handle at a time: the
 // returned ZipFile borrows the archive (a Rust `&mut` that Crubit cannot
-// enforce in C++), and while it is alive any further `GetFileByIndex*` call on
-// the same handle returns `kFailedPrecondition`. Destroy (or `reset()`) the
-// previous ZipFile first, or scope each entry in its own block. To read
-// several entries at once, open an independent handle on the same archive
-// instead of sharing one. Note that `entry = archive.GetFileByIndex(i)` on an
-// existing `absl::StatusOr<ZipFile>` evaluates the call before the old entry
-// is destroyed, so it fails while `entry` still holds one.
+// enforce in C++), and while it is alive any further `GetFileByIndex*`,
+// `TryClone()` or `TryCloneWithReader()` call on the same handle returns
+// `kFailedPrecondition`. Destroy (or `reset()`) the previous ZipFile first, or
+// scope each entry in its own block. To read several entries at once, open an
+// independent handle on the same archive beforehand (file-backed and
+// reader-backed archives provide `TryClone()` for this, and reader-backed ones
+// `TryCloneWithReader()` too, each clone with its own entry slot;
+// buffer-backed archives must open a separate handle via `NewFromData()` /
+// `FromBuffer()`) instead of sharing one. Note that
+// `entry = archive.GetFileByIndex(i)` on an existing `absl::StatusOr<ZipFile>`
+// evaluates the call before the old entry is destroyed, so it fails while
+// `entry` still holds one. GetLength(), GetComment() and GetEntryMetadata() do
+// not borrow the archive and stay usable while an entry is open.
 class BufferedZipArchive final {
  public:
   // Parses `data` as a zip archive. Returns `kInvalidArgument` if `data` is not
@@ -60,6 +67,13 @@ class BufferedZipArchive final {
   // This data will be compressed again when written through a `*ZipWriter`.
   absl::StatusOr<ZipFile> GetFileByIndexRaw(uintptr_t index)
       ABSL_ATTRIBUTE_LIFETIME_BOUND;
+  // Returns what the central directory records about the entry at `index`,
+  // reading nothing. Prefer this to GetFileByIndex when the entry's contents
+  // are not wanted: that one also reads the entry's local file header, so
+  // listing an archive with it costs one read per entry. Returns `kOutOfRange`
+  // if `index >= GetLength()` and `kFailedPrecondition` on a moved-from
+  // archive.
+  absl::StatusOr<ZipEntryMetadata> GetEntryMetadata(uintptr_t index) const;
   // True if moved-from; the accessors above then return `kFailedPrecondition`.
   [[nodiscard]] bool IsNone() const;
 
@@ -93,6 +107,33 @@ class FsZipArchive final {
   // UTF-8, or is not a valid zip archive, and returns `kFailedPrecondition` if
   // the archive uses an unsupported feature (such as multi-disk spanning).
   static absl::StatusOr<FsZipArchive> NewFromPath(absl::string_view path);
+  // Returns an independent handle onto the same archive.
+  //
+  // The new handle shares the central directory that NewFromPath already
+  // parsed, so this costs one open(2) and is O(1) in the number of entries,
+  // whereas NewFromPath is O(entries). Use it when several entries must be read
+  // at once: GetFileByIndex keeps the archive borrowed for as long as the
+  // returned ZipFile lives, so N concurrently open entries need N handles, and
+  // reopening by path for each one is quadratic on large archives.
+  //
+  // Each handle owns its own file descriptor and therefore its own file
+  // position, so handles may be read independently.
+  //
+  // The path must still resolve to the same, unmodified file the archive was
+  // opened from (for a relative path, the working directory must not have
+  // changed either), since the shared central directory would otherwise
+  // describe byte ranges that no longer hold the entries it names. The
+  // reopened file's identity (length, plus device and inode on Unix) is
+  // compared with what NewFromPath saw, so a file that was replaced, truncated
+  // or appended to in between is detected and reported as
+  // `absl::StatusCode::kFailedPrecondition`. An in-place rewrite that keeps the
+  // inode and the length is not detected.
+  //
+  // Also returns `absl::StatusCode::kFailedPrecondition` on a moved-from
+  // archive or while another entry of this archive is still open, and
+  // propagates OS file-open errors (such as `kNotFound` and
+  // `kPermissionDenied`) when the path can no longer be opened.
+  absl::StatusOr<FsZipArchive> TryClone() const;
   // Returns the number of entries in the archive, or `kFailedPrecondition` if
   // the archive is moved-from.
   absl::StatusOr<uintptr_t> GetLength() const;
@@ -117,6 +158,13 @@ class FsZipArchive final {
   // This data will be compressed again when written through a `*ZipWriter`.
   absl::StatusOr<ZipFile> GetFileByIndexRaw(uintptr_t index)
       ABSL_ATTRIBUTE_LIFETIME_BOUND;
+  // Returns what the central directory records about the entry at `index`,
+  // reading nothing. Prefer this to GetFileByIndex when the entry's contents
+  // are not wanted: that one also reads the entry's local file header, so
+  // listing an archive with it costs one read per entry. Returns `kOutOfRange`
+  // if `index >= GetLength()` and `kFailedPrecondition` on a moved-from
+  // archive.
+  absl::StatusOr<ZipEntryMetadata> GetEntryMetadata(uintptr_t index) const;
   // True if moved-from; the accessors above then return `kFailedPrecondition`.
   [[nodiscard]] bool IsNone() const;
 
@@ -136,20 +184,70 @@ class FsZipArchive final {
       : archive_(std::move(archive)),
         active_entry_(std::make_shared<bool>(false)) {}
 
+  absl::Status CheckNone() const;
+
   rust::FsZipArchive archive_;
   // Set while a ZipFile returned by GetFileByIndex* is alive; see
   // internal::ActiveEntryGuard. Null on a moved-from archive.
   std::shared_ptr<bool> active_entry_;
 };
 
-class ZipArchive final {
+// An archive read through a caller-supplied RandomAccessReader.
+//
+// Opening reads only the end-of-central-directory record and the central
+// directory, and an entry's bytes are read when that entry is read, so an
+// archive in remote storage never has to be transferred in full. See
+// security/zip/reader.h for what the reader must guarantee.
+class CallbackZipArchive final {
  public:
-  // Opens `path` as a seekable zip archive; see `FsZipArchive::NewFromPath` for
-  // error codes.
-  static absl::StatusOr<ZipArchive> FromFile(absl::string_view path);
-  // Parses `data` as a seekable zip archive; see
-  // `BufferedZipArchive::NewFromData` for error codes.
-  static absl::StatusOr<ZipArchive> FromBuffer(absl::string_view data);
+  // Opens an archive read through `reader`, which the archive takes ownership
+  // of. Propagates `reader->Size()` and `reader->ReadAt()` failures (a read
+  // that fails at any point fails the open with the reader's status, and is
+  // the last read the open makes), returns `kOutOfRange` if `reader->Size()`
+  // exceeds `INT64_MAX`, returns `kInvalidArgument` if `reader` is null, does
+  // not contain a valid zip archive starting at offset 0, or returns no bytes
+  // from a `ReadAt()` (which is then the last read the open makes), and returns
+  // `kFailedPrecondition` if the archive uses an unsupported feature (such as
+  // multi-disk spanning).
+  static absl::StatusOr<CallbackZipArchive> NewFromReader(
+      std::unique_ptr<RandomAccessReader> reader);
+  // Returns an independent handle onto the same archive.
+  //
+  // Unlike FsZipArchive::TryClone this performs no I/O at all: the handles
+  // share the parsed central directory and the reader, and differ only in where
+  // they are reading. Use it when several entries must be read at once, since
+  // GetFileByIndex keeps the archive borrowed for as long as the returned
+  // ZipFile lives.
+  //
+  // Handles that share a reader may be read concurrently, so the reader must be
+  // thread-safe if the caller does that. Returns
+  // `absl::StatusCode::kFailedPrecondition` on a moved-from archive or while
+  // another entry of this archive is still open.
+  absl::StatusOr<CallbackZipArchive> TryClone() const;
+  // Returns an independent handle onto the same archive that reads through
+  // `reader` instead of sharing this one's.
+  //
+  // Reuses the central directory this archive already parsed, so like TryClone
+  // it is O(1) in the number of entries. Prefer it over TryClone when the
+  // reader holds per-handle state: two handles reading two different entries
+  // through one cache would thrash it, and a reader that is merely
+  // thread-compatible cannot be shared between threads at all.
+  //
+  // `reader` must serve exactly the bytes this archive's reader does. The
+  // shared central directory would otherwise describe byte ranges that do not
+  // hold the entries it names. That cannot be checked in full, but a reader
+  // whose Size() differs from the one this archive was opened from certainly
+  // does not qualify and is rejected with `absl::StatusCode::kInvalidArgument`.
+  //
+  // Returns `absl::StatusCode::kInvalidArgument` if `reader` is null,
+  // `absl::StatusCode::kFailedPrecondition` on a moved-from archive or while
+  // another entry of this archive is still open (in both cases before `reader`
+  // is asked for its size), `absl::StatusCode::kOutOfRange` if
+  // `reader->Size()` exceeds `INT64_MAX`, and the reader's own status if its
+  // Size() fails. The archive takes ownership of `reader` in every case,
+  // including failure.
+  absl::StatusOr<CallbackZipArchive> TryCloneWithReader(
+      std::unique_ptr<RandomAccessReader> reader) const;
   // Returns the number of entries in the archive, or `kFailedPrecondition` if
   // the archive is moved-from.
   absl::StatusOr<uintptr_t> GetLength() const;
@@ -162,23 +260,142 @@ class ZipArchive final {
   // if the entry's local header is corrupt, `kFailedPrecondition` if the
   // archive is moved-from, another entry of this archive is still open, or the
   // entry is encrypted, `kUnimplemented` if the entry uses an unsupported
-  // compression method, or propagates underlying I/O errors.
+  // compression method, or the RandomAccessReader's own status if reading the
+  // entry's local header fails.
   absl::StatusOr<ZipFile> GetFileByIndex(uintptr_t index)
       ABSL_ATTRIBUTE_LIFETIME_BOUND;
   // Returns a ZipFile by index. The result file returns compressed data as-is
   // without decompressing when read. Returns `kOutOfRange` if
   // `index >= GetLength()`, `kInvalidArgument` if the entry's local header is
   // corrupt, `kFailedPrecondition` if the archive is moved-from or another
-  // entry of this archive is still open, or propagates underlying I/O errors.
+  // entry of this archive is still open, or the RandomAccessReader's own status
+  // if reading the entry's local header fails.
   // Warning: Writers in zip-rs do not support writing compressed data as-is.
   // This data will be compressed again when written through a `*ZipWriter`.
   absl::StatusOr<ZipFile> GetFileByIndexRaw(uintptr_t index)
       ABSL_ATTRIBUTE_LIFETIME_BOUND;
+  // Returns what the central directory records about the entry at `index`,
+  // reading nothing. Prefer this to GetFileByIndex when the entry's contents
+  // are not wanted: that one also reads the entry's local file header, so
+  // listing an archive with it costs one read per entry. Returns `kOutOfRange`
+  // if `index >= GetLength()` and `kFailedPrecondition` on a moved-from
+  // archive.
+  absl::StatusOr<ZipEntryMetadata> GetEntryMetadata(uintptr_t index) const;
+  // True if moved-from; the accessors above then return `kFailedPrecondition`.
+  [[nodiscard]] bool IsNone() const;
+
+  CallbackZipArchive(CallbackZipArchive&&) noexcept = default;
+  // Drops the previous Rust handle and leaves `other` empty (`IsNone()`); see
+  // internal::MoveAssignRustHandle in file.h.
+  CallbackZipArchive& operator=(CallbackZipArchive&& other) noexcept {
+    if (this != &other) {
+      internal::MoveAssignRustHandle(archive_, std::move(other.archive_));
+      active_entry_ = std::move(other.active_entry_);
+    }
+    return *this;
+  }
+
+ private:
+  explicit CallbackZipArchive(rust::CallbackZipArchive archive)
+      : archive_(std::move(archive)),
+        active_entry_(std::make_shared<bool>(false)) {}
+
+  absl::Status CheckNone() const;
+
+  rust::CallbackZipArchive archive_;
+  // Set while a ZipFile returned by GetFileByIndex* is alive; see
+  // internal::ActiveEntryGuard. Null on a moved-from archive. Clones get a
+  // flag of their own, since they are independent handles.
+  std::shared_ptr<bool> active_entry_;
+};
+
+class ZipArchive final {
+ public:
+  // Opens `path` as a seekable zip archive; see `FsZipArchive::NewFromPath` for
+  // error codes.
+  static absl::StatusOr<ZipArchive> FromFile(absl::string_view path);
+  // Parses `data` as a seekable zip archive; see
+  // `BufferedZipArchive::NewFromData` for error codes.
+  static absl::StatusOr<ZipArchive> FromBuffer(absl::string_view data);
+  // Opens an archive read through `reader`, which the archive takes ownership
+  // of. Only the central directory is read here; entries are read when they are
+  // opened. The archive must start at offset 0 of the reader: unlike FromBuffer
+  // and FromFile, data in front of the archive (a self-extracting stub) is
+  // rejected, since finding a displaced archive would mean scanning the reader
+  // from the front. See CallbackZipArchive and security/zip/reader.h.
+  static absl::StatusOr<ZipArchive> FromReader(
+      std::unique_ptr<RandomAccessReader> reader);
+  // Returns an independent handle onto the same archive, sharing the central
+  // directory this one already parsed. See FsZipArchive::TryClone and
+  // CallbackZipArchive::TryClone for the cost model and the caller's
+  // obligations (for a FromFile archive, that the path still name the same,
+  // unmodified file).
+  //
+  // Returns `absl::StatusCode::kFailedPrecondition` on a moved-from FromFile or
+  // FromReader archive, while another entry of this archive is still open, or
+  // when a FromFile archive's file was replaced, truncated or appended to since
+  // it was opened, or propagates OS file-open errors (such as `kNotFound` and
+  // `kPermissionDenied`) when a FromFile archive's path can no longer be
+  // opened.
+  //
+  // Not supported for archives opened with FromBuffer, which return
+  // `absl::StatusCode::kUnimplemented` (even when moved from), because their
+  // reader cannot currently be shared and cloning one would copy the whole
+  // archive.
+  absl::StatusOr<ZipArchive> TryClone() const;
+  // Returns an independent handle onto the same archive that reads through
+  // `reader` instead of sharing this one's. See
+  // CallbackZipArchive::TryCloneWithReader.
+  //
+  // Only supported for archives opened with FromReader; the others return
+  // absl::UnimplementedError, since their bytes do not come from a
+  // RandomAccessReader. Returns `absl::StatusCode::kInvalidArgument` if
+  // `reader` is null or its Size() differs from that of the reader this archive
+  // was opened from, `absl::StatusCode::kFailedPrecondition` on a moved-from
+  // FromReader archive or while another entry of this archive is still open,
+  // `absl::StatusCode::kOutOfRange` if `reader->Size()` exceeds `INT64_MAX`,
+  // and the reader's own status if its Size() fails.
+  absl::StatusOr<ZipArchive> TryCloneWithReader(
+      std::unique_ptr<RandomAccessReader> reader) const;
+  // Returns the number of entries in the archive, or `kFailedPrecondition` if
+  // the archive is moved-from.
+  absl::StatusOr<uintptr_t> GetLength() const;
+  // Returns the archive comment as the raw bytes stored in the central
+  // directory, without UTF-8 validation. Returns `kFailedPrecondition` if the
+  // archive is moved-from.
+  absl::StatusOr<std::string> GetComment() const;
+  // Returns a ZipFile by index. The result file returns decompressed data when
+  // read. Returns `kOutOfRange` if `index >= GetLength()`, `kInvalidArgument`
+  // if the entry's local header is corrupt, `kFailedPrecondition` if the
+  // archive is moved-from, another entry of this archive is still open, or the
+  // entry is encrypted, `kUnimplemented` if the entry uses an unsupported
+  // compression method, or propagates underlying I/O errors (for a FromReader
+  // archive, the RandomAccessReader's own status).
+  absl::StatusOr<ZipFile> GetFileByIndex(uintptr_t index)
+      ABSL_ATTRIBUTE_LIFETIME_BOUND;
+  // Returns a ZipFile by index. The result file returns compressed data as-is
+  // without decompressing when read. Returns `kOutOfRange` if
+  // `index >= GetLength()`, `kInvalidArgument` if the entry's local header is
+  // corrupt, `kFailedPrecondition` if the archive is moved-from or another
+  // entry of this archive is still open, or propagates underlying I/O errors
+  // (for a FromReader archive, the RandomAccessReader's own status).
+  // Warning: Writers in zip-rs do not support writing compressed data as-is.
+  // This data will be compressed again when written through a `*ZipWriter`.
+  absl::StatusOr<ZipFile> GetFileByIndexRaw(uintptr_t index)
+      ABSL_ATTRIBUTE_LIFETIME_BOUND;
+  // Returns what the central directory records about the entry at `index`,
+  // reading nothing. Prefer this to GetFileByIndex when the entry's contents
+  // are not wanted: that one also reads the entry's local file header, so
+  // listing an archive with it costs one read per entry. Returns `kOutOfRange`
+  // if `index >= GetLength()` and `kFailedPrecondition` on a moved-from
+  // archive.
+  absl::StatusOr<ZipEntryMetadata> GetEntryMetadata(uintptr_t index) const;
   // True if moved-from; the accessors above then return `kFailedPrecondition`.
   [[nodiscard]] bool IsNone() const;
 
  private:
-  using BackendType = std::variant<BufferedZipArchive, FsZipArchive>;
+  using BackendType =
+      std::variant<BufferedZipArchive, FsZipArchive, CallbackZipArchive>;
 
   explicit ZipArchive(BackendType archive) : archive_(std::move(archive)) {}
 

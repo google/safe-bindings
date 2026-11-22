@@ -27,18 +27,26 @@ int main(int argc, char** argv) {
                    rust::ToString(json).as_str())
             << std::endl;
 
+  std::cout << "Sorted JSON: "
+            << std::string_view(
+                   rust::ToString(
+                       json, {.sort_keys = true, .trailing_newline = true})
+                       .as_str());
+
   if (auto name = json["name"].as_str(); name.has_value()) {
     std::cout << "Name: " << std::string_view(*name) << std::endl;
   }
 
-  std::cout << "Name (find_str_or): " << json.find_str_or("name", "Unknown")
+  std::cout << "Name (find_as_str): "
+            << std::string_view(
+                   json.find_as_str("name").value_or(rs::StrRef("Unknown")))
             << std::endl;
 
   if (auto age = json["age"].as_int64(); age.has_value()) {
     std::cout << "Age: " << *age << std::endl;
   }
 
-  std::cout << "Age (find_int64_or): " << json.find_int64_or("age", -1)
+  std::cout << "Age (find_as_int64): " << json.find_as_int64("age").value_or(-1)
             << std::endl;
 
   if (auto is_student = json["is_student"].as_bool(); is_student.has_value()) {

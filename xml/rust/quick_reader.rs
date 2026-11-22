@@ -49,7 +49,7 @@ impl XmlError {
 
 /// Limit the length of tag names to prevent excessive resource consumption or potential DoS
 /// attacks.
-fn check_name_len(input: &[u8]) -> anyhow::Result<()> {
+fn check_name_len(input: &str) -> anyhow::Result<()> {
     // Match libxml2's XML_MAX_NAME_LENGTH limit.
     const XML_MAX_NAME_LENGTH: usize = 50000;
 
@@ -104,10 +104,9 @@ fn normalize_whitespace(input: &[u8]) -> Vec<u8> {
 /// Computes (local name is valid, prefix is valid) for a given `QName`.
 fn compute_validity(name: &QName) -> (bool, bool) {
     (
-        str::from_utf8(name.local_name().into_inner()).is_ok_and(is_valid_ncname),
+        is_valid_ncname(name.local_name().into_inner()),
         // A None prefix is considered valid.
-        name.prefix()
-            .is_none_or(|pref| str::from_utf8(pref.into_inner()).is_ok_and(is_valid_ncname)),
+        name.prefix().is_none_or(|pref| is_valid_ncname(pref.into_inner())),
     )
 }
 
@@ -124,14 +123,18 @@ pub struct Attribute {
 impl Attribute {
     /// Returns the local name portion of the attribute's key.
     pub fn local_name(&self) -> Vec<u8> {
-        let qname = QName(self.key.as_slice());
-        qname.local_name().into_inner().into()
+        // Keys produced by the parser are always valid UTF-8 (quick-xml validates them).
+        let Ok(key) = str::from_utf8(&self.key) else {
+            return self.key.clone();
+        };
+        QName(key).local_name().into_inner().into()
     }
 
     /// Returns the namespace prefix of the attribute's key.
     pub fn namespace_prefix(&self) -> Option<Vec<u8>> {
-        let qname = QName(self.key.as_slice());
-        qname.prefix().map(|prefix| prefix.into_inner().into())
+        // Keys produced by the parser are always valid UTF-8 (quick-xml validates them).
+        let key = str::from_utf8(&self.key).ok()?;
+        QName(key).prefix().map(|prefix| prefix.into_inner().into())
     }
 }
 
@@ -184,29 +187,34 @@ fn expand(entity: &[u8]) -> anyhow::Result<Vec<u8>> {
 // fails, returns the original attribute value. If the attribute value contains a '<' (signalling an
 // invalid attribute value), returns an error.
 fn expand_entities_in_attribute_value(attribute_value: &[u8]) -> anyhow::Result<Cow<'_, [u8]>> {
-    // Check for early exit to avoid running a nested parser. If there is no `&` in the attribute
-    // value, then there are no entities to expand.
-    if !attribute_value.contains(&b'&') {
-        return Ok(Cow::Borrowed(attribute_value));
-    }
     // Attribute values must not contain '<' (see https://www.w3.org/TR/xml/#NT-AttValue), so
     // parsing them as XML yields a sequence of Text and GeneralRef events only. This is exactly
     // what is needed in this function: Text are passed through, entities are expanded.
     if attribute_value.contains(&b'<') {
         return Err(anyhow::anyhow!("Invalid attribute value: contains '<'"));
     }
+    // Check for early exit to avoid running a nested parser. If there is no `&` in the attribute
+    // value, then there are no entities to expand.
+    if !attribute_value.contains(&b'&') {
+        return Ok(Cow::Borrowed(attribute_value));
+    }
     let mut result = Vec::new();
+    // `PlainReader` starts in `ParseState::Init`, which strips a single leading UTF-8 BOM
+    // (`\u{FEFF}`) as if `attribute_value` were the start of an XML document. Preserve it here.
+    let bom = "\u{FEFF}".as_bytes();
+    if attribute_value.starts_with(bom) {
+        result.extend_from_slice(bom);
+    }
     let mut reader = PlainReader::from_reader(attribute_value);
-    let mut buf = Vec::new();
 
     loop {
-        match reader.read_event_into(&mut buf) {
+        match reader.read_event() {
             Ok(event) => match event {
                 Event::Text(ref bytes_text) => {
-                    result.extend_from_slice(bytes_text.deref());
+                    result.extend_from_slice(bytes_text.deref().as_bytes());
                 }
                 Event::GeneralRef(bytes_ref) => {
-                    let entity_name = bytes_ref.deref();
+                    let entity_name = bytes_ref.deref().as_bytes();
                     let expanded = expand(entity_name)?;
                     if expanded.is_empty() {
                         result.push(b'&');
@@ -221,7 +229,6 @@ fn expand_entities_in_attribute_value(attribute_value: &[u8]) -> anyhow::Result<
             },
             Err(_) => return Ok(Cow::Borrowed(attribute_value)),
         }
-        buf.clear();
     }
     Ok(Cow::Owned(result))
 }
@@ -254,7 +261,7 @@ impl<'a> Iterator for Attributes<'a> {
             let attr_result = inner.next()?;
             match attr_result {
                 Ok(attr) => {
-                    let expanded = match expand_entities_in_attribute_value(attr.value.as_ref()) {
+                    let expanded = match expand_entities_in_attribute_value(attr.value.as_bytes()) {
                         Ok(expanded) => expanded,
                         Err(err) => return Some(Err(err.to_string().into())),
                     };
@@ -263,8 +270,8 @@ impl<'a> Iterator for Attributes<'a> {
                     {
                         let (local, prefix) = attr.key.decompose();
                         if match prefix {
-                            Some(p) => p.as_ref() == b"xmlns",
-                            None => local.as_ref() == b"xmlns",
+                            Some(p) => p.as_ref() == "xmlns",
+                            None => local.as_ref() == "xmlns",
                         } {
                             // `xmlns` are not usual attributes, and the parser already
                             // transformed that information into namespace resolution. Let's
@@ -401,13 +408,13 @@ impl<'a> XmlEvent<'a> {
     /// returns an empty string.
     pub fn content(self: &XmlEvent<'a>) -> Vec<u8> {
         let content: &[u8] = match &self.event {
-            Event::Text(bytes_text) => bytes_text.deref(),
-            Event::Comment(bytes_text) => bytes_text.deref(),
-            Event::DocType(bytes_text) => bytes_text.deref(),
-            Event::CData(bytes_cdata) => bytes_cdata.deref(),
-            Event::Decl(bytes_decl) => bytes_decl.deref(),
-            Event::PI(bytes_pi) => bytes_pi.deref(),
-            Event::GeneralRef(bytes_ref) => bytes_ref.deref(),
+            Event::Text(bytes_text) => bytes_text.deref().as_bytes(),
+            Event::Comment(bytes_text) => bytes_text.deref().as_bytes(),
+            Event::DocType(bytes_text) => bytes_text.deref().as_bytes(),
+            Event::CData(bytes_cdata) => bytes_cdata.deref().as_bytes(),
+            Event::Decl(bytes_decl) => bytes_decl.deref().as_bytes(),
+            Event::PI(bytes_pi) => bytes_pi.deref().as_bytes(),
+            Event::GeneralRef(bytes_ref) => bytes_ref.deref().as_bytes(),
             _ => "".as_bytes(),
         };
         normalize_line_endings(content)
@@ -686,7 +693,7 @@ impl<'a> QuickReader<'a> {
                         }
                         (result.local_name_valid, result.prefix_valid) = compute_validity(&name);
                     }
-                    Event::GeneralRef(bytes_ref) => match expand(bytes_ref.deref()) {
+                    Event::GeneralRef(bytes_ref) => match expand(bytes_ref.deref().as_bytes()) {
                         Ok(expanded) => result.expanded_entity = expanded,
                         Err(e) => {
                             self.last_error_position = begin;
@@ -747,7 +754,10 @@ impl<'a> QuickReader<'a> {
         let Reader::Ns(ns_reader) = &self.reader else {
             return Err(XmlError::failed_precondition("Namespace resolution disabled."));
         };
-        let qname = QName(qname_data);
+        let Ok(qname_str) = str::from_utf8(qname_data) else {
+            return Err(XmlError::invalid_argument("Invalid UTF-8 in name."));
+        };
+        let qname = QName(qname_str);
         let (resolve_result, local) = ns_reader.resolver().resolve(qname, !is_attribute);
         match resolve_result {
             ResolveResult::Unbound => Err(XmlError::invalid_argument("Unbound name.")),
@@ -826,7 +836,7 @@ pub fn get_xml_encoding(input: &[u8]) -> Option<Vec<u8>> {
                 return None;
             }
             Ok(Event::Decl(e)) => {
-                return e.encoding().and_then(Result::ok).map(|cow| cow.into_owned());
+                return e.encoding().and_then(Result::ok).map(|cow| cow.into_owned().into_bytes());
             }
             // The XML declaration must appear before the root element.
             // If we find a start tag or EOF, we can stop.

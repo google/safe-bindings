@@ -4,6 +4,7 @@
 #include <optional>
 
 #include "exif_bridge.h"
+
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
 #include "absl/types/span.h"

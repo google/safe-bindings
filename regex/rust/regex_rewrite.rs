@@ -313,7 +313,7 @@ fn add_anchors_to_ast(ast: Ast) -> Ast {
 
 #[cfg(test)]
 mod tests {
-        use super::*;
+    use super::*;
     use googletest::prelude::*;
 
     fn rewrite(pattern: &str) -> Vec<u8> {
