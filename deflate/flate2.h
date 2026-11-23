@@ -1,5 +1,5 @@
-#ifndef SECURITY_DEFLATE_FLATE2_H_
-#define SECURITY_DEFLATE_FLATE2_H_
+#ifndef SAFE_BINDINGS_DEFLATE_FLATE2_H_
+#define SAFE_BINDINGS_DEFLATE_FLATE2_H_
 
 #include <cstddef>
 #include <cstdint>
@@ -162,4 +162,4 @@ class VecU8Wrapper {
 };
 
 }  // namespace security::deflate
-#endif  // SECURITY_DEFLATE_FLATE2_H_
+#endif  // SAFE_BINDINGS_DEFLATE_FLATE2_H_
