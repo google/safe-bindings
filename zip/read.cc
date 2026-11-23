@@ -169,7 +169,8 @@ int64_t ReadFromReader(uintptr_t context, uint64_t offset,
   }
   if (*bytes_read > 0) {
     rust::stage_callback_chunk(
-        ToByteSpan(absl::string_view(buffer.data(), *bytes_read)));
+        ToByteSpan(absl::string_view(buffer.data(), buffer.size())
+                       .substr(0, *bytes_read)));
   }
   return static_cast<int64_t>(*bytes_read);
 }
