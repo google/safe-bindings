@@ -990,6 +990,20 @@ fn parser_config() -> xmltree::ParserConfig {
     xmltree::ParserConfig::new().ignore_comments(false).whitespace_to_characters(true)
 }
 
+/// Returns whether `data` contains `<!ENTITY` in any encoding that `xml` reads: UTF-8 and the
+/// ASCII-compatible encodings, or UTF-16 in either byte order.
+///
+/// `xml` only recognizes an entity declaration spelled exactly like this, so a document without
+/// a match declares no entities. A match in a comment or CDATA section also counts.
+fn contains_entity_declaration(data: &[u8]) -> bool {
+    const ASCII: &[u8] = b"<!ENTITY";
+    const UTF16LE: &[u8] = b"<\0!\0E\0N\0T\0I\0T\0Y\0";
+    const UTF16BE: &[u8] = b"\0<\0!\0E\0N\0T\0I\0T\0Y";
+    [ASCII, UTF16LE, UTF16BE]
+        .iter()
+        .any(|pattern| data.windows(pattern.len()).any(|w| w == *pattern))
+}
+
 /// Validates that `local_name` and (if present) `prefix` are valid W3C XML `NCName`s.
 ///
 /// Note: When parsing via `xml-rs`, unprefixed names (`prefix == None`) and element/attribute
@@ -1043,6 +1057,17 @@ fn parse_element(
     scanner_max_depth: usize,
     reported_max_depth: usize,
 ) -> Result<Element, ParseError> {
+    // `xml` does not bound the total size of entity expansion. It expands parameter entities in
+    // entity values while it reads the DTD, so each declaration of about 60 bytes can multiply
+    // the size by 10, and a 500-byte document needs 1 GB before its first element. Each reference
+    // to a general entity in content can also expand to a megabyte. Reject entity declarations
+    // before `xml` sees them; `QuickReader` does not expand user-defined entities either.
+    if contains_entity_declaration(data) {
+        return Err(ParseError {
+            message: "XML entity declarations are not supported".to_string(),
+        });
+    }
+
     let config = parser_config();
     let depth_check = crate::nesting_depth::check_nesting_depth(data, scanner_max_depth, config.clone());
     if depth_check == Err(crate::nesting_depth::NestingDepthError::ExceededMaxDepth) {
