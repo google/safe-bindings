@@ -211,6 +211,24 @@ class JxlDecoder final {
   absl::Status SetPixelLayout(ChannelLayout channel_layout,
                               const SampleFormat& sample_format);
 
+  // Like SetPixelLayout(), but frames are then decoded with the DecodeFrame()
+  // overload that takes `extra_channels`, which also writes every extra
+  // channel of the image (see BasicInfo::extra_channels) to a plane of its own,
+  // in `sample_format`.
+  //
+  // Use this for images whose extra channels are data rather than
+  // transparency, e.g. the bands of a multispectral image beyond the first one
+  // or three.
+  //
+  // This is independent of `channel_layout`: an alpha or black channel that
+  // the layout interleaves with the color channels is written to its plane as
+  // well.
+  //
+  // The DecodeFrame() overloads without `extra_channels` then fail, whether or
+  // not the image has extra channels.
+  absl::Status SetPixelLayoutWithExtraChannels(
+      ChannelLayout channel_layout, const SampleFormat& sample_format);
+
   // Decodes the next frame from the input data into the output buffer.
   // Consumes bytes from `data` by advancing the span.
   // If the decoder is in HeaderDecoded state, this will also parse the frame
@@ -229,9 +247,27 @@ class JxlDecoder final {
                                          absl::Span<uint8_t> output);
 
   // Overload: decodes into output using a previously set pixel layout.
-  // SetPixelLayout() must have been called before this.
+  // SetPixelLayout() must have been called before this. Returns
+  // FailedPrecondition if the layout was set with
+  // SetPixelLayoutWithExtraChannels().
   absl::StatusOr<FeedResult> DecodeFrame(absl::Span<const uint8_t>& data,
                                          absl::Span<uint8_t> output);
+
+  // Overload for a pixel layout set with SetPixelLayoutWithExtraChannels():
+  // additionally decodes the extra channels into `extra_channels`.
+  //
+  // `extra_channels` holds one plane per extra channel, back to back in the
+  // order of BasicInfo::extra_channels. Each plane is width * height samples in
+  // row-major order, in the sample format of the pixel layout, so the buffer
+  // must be pre-allocated with
+  //   info.extra_channels.size() * width * height * BytesPerSample(data_type)
+  // bytes. It is empty for an image without extra channels.
+  //
+  // Returns FailedPrecondition if the pixel layout was set with
+  // SetPixelLayout(), or if `extra_channels` is too small.
+  absl::StatusOr<FeedResult> DecodeFrame(absl::Span<const uint8_t>& data,
+                                         absl::Span<uint8_t> output,
+                                         absl::Span<uint8_t> extra_channels);
 
   // Returns true if there are more frames to decode (for animations).
   bool HasMoreFrames() const;
