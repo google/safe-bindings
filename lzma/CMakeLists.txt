@@ -11,10 +11,9 @@ include(FetchContent)
 
 FetchContent_Declare(
   Corrosion
-  # NOTE: Replace with https://github.com/corrosion-rs/corrosion once
-  # http://github.com/corrosion-rs/corrosion/pull/666 is merged.
-  GIT_REPOSITORY https://github.com/thunderseethe/corrosion
-  GIT_TAG master
+  GIT_REPOSITORY https://github.com/corrosion-rs/corrosion
+  # Post-v0.6.1 commit with Crubit support (PR #666).
+  GIT_TAG c4a90eaef5700fcfd2630e8d886563bfc2385d8f
 )
 
 FetchContent_MakeAvailable(Corrosion)
