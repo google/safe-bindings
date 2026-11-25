@@ -450,7 +450,9 @@ class ZipArchive final {
 // appends a data descriptor, must be read with seekable `ZipArchive`. A wrong
 // `compressed_size` truncates or over-reads the entry and surfaces as a CRC or
 // decoding error (kInternal) when the data is read, after which the stream
-// position is undefined.
+// position is undefined. Such a local header declares no uncompressed size
+// either, so the decoded size is not checked against one (see
+// ZipFile::ReadInto()).
 //
 // IMPORTANT: The returned ZipFile borrows the underlying stream (a Rust `&mut`
 // that Crubit cannot enforce in C++) and drains any unread compressed bytes
