@@ -6,14 +6,14 @@
 #include <variant>
 
 #include "crubit_helpers/string_conversions.h"
-#include "converters.h"
-#include "reader_status.h"
-#include "crubit/rust.h"
 #include "absl/status/status.h"
 #include "absl/status/status_macros.h"
 #include "absl/status/statusor.h"
 #include "absl/types/span.h"
 #include "support/rs_std/slice_ref.h"
+#include "converters.h"
+#include "reader_status.h"
+#include "crubit/rust.h"
 
 namespace security::zip {
 
@@ -406,7 +406,7 @@ absl::StatusOr<uint64_t> CallbackZipFile::GetDataStart() const {
 absl::StatusOr<RustVecU8Wrapper> CallbackZipFile::GetFileData() {
   // Unlike the other two backends this one reads through the caller's
   // RandomAccessReader, whose failures reach us as a generic bridge error; see
-  // security/zip/reader_status.h.
+  // reader_status.h.
   return internal::ThroughReader([&] { return GetFileDataImpl(zip_); });
 }
 absl::StatusOr<RustVecU8Wrapper> CallbackZipFile::GetFileData(size_t max_size) {

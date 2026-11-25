@@ -1,5 +1,5 @@
-#ifndef SECURITY_ZIP_READER_H_
-#define SECURITY_ZIP_READER_H_
+#ifndef SAFE_BINDINGS_ZIP_READER_H_
+#define SAFE_BINDINGS_ZIP_READER_H_
 
 #include <cstddef>
 #include <cstdint>
@@ -89,4 +89,4 @@ class RandomAccessReader {
 
 }  // namespace security::zip
 
-#endif  // SECURITY_ZIP_READER_H_
+#endif  // SAFE_BINDINGS_ZIP_READER_H_

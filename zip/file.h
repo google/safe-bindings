@@ -1,5 +1,5 @@
-#ifndef SECURITY_ZIP_FILE_H_
-#define SECURITY_ZIP_FILE_H_
+#ifndef SAFE_BINDINGS_ZIP_FILE_H_
+#define SAFE_BINDINGS_ZIP_FILE_H_
 
 #include <cstddef>
 #include <cstdint>
@@ -8,11 +8,11 @@
 #include <utility>
 #include <variant>
 
-#include "converters.h"
-#include "crubit/rust.h"
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
 #include "absl/types/span.h"
+#include "converters.h"
+#include "crubit/rust.h"
 
 namespace security::zip {
 namespace internal {
@@ -20,7 +20,7 @@ namespace internal {
 // Gives the writers in write.cc access to the entry types' Rust handles.
 struct ZipFileWriterPeer;
 
-// Internal to security/zip; not part of the public API.
+// Internal to third_party/safe_bindings/zip; not part of the public API.
 //
 // Move-only RAII token recording that an entry borrowed from an archive or
 // stream-reader handle is alive. Each handle owns a `std::shared_ptr<bool>`
@@ -66,7 +66,7 @@ class ActiveEntryGuard final {
 // `*this`: after `a = std::move(b)`, `b` would still hold `a`'s old Rust value
 // (and any `&mut` borrow it carries) rather than being empty. Routing the move
 // through a temporary drops `dst`'s old value immediately and leaves `src`
-// empty (`is_none()`), which is what every C++ wrapper in security/zip relies
+// empty (`is_none()`), which is what every C++ wrapper in this library relies
 // on.
 template <typename T>
 void MoveAssignRustHandle(T& dst, T&& src) {
@@ -499,9 +499,10 @@ class CallbackZipFile final {
 
 class ZipFile final {
  public:
-  // `guard` is internal to security/zip: it is the token that marks the
-  // originating archive or stream reader as having an entry open and is
-  // released when this ZipFile is destroyed (see internal::ActiveEntryGuard).
+  // `guard` is internal to third_party/safe_bindings/zip: it is the token that
+  // marks the originating archive or stream reader as having an entry open and
+  // is released when this ZipFile is destroyed (see
+  // internal::ActiveEntryGuard).
   static ZipFile FromFile(rust::FsZipFile zip,
                           internal::ActiveEntryGuard guard) {
     return ZipFile(FsZipFile(std::move(zip)), std::move(guard));
@@ -700,4 +701,4 @@ class ZipFile final {
 
 }  // namespace security::zip
 
-#endif  // SECURITY_ZIP_FILE_H_
+#endif  // SAFE_BINDINGS_ZIP_FILE_H_

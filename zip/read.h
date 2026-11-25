@@ -1,5 +1,5 @@
-#ifndef SECURITY_ZIP_READ_H_
-#define SECURITY_ZIP_READ_H_
+#ifndef SAFE_BINDINGS_ZIP_READ_H_
+#define SAFE_BINDINGS_ZIP_READ_H_
 
 #include <cstdint>
 #include <memory>
@@ -8,13 +8,13 @@
 #include <utility>
 #include <variant>
 
-#include "file.h"
-#include "reader.h"
-#include "crubit/rust.h"
 #include "absl/base/attributes.h"
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
 #include "absl/strings/string_view.h"
+#include "file.h"
+#include "reader.h"
+#include "crubit/rust.h"
 
 namespace security::zip {
 
@@ -197,7 +197,7 @@ class FsZipArchive final {
 // Opening reads only the end-of-central-directory record and the central
 // directory, and an entry's bytes are read when that entry is read, so an
 // archive in remote storage never has to be transferred in full. See
-// security/zip/reader.h for what the reader must guarantee.
+// third_party/safe_bindings/zip/reader.h for what the reader must guarantee.
 class CallbackZipArchive final {
  public:
   // Opens an archive read through `reader`, which the archive takes ownership
@@ -322,7 +322,8 @@ class ZipArchive final {
   // opened. The archive must start at offset 0 of the reader: unlike FromBuffer
   // and FromFile, data in front of the archive (a self-extracting stub) is
   // rejected, since finding a displaced archive would mean scanning the reader
-  // from the front. See CallbackZipArchive and security/zip/reader.h.
+  // from the front. See CallbackZipArchive and
+  // third_party/safe_bindings/zip/reader.h.
   static absl::StatusOr<ZipArchive> FromReader(
       std::unique_ptr<RandomAccessReader> reader);
   // Returns an independent handle onto the same archive, sharing the central
@@ -562,4 +563,4 @@ class ZipStreamReader final {
 
 }  // namespace security::zip
 
-#endif  // SECURITY_ZIP_READ_H_
+#endif  // SAFE_BINDINGS_ZIP_READ_H_

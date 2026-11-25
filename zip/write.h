@@ -1,16 +1,16 @@
-#ifndef SECURITY_ZIP_WRITE_H_
-#define SECURITY_ZIP_WRITE_H_
+#ifndef SAFE_BINDINGS_ZIP_WRITE_H_
+#define SAFE_BINDINGS_ZIP_WRITE_H_
 
 #include <cstdint>
 #include <utility>
 #include <variant>
 
-#include "converters.h"
-#include "file.h"
-#include "crubit/rust.h"
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
 #include "absl/strings/string_view.h"
+#include "converters.h"
+#include "file.h"
+#include "crubit/rust.h"
 
 namespace security::zip {
 
@@ -333,4 +333,4 @@ class ZipStreamWriter final {
 
 }  // namespace security::zip
 
-#endif  // SECURITY_ZIP_WRITE_H_
+#endif  // SAFE_BINDINGS_ZIP_WRITE_H_

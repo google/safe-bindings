@@ -4,15 +4,15 @@
 #include <utility>
 #include <variant>
 
-#include "converters.h"
-#include "file.h"
-#include "reader_status.h"
-#include "crubit/rust.h"
 #include "absl/functional/overload.h"
 #include "absl/status/status.h"
 #include "absl/status/status_macros.h"
 #include "absl/status/statusor.h"
 #include "absl/strings/string_view.h"
+#include "converters.h"
+#include "file.h"
+#include "reader_status.h"
+#include "crubit/rust.h"
 
 namespace security::zip {
 namespace internal {
@@ -32,7 +32,7 @@ struct ZipFileWriterPeer {
             },
             [&](CallbackZipFile& file) {
               // Reads through the caller's RandomAccessReader; see
-              // security/zip/reader_status.h for the status hand-off.
+              // reader_status.h for the status hand-off.
               return internal::ThroughReader([&] {
                 return FromRustResultUnit(
                     writer.write_callback_zip_file_content(file.zip_));
