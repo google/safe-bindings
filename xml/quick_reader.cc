@@ -13,15 +13,18 @@
 #include "absl/base/attributes.h"
 #include "absl/functional/function_ref.h"
 #include "absl/functional/overload.h"
+#include "absl/log/check.h"
 #include "absl/log/log.h"
 #include "absl/status/status.h"
 #include "absl/status/status_macros.h"
 #include "absl/status/statusor.h"
 #include "absl/strings/str_cat.h"
 #include "absl/strings/string_view.h"
+#include "support/rs_std/option.h"
 #include "support/rs_std/result.h"
 #include "support/rs_std/str_ref.h"
 #include "support/rs_std/vec.h"
+#include "util/utf8/public/unilib.h"
 
 namespace security::xml {
 
@@ -112,11 +115,16 @@ absl::StatusOr<Substrings> RangeToString(rust::Range range,
 }
 
 absl::StatusOr<rs_std::StrRef> ToStrRef(absl::string_view xml) {
-  std::optional<rs_std::StrRef> str_ref = rs_std::StrRef::FromUtf8(xml);
-  if (!str_ref.has_value()) {
+  // UniLib's (SIMD) validation is much faster than the scalar one in
+  // rs_std::StrRef::FromUtf8() (about 20x on a 716 KB document), and checks the
+  // same: Rust's `&str` rules (no overlong encodings, surrogates or code points
+  // above U+10FFFF).
+  if (!UniLib::IsStructurallyValid(xml)) {
     return absl::InvalidArgumentError("Input string is not UTF-8");
   }
-  return *str_ref;
+  // Memory safety relies on the two agreeing, so check it in debug builds.
+  DCHECK(rs_std::StrRef::FromUtf8(xml).has_value());
+  return rs_std::StrRef::FromUtf8Unchecked(xml);
 }
 
 rust::ReaderConfig ToRustConfig(const QuickReader::Config& config) {
@@ -205,7 +213,13 @@ absl::StatusOr<QuickReader::Event> QuickReader::NextEvent()
   if (!result.has_value()) {
     return XmlErrorToStatus(std::move(result).err());
   }
-  rust::XmlEvent event = std::move(result).value();
+  // Moving a Rust object creates a default object in Rust and swaps all of
+  // their bytes (crubit::MemSwap). So the event is used in place instead of
+  // being moved out of `result` first, and the constructors of the wrappers
+  // (Data, Name, Attributes and Attribute) take rvalue references instead of
+  // values. Each part is still moved into its wrapper, and the wrapper into
+  // the returned StatusOr.
+  rust::XmlEvent& event = result.value();
   switch (event.event_type().tag) {
     case rust::EventType::Tag::Empty:
     case rust::EventType::Tag::Start: {
@@ -254,8 +268,7 @@ absl::StatusOr<QuickReader::Event> QuickReader::NextEvent()
       return DocType{.data = Data(std::move(event))};
     case rust::EventType::Tag::GeneralRef: {
       std::string expanded(StringViewFromVecU8(event.expanded_entity));
-      Data data(std::move(event));
-      return GeneralRef{.data = std::move(data),
+      return GeneralRef{.data = Data(std::move(event)),
                         .expanded = std::move(expanded)};
     }
     case rust::EventType::Tag::Eof:
@@ -325,8 +338,8 @@ QuickReader::Attributes::NextAttribute() ABSL_ATTRIBUTE_LIFETIME_BOUND {
         absl::StrCat("Failed to read attribute: ",
                      StringViewFromVecU8(std::move(attr_result).err())));
   }
-  std::optional<rust::Attribute> opt_attr =
-      std::move(attr_result).value();
+  // Used in place; see NextEvent().
+  rs_std::Option<rust::Attribute>& opt_attr = attr_result.value();
   if (!opt_attr.has_value()) {
     return std::nullopt;
   }
