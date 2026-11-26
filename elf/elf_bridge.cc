@@ -8,13 +8,13 @@
 #include <utility>
 
 #include "crubit_helpers/string_conversions.h"
-#include "crubit/elf_cpp_bindings.h"
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
 #include "absl/strings/str_cat.h"
 #include "absl/strings/string_view.h"
 #include "support/rs_std/result.h"
 #include "support/rs_std/str_ref.h"
+#include "crubit/elf_cpp_bindings.h"
 
 namespace elf_bridge {
 namespace {

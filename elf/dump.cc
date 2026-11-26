@@ -7,10 +7,10 @@
 #include <ostream>
 #include <string>
 
-#include "elf_bridge.h"
 #include "absl/status/statusor.h"
 #include "absl/strings/str_format.h"
 #include "absl/strings/string_view.h"
+#include "elf_bridge.h"
 
 namespace elf_bridge {
 
