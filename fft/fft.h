@@ -35,12 +35,12 @@
 // Each transform function has an "advanced" overload that takes ArrayLayout
 // objects to define the input and output arrays. This allows processing
 // arrays with non-contiguous elements or subarrays of larger arrays. See
-// `security/fft/array_layout.h` for more information.
+// `safe_bindings/fft/array_layout.h` for more information.
 //
 // See fft_test.cc for more examples.
 
-#ifndef SECURITY_FFT_FFT_H_
-#define SECURITY_FFT_FFT_H_
+#ifndef SAFE_BINDINGS_FFT_FFT_H_
+#define SAFE_BINDINGS_FFT_FFT_H_
 
 #include <array>
 #include <complex>
@@ -49,12 +49,12 @@
 #include <utility>
 #include <vector>
 
-#include "array_layout.h"
-#include "fft_internal.h"
-#include "crubit/rust.h"
 #include "absl/status/status.h"
 #include "absl/status/status_macros.h"
 #include "absl/types/span.h"
+#include "array_layout.h"
+#include "fft_internal.h"
+#include "crubit/rust.h"
 
 namespace security::fft {
 
@@ -528,4 +528,4 @@ absl::Status Dct4(absl::Span<const T> input, absl::Span<T> output,
 
 }  // namespace security::fft
 
-#endif  // SECURITY_FFT_FFT_H_
+#endif  // SAFE_BINDINGS_FFT_FFT_H_

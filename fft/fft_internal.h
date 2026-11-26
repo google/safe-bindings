@@ -1,5 +1,5 @@
-#ifndef SECURITY_FFT_FFT_INTERNAL_H_
-#define SECURITY_FFT_FFT_INTERNAL_H_
+#ifndef SAFE_BINDINGS_FFT_FFT_INTERNAL_H_
+#define SAFE_BINDINGS_FFT_FFT_INTERNAL_H_
 
 #include <complex>
 #include <cstddef>
@@ -7,8 +7,6 @@
 #include <functional>
 #include <numeric>
 
-#include "array_layout.h"
-#include "crubit/rust.h"
 #include "absl/status/status.h"
 #include "absl/strings/string_view.h"
 #include "absl/types/span.h"
@@ -16,6 +14,8 @@
 #include "support/rs_std/slice_ref.h"
 #include "support/rs_std/unit.h"
 #include "support/rs_std/vec.h"
+#include "array_layout.h"
+#include "crubit/rust.h"
 
 namespace security::fft::internal {
 
@@ -226,4 +226,4 @@ inline size_t NumElements(absl::Span<const size_t> shape) {
 
 }  // namespace security::fft::internal
 
-#endif  // SECURITY_FFT_FFT_INTERNAL_H_
+#endif  // SAFE_BINDINGS_FFT_FFT_INTERNAL_H_

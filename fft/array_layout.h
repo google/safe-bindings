@@ -28,8 +28,8 @@
 // span of strides, like the one the underlying Rust ArrayView uses. This might
 // be useful for new code that doesn't need FFTW-like semantics.
 
-#ifndef SECURITY_FFT_ARRAY_LAYOUT_H_
-#define SECURITY_FFT_ARRAY_LAYOUT_H_
+#ifndef SAFE_BINDINGS_FFT_ARRAY_LAYOUT_H_
+#define SAFE_BINDINGS_FFT_ARRAY_LAYOUT_H_
 
 #include <cstddef>
 
@@ -55,4 +55,4 @@ ArrayLayout(absl::Span<T> data, absl::Span<const size_t> nembed, size_t stride)
 
 }  // namespace security::fft
 
-#endif  // SECURITY_FFT_ARRAY_LAYOUT_H_
+#endif  // SAFE_BINDINGS_FFT_ARRAY_LAYOUT_H_
