@@ -14,6 +14,7 @@ use crate::types::{
 const PRESET_EXTREME: u32 = 0x80000000;
 
 const FILTER_LZMA1: u64 = types::LZMA_FILTER_LZMA1 as u64;
+const FILTER_LZMA1EXT: u64 = types::LZMA_FILTER_LZMA1EXT as u64;
 const FILTER_LZMA2: u64 = types::LZMA_FILTER_LZMA2 as u64;
 const FILTER_X86: u64 = types::LZMA_FILTER_X86 as u64;
 const FILTER_POWERPC: u64 = types::LZMA_FILTER_POWERPC as u64;
@@ -47,7 +48,8 @@ const LZMA2_PROP_MAX: u8 = 40;
 /// # Safety
 /// `options` must point to a valid, writable `lzma_options_lzma`.
 /// The memory pointed to by `options` must be initialized.
-// NOTE(b/552362497): Change the raw pointers into references once MaybeUninit is supported in safer_cffi.
+// NOTE(b/552362497): Change the raw pointers into references once MaybeUninit is supported in
+// safer_cffi.
 #[unsafe(export_name = crate::prefix!(lzma_lzma_preset))]
 pub unsafe extern "C" fn lzma_lzma_preset(
     options: *mut lzma_options_lzma,
@@ -112,7 +114,7 @@ pub extern "C" fn lzma_properties_size(
         return LZMA_PROG_ERROR;
     };
     let props_size = match f.id {
-        FILTER_LZMA1 => 5,
+        FILTER_LZMA1 | FILTER_LZMA1EXT => 5,
         FILTER_LZMA2 => 1,
         FILTER_DELTA => 1,
         FILTER_X86 | FILTER_POWERPC | FILTER_IA64 | FILTER_ARM | FILTER_ARMTHUMB | FILTER_SPARC
@@ -148,7 +150,7 @@ pub unsafe extern "C" fn lzma_properties_encode(
     };
 
     let props_size = match f.id {
-        FILTER_LZMA1 => 5,
+        FILTER_LZMA1 | FILTER_LZMA1EXT => 5,
         FILTER_LZMA2 => 1,
         FILTER_DELTA => 1,
         _ => 0,
@@ -173,7 +175,7 @@ pub unsafe extern "C" fn lzma_properties_encode(
 
 fn lzma_properties_encode_inner(f: &lzma_filter, props_slice: &mut [u8]) -> lzma_ret {
     match f.id {
-        FILTER_LZMA1 => {
+        FILTER_LZMA1 | FILTER_LZMA1EXT => {
             if f.options.is_null() {
                 return LZMA_PROG_ERROR;
             }
@@ -259,7 +261,8 @@ pub unsafe extern "C" fn lzma_properties_decode(
         return LZMA_OPTIONS_ERROR;
     }
     // SAFETY:
-    // - If `props_size > 0`, `props` points to `props_size` bytes of initialized memory, as required by the safety precondition.
+    // - If `props_size > 0`, `props` points to `props_size` bytes of initialized memory, as
+    //   required by the safety precondition.
     let props = if props_size > 0 {
         unsafe { core::slice::from_raw_parts(props, props_size) }
     } else {
@@ -286,7 +289,7 @@ fn alloc_options<T>(options: T) -> Result<*mut c_void, lzma_ret> {
 
 fn lzma_properties_decode_inner(f: &mut lzma_filter, props: &[u8]) -> lzma_ret {
     match f.id {
-        FILTER_LZMA1 => {
+        FILTER_LZMA1 | FILTER_LZMA1EXT => {
             if props.len() != 5 {
                 return LZMA_OPTIONS_ERROR;
             }
@@ -315,9 +318,9 @@ fn lzma_properties_decode_inner(f: &mut lzma_filter, props: &[u8]) -> lzma_ret {
                 nice_len: 64,
                 mf: LZMA_MF_BT4,
                 depth: 0,
-                reserved_int1: 0,
-                reserved_int2: 0,
-                reserved_int3: 0,
+                ext_flags: 0,
+                ext_size_low: 0,
+                ext_size_high: 0,
                 reserved_int4: 0,
                 reserved_int5: 0,
                 reserved_int6: 0,
@@ -358,9 +361,9 @@ fn lzma_properties_decode_inner(f: &mut lzma_filter, props: &[u8]) -> lzma_ret {
                 nice_len: 64,
                 mf: LZMA_MF_BT4,
                 depth: 0,
-                reserved_int1: 0,
-                reserved_int2: 0,
-                reserved_int3: 0,
+                ext_flags: 0,
+                ext_size_low: 0,
+                ext_size_high: 0,
                 reserved_int4: 0,
                 reserved_int5: 0,
                 reserved_int6: 0,

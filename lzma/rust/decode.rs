@@ -11,9 +11,9 @@ use crate::helpers;
 use crate::state::{ActionState, AutoDecoder, CoderInner, InternalState, RawProps};
 use crate::types::{
     lzma_filter, lzma_options_lzma, lzma_ret, lzma_stream, LZMA_CONCATENATED, LZMA_FILTER_LZMA1,
-    LZMA_FILTER_LZMA2, LZMA_LC_DEFAULT, LZMA_LP_DEFAULT, LZMA_OK, LZMA_OPTIONS_ERROR,
-    LZMA_PB_DEFAULT, LZMA_PROG_ERROR, LZMA_SUPPORTED_FLAGS, LZMA_TELL_ANY_CHECK,
-    LZMA_TELL_NO_CHECK,
+    LZMA_FILTER_LZMA1EXT, LZMA_FILTER_LZMA2, LZMA_LC_DEFAULT, LZMA_LP_DEFAULT,
+    LZMA_LZMA1EXT_ALLOW_EOPM, LZMA_OK, LZMA_OPTIONS_ERROR, LZMA_PB_DEFAULT, LZMA_PROG_ERROR,
+    LZMA_SUPPORTED_FLAGS, LZMA_TELL_ANY_CHECK, LZMA_TELL_NO_CHECK,
 };
 
 /// Initialize `.xz` stream decoder.
@@ -115,7 +115,10 @@ pub unsafe extern "C" fn lzma_raw_decoder(
     };
 
     for (i, f) in filter_slice.iter().enumerate() {
-        if f.id == LZMA_FILTER_LZMA2.into() || f.id == LZMA_FILTER_LZMA1.into() {
+        if f.id == LZMA_FILTER_LZMA2.into()
+            || f.id == LZMA_FILTER_LZMA1.into()
+            || f.id == LZMA_FILTER_LZMA1EXT.into()
+        {
             lzma_f_opt = Some(f);
 
             // According to both liblzma and lzma_rust2, the last filter should be either lzma1 or
@@ -140,15 +143,29 @@ pub unsafe extern "C" fn lzma_raw_decoder(
         None => return LZMA_OPTIONS_ERROR,
     };
 
+    // LZMA1EXT carries the uncompressed size in its options, so it cannot do without them. Like
+    // liblzma, an unknown `ext_flags` bit is an error, and a size of `u64::MAX` means unknown.
+    let is_lzma1ext = f.id == LZMA_FILTER_LZMA1EXT.into();
+    if is_lzma1ext && f.options.is_null() {
+        return LZMA_PROG_ERROR;
+    }
+    let mut uncomp_size = u64::MAX;
+
     // Use default dict size; raw decoder typically gets dict_size from filter options
     let raw_props = if !f.options.is_null() {
         // SAFETY: The `options` pointer is valid and non-null, pointing to a properly aligned
         // `lzma_options_lzma` struct as required by the public safety contract.
         let opts = unsafe { &*(f.options as *const lzma_options_lzma) };
-        if f.id == LZMA_FILTER_LZMA1.into() {
+        if f.id != LZMA_FILTER_LZMA2.into() {
             if opts.lc > 4 || opts.lp > 4 || opts.lc + opts.lp > 4 || opts.pb > 4 {
                 return LZMA_OPTIONS_ERROR;
             }
+        }
+        if is_lzma1ext {
+            if opts.ext_flags & !LZMA_LZMA1EXT_ALLOW_EOPM != 0 {
+                return LZMA_OPTIONS_ERROR;
+            }
+            uncomp_size = u64::from(opts.ext_size_low) | (u64::from(opts.ext_size_high) << 32);
         }
         RawProps { dict_size: opts.dict_size, lc: opts.lc, lp: opts.lp, pb: opts.pb }
     } else {
@@ -169,12 +186,7 @@ pub unsafe extern "C" fn lzma_raw_decoder(
     } else {
         // Compute properties byte. Props is encoded as `(pb * 5 + lp) * 9 + lc`
         let props_byte = (raw_props.pb * 5 + raw_props.lp) * 9 + raw_props.lc;
-        match LzmaStream::new_with_props(
-            u64::MAX, // uncompressed size unknown
-            props_byte as u8,
-            raw_props.dict_size,
-            None,
-        ) {
+        match LzmaStream::new_with_props(uncomp_size, props_byte as u8, raw_props.dict_size, None) {
             Ok(mut stream) => {
                 if stream.set_filters(&extra_filters).is_err() {
                     return LZMA_OPTIONS_ERROR;

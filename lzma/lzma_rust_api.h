@@ -104,6 +104,7 @@ typedef uint64_t lzma_vli;
 /* ---- Filter IDs ---- */
 
 #define LZMA_FILTER_LZMA1 0x4000000000000001ULL
+#define LZMA_FILTER_LZMA1EXT 0x4000000000000002ULL
 #define LZMA_FILTER_LZMA2 0x21ULL
 #define LZMA_FILTER_DELTA 0x03ULL
 #define LZMA_FILTER_X86 0x04ULL
@@ -132,9 +133,9 @@ typedef struct {
   lzma_match_finder mf;
   uint32_t depth;
 
-  uint32_t reserved_int1;
-  uint32_t reserved_int2;
-  uint32_t reserved_int3;
+  uint32_t ext_flags;
+  uint32_t ext_size_low;
+  uint32_t ext_size_high;
   uint32_t reserved_int4;
   uint32_t reserved_int5;
   uint32_t reserved_int6;
@@ -147,6 +148,14 @@ typedef struct {
   void* reserved_ptr1;
   void* reserved_ptr2;
 } lzma_options_lzma;
+
+#define LZMA_LZMA1EXT_ALLOW_EOPM 0x01U
+
+#define lzma_set_ext_size(opt_lzma, u64size)                          \
+  do {                                                                \
+    (opt_lzma).ext_size_low = (uint32_t)(u64size);                    \
+    (opt_lzma).ext_size_high = (uint32_t)((uint64_t)(u64size) >> 32); \
+  } while (0)
 
 /* ---- Filter chain ---- */
 
