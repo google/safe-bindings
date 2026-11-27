@@ -52,6 +52,7 @@ target_include_directories(exif_bridge PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/..")
 target_link_libraries(exif_bridge
   PUBLIC
     rust
+    absl::base
     absl::chunked_queue
     absl::core_headers
     absl::status

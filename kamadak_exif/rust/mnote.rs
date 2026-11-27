@@ -160,6 +160,13 @@ pub fn parse_makernote(
     (mnote_type, fields)
 }
 
+/// Limits the bytes `parse_ifd` copies out of the buffers, as a multiple of
+/// the TIFF data size. The values of a real maker note take up separate parts
+/// of the file, but nothing stops a crafted one from pointing all of its
+/// entries (up to 65535) at the same bytes, and the reader parses the maker
+/// note eagerly.
+const MAX_VALUE_BYTES_PER_TIFF_BYTE: usize = 4;
+
 fn parse_ifd(
     tiff_buf: &[u8],
     mnote_bytes: &[u8],
@@ -175,6 +182,7 @@ fn parse_ifd(
         u16::from_be_bytes([n_bytes[0], n_bytes[1]])
     } as usize;
 
+    let mut value_budget = tiff_buf.len().saturating_mul(MAX_VALUE_BYTES_PER_TIFF_BYTE);
     let mut fields = Vec::new();
     for i in 0..n {
         let i_mul_12 = i.checked_mul(12)?;
@@ -238,6 +246,8 @@ fn parse_ifd(
             Some(b) => b,
             None => continue,
         };
+        // Over budget: give up on the whole maker note, as for a truncated one.
+        value_budget = value_budget.checked_sub(val_bytes.len())?;
 
         if let Some(val) = parse_value_payload(val_bytes, typ, little_endian) {
             fields.push(MnoteField { tag, value: Value(val) });

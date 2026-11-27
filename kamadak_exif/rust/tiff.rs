@@ -25,27 +25,27 @@ pub struct In(pub i32);
 impl In {
     pub const PRIMARY: In = In(KamadakIn::PRIMARY.0 as i32);
     pub const THUMBNAIL: In = In(KamadakIn::THUMBNAIL.0 as i32);
+    /// Not a valid IFD number. Fields and lookups never return it; a lookup
+    /// with it finds nothing.
     pub const UNKNOWN: In = In(-1);
 }
 
+// kamadak-exif numbers IFDs with a u16 and reads up to 8 of them, so a field
+// read from a file can belong to IFD 2 or later. Keep the actual number: the
+// C++ side indexes per-IFD storage with it.
 impl From<KamadakIn> for In {
     fn from(in_: KamadakIn) -> Self {
-        match in_ {
-            KamadakIn::PRIMARY => In::PRIMARY,
-            KamadakIn::THUMBNAIL => In::THUMBNAIL,
-            _ => In::UNKNOWN,
-        }
+        In(i32::from(in_.0))
     }
 }
 
 impl From<In> for KamadakIn {
     fn from(in_: In) -> Self {
-        match in_ {
-            In::PRIMARY => KamadakIn::PRIMARY,
-            In::THUMBNAIL => KamadakIn::THUMBNAIL,
-            // Default to PRIMARY if the IFD is not known.
-            _ => KamadakIn::PRIMARY,
-        }
+        // Only a number made up outside this crate, such as `In::UNKNOWN`,
+        // falls outside u16. Map it to an IFD that never exists rather than
+        // to PRIMARY, so that a lookup finds nothing instead of a field from
+        // another IFD.
+        KamadakIn(u16::try_from(in_.0).unwrap_or(u16::MAX))
     }
 }
 
