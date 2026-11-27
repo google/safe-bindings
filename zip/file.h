@@ -1,5 +1,5 @@
-#ifndef SECURITY_ZIP_FILE_H_
-#define SECURITY_ZIP_FILE_H_
+#ifndef SAFE_BINDINGS_ZIP_FILE_H_
+#define SAFE_BINDINGS_ZIP_FILE_H_
 
 #include <cstddef>
 #include <cstdint>
@@ -8,11 +8,11 @@
 #include <utility>
 #include <variant>
 
-#include "converters.h"
-#include "crubit/rust.h"
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
 #include "absl/types/span.h"
+#include "converters.h"
+#include "crubit/rust.h"
 
 namespace security::zip {
 namespace internal {
@@ -20,7 +20,7 @@ namespace internal {
 // Gives the writers in write.cc access to the entry types' Rust handles.
 struct ZipFileWriterPeer;
 
-// Internal to security/zip; not part of the public API.
+// Internal to third_party/safe_bindings/zip; not part of the public API.
 //
 // Move-only RAII token recording that an entry borrowed from an archive or
 // stream-reader handle is alive. Each handle owns a `std::shared_ptr<bool>`
@@ -66,7 +66,7 @@ class ActiveEntryGuard final {
 // `*this`: after `a = std::move(b)`, `b` would still hold `a`'s old Rust value
 // (and any `&mut` borrow it carries) rather than being empty. Routing the move
 // through a temporary drops `dst`'s old value immediately and leaves `src`
-// empty (`is_none()`), which is what every C++ wrapper in security/zip relies
+// empty (`is_none()`), which is what every C++ wrapper in this library relies
 // on.
 template <typename T>
 void MoveAssignRustHandle(T& dst, T&& src) {
@@ -273,7 +273,8 @@ class BufferedZipFile final {
   // entry into an unbounded heap buffer. For untrusted zip archives, prefer
   // `GetFileData(size_t max_size)` below to cap memory allocation and defend
   // against zip bomb memory exhaustion (OOM) attacks, or read the entry
-  // incrementally with `ReadBytes()`.
+  // incrementally with `ReadBytes()`. See ZipFile::GetFileData() for the full
+  // contract.
   absl::StatusOr<RustVecU8Wrapper> GetFileData();
 
   // Reads up to `max_bytes` decompressed bytes from the entry, advancing the
@@ -283,14 +284,16 @@ class BufferedZipFile final {
   // rather than assuming a short non-empty read means end of entry
   // (`ReadBytes(0)` returns an empty buffer immediately without advancing the
   // entry). Returns `absl::StatusCode::kInternal` on a moved-from entry or
-  // decompression/CRC errors, or propagates underlying I/O error codes.
+  // decompression, CRC-32 or declared-size errors, or propagates underlying
+  // I/O error codes.
   //
   // WARNING: Chunks returned before the terminating empty read are not yet
-  // verified against the entry's CRC-32: zip-rs checks it only on the read that
-  // observes end of entry. In particular, when the uncompressed size is an
-  // exact multiple of `max_bytes`, the chunk carrying the last byte is still
-  // unverified; always read until an empty result (or an error) before acting
-  // on the data.
+  // verified against the entry's CRC-32 or declared `uncompressed_size`: both
+  // are checked only on the read that observes end of entry. In particular,
+  // when the decoded size is an exact multiple of `max_bytes`, the chunk
+  // carrying the last byte is still unverified; always read until an empty
+  // result (or an error) before acting on the data. The entries that
+  // ZipFile::ReadInto() lists as unchecked are not checked here either.
   absl::StatusOr<RustVecU8Wrapper> ReadBytes(size_t max_bytes);
   // Reads into `buf` and returns how many bytes were written, which is less
   // than `buf.size()` only at end of entry. See ZipFile::ReadInto() for the
@@ -303,7 +306,7 @@ class BufferedZipFile final {
 
   // Decompresses at most `max_size` bytes from the entry, returning
   // `absl::StatusCode::kOutOfRange` if the decompressed size exceeds
-  // `max_size`.
+  // `max_size`. See ZipFile::GetFileData(size_t) for the full contract.
   absl::StatusOr<RustVecU8Wrapper> GetFileData(size_t max_size);
 
  private:
@@ -396,7 +399,8 @@ class FsZipFile final {
   // entry into an unbounded heap buffer. For untrusted zip archives, prefer
   // `GetFileData(size_t max_size)` below to cap memory allocation and defend
   // against zip bomb memory exhaustion (OOM) attacks, or read the entry
-  // incrementally with `ReadBytes()`.
+  // incrementally with `ReadBytes()`. See ZipFile::GetFileData() for the full
+  // contract.
   absl::StatusOr<RustVecU8Wrapper> GetFileData();
 
   // Reads up to `max_bytes` decompressed bytes from the entry, advancing the
@@ -406,14 +410,16 @@ class FsZipFile final {
   // rather than assuming a short non-empty read means end of entry
   // (`ReadBytes(0)` returns an empty buffer immediately without advancing the
   // entry). Returns `absl::StatusCode::kInternal` on a moved-from entry or
-  // decompression/CRC errors, or propagates underlying I/O error codes.
+  // decompression, CRC-32 or declared-size errors, or propagates underlying
+  // I/O error codes.
   //
   // WARNING: Chunks returned before the terminating empty read are not yet
-  // verified against the entry's CRC-32: zip-rs checks it only on the read that
-  // observes end of entry. In particular, when the uncompressed size is an
-  // exact multiple of `max_bytes`, the chunk carrying the last byte is still
-  // unverified; always read until an empty result (or an error) before acting
-  // on the data.
+  // verified against the entry's CRC-32 or declared `uncompressed_size`: both
+  // are checked only on the read that observes end of entry. In particular,
+  // when the decoded size is an exact multiple of `max_bytes`, the chunk
+  // carrying the last byte is still unverified; always read until an empty
+  // result (or an error) before acting on the data. The entries that
+  // ZipFile::ReadInto() lists as unchecked are not checked here either.
   absl::StatusOr<RustVecU8Wrapper> ReadBytes(size_t max_bytes);
   // Reads into `buf` and returns how many bytes were written, which is less
   // than `buf.size()` only at end of entry. See ZipFile::ReadInto() for the
@@ -426,7 +432,7 @@ class FsZipFile final {
 
   // Decompresses at most `max_size` bytes from the entry, returning
   // `absl::StatusCode::kOutOfRange` if the decompressed size exceeds
-  // `max_size`.
+  // `max_size`. See ZipFile::GetFileData(size_t) for the full contract.
   absl::StatusOr<RustVecU8Wrapper> GetFileData(size_t max_size);
 
  private:
@@ -493,9 +499,10 @@ class CallbackZipFile final {
 
 class ZipFile final {
  public:
-  // `guard` is internal to security/zip: it is the token that marks the
-  // originating archive or stream reader as having an entry open and is
-  // released when this ZipFile is destroyed (see internal::ActiveEntryGuard).
+  // `guard` is internal to third_party/safe_bindings/zip: it is the token that
+  // marks the originating archive or stream reader as having an entry open and
+  // is released when this ZipFile is destroyed (see
+  // internal::ActiveEntryGuard).
   static ZipFile FromFile(rust::FsZipFile zip,
                           internal::ActiveEntryGuard guard) {
     return ZipFile(FsZipFile(std::move(zip)), std::move(guard));
@@ -598,8 +605,10 @@ class ZipFile final {
   // against zip bomb memory exhaustion (OOM) attacks, or read the entry
   // incrementally with `ReadBytes()`.
   //
-  // Propagates underlying I/O error codes (for an entry of a FromReader
-  // archive, the RandomAccessReader's own status).
+  // The data is verified against the entry's CRC-32 and declared
+  // `uncompressed_size` (`kInternal` on mismatch), except for the entries that
+  // ReadInto() lists as unchecked. Propagates underlying I/O error codes (for
+  // an entry of a FromReader archive, the RandomAccessReader's own status).
   absl::StatusOr<RustVecU8Wrapper> GetFileData();
 
   // Reads up to `max_bytes` decompressed bytes from the entry, advancing the
@@ -609,15 +618,17 @@ class ZipFile final {
   // rather than assuming a short non-empty read means end of entry
   // (`ReadBytes(0)` returns an empty buffer immediately without advancing the
   // entry). Returns `absl::StatusCode::kInternal` on a moved-from entry or
-  // decompression/CRC errors, or propagates underlying I/O error codes (for an
-  // entry of a FromReader archive, the RandomAccessReader's own status).
+  // decompression, CRC-32 or declared-size errors, or propagates underlying
+  // I/O error codes (for an entry of a FromReader archive, the
+  // RandomAccessReader's own status).
   //
   // WARNING: Chunks returned before the terminating empty read are not yet
-  // verified against the entry's CRC-32: zip-rs checks it only on the read that
-  // observes end of entry. In particular, when the uncompressed size is an
-  // exact multiple of `max_bytes`, the chunk carrying the last byte is still
-  // unverified; always read until an empty result (or an error) before acting
-  // on the data.
+  // verified against the entry's CRC-32 or declared `uncompressed_size`: both
+  // are checked only on the read that observes end of entry. In particular,
+  // when the decoded size is an exact multiple of `max_bytes`, the chunk
+  // carrying the last byte is still unverified; always read until an empty
+  // result (or an error) before acting on the data. The entries that
+  // ReadInto() lists as unchecked are not checked here either.
   absl::StatusOr<RustVecU8Wrapper> ReadBytes(size_t max_bytes);
   // Reads into `buf` (decompressing unless the entry was opened raw) and
   // returns how many bytes were written, which is less than `buf.size()` only
@@ -628,16 +639,23 @@ class ZipFile final {
   // again on the way out, so this is what a caller reading an entry of any
   // size should use.
   //
-  // zip-rs verifies the CRC only on the read that reaches the end of the
-  // entry, so reading exactly the uncompressed size never checks it; read
-  // until a short count (or 0) to have the entry validated. Entries opened raw
-  // (GetFileByIndexRaw) are never CRC-checked.
+  // The CRC-32 and the declared `uncompressed_size` are verified only by the
+  // read that reaches the end of the entry (an entry that decodes to fewer
+  // bytes than it declares fails with `kInternal`, as libzip reports such
+  // archives as inconsistent), so reading exactly the decoded size never
+  // checks them; read until a short count (or 0) to have the entry validated.
+  //
+  // Two kinds of entry are not checked this way. An entry opened raw
+  // (GetFileByIndexRaw) is never checked at all. A ZipStreamReader entry whose
+  // local header defers its sizes to a data descriptor (see
+  // ReadNextFileWithCompressedSize) declares no size to check against, so only
+  // its CRC-32 is verified.
   //
   // Returns `absl::StatusCode::kInternal` on a moved-from entry or
-  // decompression/CRC errors, or propagates underlying I/O error codes (for an
-  // entry of a FromReader archive, the RandomAccessReader's own status). On
-  // error, the contents of `buf` and the position within the entry are
-  // unspecified.
+  // decompression, CRC-32 or declared-size errors, or propagates underlying
+  // I/O error codes (for an entry of a FromReader archive, the
+  // RandomAccessReader's own status). On error, the contents of `buf` and the
+  // position within the entry are unspecified.
   absl::StatusOr<size_t> ReadInto(absl::Span<char> buf);
   // Discards up to `max_bytes` and returns how many were discarded, which is
   // less than `max_bytes` only at end of entry. This is the full contract;
@@ -647,21 +665,24 @@ class ZipFile final {
   // A zip entry is a forward-only stream, so this is how a caller seeks
   // within one. Nothing is allocated, whatever the distance.
   //
-  // As with ReadInto(), the CRC is checked only by the read or skip that
-  // reaches the end of the entry, so skipping exactly the uncompressed size
-  // never checks it, and entries opened raw (GetFileByIndexRaw) are never
-  // CRC-checked.
+  // As with ReadInto(), the CRC-32 and the declared `uncompressed_size` are
+  // checked only by the read or skip that reaches the end of the entry, so
+  // skipping exactly the decoded size never checks them, and the entries
+  // that ReadInto() lists as unchecked are not checked here either.
   //
   // Returns `absl::StatusCode::kInternal` on a moved-from entry or
-  // decompression/CRC errors, or propagates underlying I/O error codes (for an
-  // entry of a FromReader archive, the RandomAccessReader's own status). On
-  // error, the position within the entry is unspecified.
+  // decompression, CRC-32 or declared-size errors, or propagates underlying
+  // I/O error codes (for an entry of a FromReader archive, the
+  // RandomAccessReader's own status). On error, the position within the entry
+  // is unspecified.
   absl::StatusOr<uint64_t> Skip(uint64_t max_bytes);
 
   // Decompresses at most `max_size` bytes from the entry, returning
   // `absl::StatusCode::kOutOfRange` if the decompressed size exceeds
-  // `max_size`. Propagates underlying I/O error codes (for an entry of a
-  // FromReader archive, the RandomAccessReader's own status).
+  // `max_size`. The data is verified against the entry's CRC-32 and declared
+  // `uncompressed_size` (`kInternal` on mismatch), except for the entries that
+  // ReadInto() lists as unchecked. Propagates underlying I/O error codes (for
+  // an entry of a FromReader archive, the RandomAccessReader's own status).
   absl::StatusOr<RustVecU8Wrapper> GetFileData(size_t max_size);
 
  private:
@@ -680,4 +701,4 @@ class ZipFile final {
 
 }  // namespace security::zip
 
-#endif  // SECURITY_ZIP_FILE_H_
+#endif  // SAFE_BINDINGS_ZIP_FILE_H_

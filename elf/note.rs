@@ -1,5 +1,4 @@
 //! Owned ELF note sections.
-use crate::{make_option_type, make_result_type, try_crubit};
 use anyhow::anyhow;
 use crubit_annotate::cpp_enum;
 use elf::endian::EndianParse;
@@ -45,9 +44,6 @@ impl From<ThirdPartyNoteGnuAbiTag> for NoteGnuAbiTag {
         Self { os: note.os, major: note.major, minor: note.minor, subminor: note.subminor }
     }
 }
-make_option_type!(NoteGnuAbiTag);
-make_result_type!(NoteGnuAbiTag);
-make_result_type!(OptionNoteGnuAbiTag);
 
 /// An owned ELF GNU build ID note, analogous to `elf::note::NoteGnuBuildId`
 /// but holding owned data (`Vec<u8>`) rather than a slice for easier FFI.
@@ -63,10 +59,6 @@ impl<'a> From<ThirdPartyNoteGnuBuildId<'a>> for NoteGnuBuildId {
         Self { build_id: note.0.into() }
     }
 }
-
-make_option_type!(NoteGnuBuildId);
-make_result_type!(NoteGnuBuildId);
-make_result_type!(OptionNoteGnuBuildId);
 
 /// An owned unknown ELF note, analogous to `elf::note::NoteAny` but holding
 /// owned data (`String`, `Vec<u8>`) rather than slices for easier FFI.
@@ -86,9 +78,6 @@ impl<'a> From<ThirdPartyNoteAny<'a>> for NoteAny {
         Self { n_type: note.n_type, name: note.name.into(), desc: note.desc.into() }
     }
 }
-make_option_type!(NoteAny);
-make_result_type!(NoteAny);
-make_result_type!(OptionNoteAny);
 
 /// An enum representing different types of ELF notes, holding owned data
 /// for easier FFI.
@@ -113,33 +102,27 @@ impl Note {
     }
 
     /// If this note is a `GnuAbiTag`, returns it, otherwise returns an error.
-    pub fn get_as_gnu_abi_tag(&self) -> ResultNoteGnuAbiTag {
-        try_crubit!({
-            match self {
-                Note::GnuAbiTag(tag) => Ok(tag.clone()),
-                _ => Err(anyhow!("Note is not a GnuAbiTag")),
-            }
-        })
+    pub fn get_as_gnu_abi_tag(&self) -> anyhow::Result<NoteGnuAbiTag> {
+        match self {
+            Note::GnuAbiTag(tag) => Ok(tag.clone()),
+            _ => Err(anyhow!("Note is not a GnuAbiTag")),
+        }
     }
 
     /// If this note is a `GnuBuildId`, returns it, otherwise returns an error.
-    pub fn get_as_gnu_build_id(&self) -> ResultNoteGnuBuildId {
-        try_crubit!({
-            match self {
-                Note::GnuBuildId(id) => Ok(id.clone()),
-                _ => Err(anyhow!("Note is not a GnuBuildId")),
-            }
-        })
+    pub fn get_as_gnu_build_id(&self) -> anyhow::Result<NoteGnuBuildId> {
+        match self {
+            Note::GnuBuildId(id) => Ok(id.clone()),
+            _ => Err(anyhow!("Note is not a GnuBuildId")),
+        }
     }
 
     /// If this note is an `Unknown` note, returns it, otherwise returns an error.
-    pub fn get_as_unknown(&self) -> ResultNoteAny {
-        try_crubit!({
-            match self {
-                Note::Unknown(any) => Ok(any.clone()),
-                _ => Err(anyhow!("Note is not an Unknown note")),
-            }
-        })
+    pub fn get_as_unknown(&self) -> anyhow::Result<NoteAny> {
+        match self {
+            Note::Unknown(any) => Ok(any.clone()),
+            _ => Err(anyhow!("Note is not an Unknown note")),
+        }
     }
 }
 
@@ -152,9 +135,6 @@ impl<'a> From<ThirdPartyNote<'a>> for Note {
         }
     }
 }
-make_option_type!(Note);
-make_result_type!(Note);
-make_result_type!(OptionNote);
 
 /// An owned table of ELF notes, analogous to iterating over
 /// `elf::note::NoteIterator` but holding owned `Note` enums in a `Vec` for
@@ -183,15 +163,10 @@ impl NoteTable {
     }
 
     /// Retrieves the note at the given index.
-    pub fn get(&self, index: usize) -> ResultNote {
-        try_crubit!({
-            self.entries
-                .get(index)
-                .cloned()
-                .ok_or(anyhow!("NoteTable: index {index} out of bounds"))
-        })
+    pub fn get(&self, index: usize) -> anyhow::Result<Note> {
+        self.entries
+            .get(index)
+            .cloned()
+            .ok_or_else(|| anyhow!("NoteTable: index {index} out of bounds"))
     }
 }
-make_option_type!(NoteTable);
-make_result_type!(NoteTable);
-make_result_type!(OptionNoteTable);

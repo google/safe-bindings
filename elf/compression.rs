@@ -1,5 +1,4 @@
 //! Owned ELF compression header.
-use crate::{make_option_type, make_result_type};
 use elf::compression::CompressionHeader as ThirdPartyCompressionHeader;
 
 /// An owned ELF section compression header (`SHT_GROUP` with `SHF_COMPRESSED`),
@@ -25,7 +24,3 @@ impl From<ThirdPartyCompressionHeader> for CompressionHeader {
         }
     }
 }
-
-make_option_type!(CompressionHeader);
-make_result_type!(CompressionHeader);
-make_result_type!(OptionCompressionHeader);

@@ -57,7 +57,7 @@ impl From<In> for KamadakIn {
 pub fn parse_exif(data: &[u8]) -> Result<TiffExifDataRs, Error> {
     kamadak_parse_exif(data)
         .map(|(fields, is_little_endian)| TiffExifDataRs {
-            fields: fields.into_iter().map(Field::from).collect::<Vec<Field>>().into(),
+            fields: fields.into_iter().map(Field::from).collect(),
             is_little_endian,
         })
         .map_err(Error::from)

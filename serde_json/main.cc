@@ -63,5 +63,13 @@ int main(int argc, char** argv) {
     std::cout << std::endl;
   }
 
+  if (const auto* first_score =
+          rust::LookupPath(json, "scores", 0);
+      first_score != nullptr) {
+    if (auto score = first_score->as_int64(); score.has_value()) {
+      std::cout << "First score (LookupPath): " << *score << std::endl;
+    }
+  }
+
   return 0;
 }

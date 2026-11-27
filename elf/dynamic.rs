@@ -1,5 +1,4 @@
 use crate::constants::DynamicTag;
-use crate::{make_option_type, make_result_type, try_crubit};
 use anyhow::anyhow;
 use elf::dynamic::Dyn as ThirdPartyDyn;
 use elf::dynamic::DynamicTable as ThirdPartyDynTable;
@@ -40,13 +39,6 @@ impl From<ThirdPartyDyn> for Dyn {
     }
 }
 
-// make option type
-make_option_type!(Dyn);
-// make result type
-make_result_type!(Dyn);
-// make result of option type
-make_result_type!(OptionDyn);
-
 /// An owned ELF dynamic table (`.dynamic`), analogous to
 /// `elf::dynamic::DynamicTable` but holding owned `Dyn` structs in a `Vec`
 /// for easier FFI.
@@ -64,13 +56,11 @@ impl DynTable {
     }
 
     /// Retrieves the dynamic entry at the given index.
-    pub fn get(&self, index: usize) -> ResultDyn {
-        try_crubit!({
-            self.entries
-                .get(index)
-                .cloned()
-                .ok_or_else(|| anyhow!("DynTable: index {index} out of bounds"))
-        })
+    pub fn get(&self, index: usize) -> anyhow::Result<Dyn> {
+        self.entries
+            .get(index)
+            .cloned()
+            .ok_or_else(|| anyhow!("DynTable: index {index} out of bounds"))
     }
 
     /// Returns true if the table contains no dynamic entries.
@@ -89,10 +79,3 @@ impl<E: EndianParse> From<ThirdPartyDynTable<'_, E>> for DynTable {
         }
     }
 }
-
-// make option type
-make_option_type!(DynTable);
-// make result type
-make_result_type!(DynTable);
-// make result of option type
-make_result_type!(OptionDynTable);

@@ -31,4 +31,3 @@ doctest = false
 anyhow = "1"
 crubit_annotate = "0.1.0"
 elf = "0.8"
-paste = "1"

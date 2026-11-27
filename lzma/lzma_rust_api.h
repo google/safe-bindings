@@ -1,8 +1,8 @@
 // This file contains a simplified subset of definitions copied directly from
 // liblzma's headers to define the C API for the Rust bridge.
 
-#ifndef SECURITY_LZMA_LZMA_RUST_API_H_
-#define SECURITY_LZMA_LZMA_RUST_API_H_
+#ifndef SAFE_BINDINGS_LZMA_LZMA_RUST_API_H_
+#define SAFE_BINDINGS_LZMA_LZMA_RUST_API_H_
 
 #include <stddef.h>
 #include <stdint.h>
@@ -569,4 +569,4 @@ lzma_ret lzma_memlimit_set(lzma_stream* strm, uint64_t new_memlimit);
 }
 #endif
 
-#endif  // SECURITY_LZMA_LZMA_RUST_API_H_
+#endif  // SAFE_BINDINGS_LZMA_LZMA_RUST_API_H_

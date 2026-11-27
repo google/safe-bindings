@@ -6,8 +6,8 @@
 #include <cstddef>
 #include <string>
 
-#include "libstemmer.h"
 #include "absl/strings/string_view.h"
+#include "libstemmer.h"
 
 using snowball_stemmer_c::sb_stemmer_delete;
 using snowball_stemmer_c::sb_stemmer_length;

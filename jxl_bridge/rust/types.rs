@@ -410,18 +410,25 @@ pub struct JxlBridgeProcessResult {
 }
 
 /// Build the JxlPixelFormat from bridge types.
+///
+/// Extra channels are ignored unless `decode_extra_channels` is set (alpha is
+/// interleaved into the color channels by the channel layout either way), in
+/// which case each of them is decoded to a plane of its own in
+/// `sample_format`.
 pub(crate) fn build_pixel_format(
     channel_layout: &JxlBridgeChannelLayout,
     sample_format: &JxlBridgeSampleFormat,
     num_extra_channels: usize,
+    decode_extra_channels: bool,
 ) -> jxl::api::JxlPixelFormat {
     let jxl_color_type = channel_layout.to_jxl_color_type();
     let jxl_data_format = sample_format.to_jxl_data_format();
     jxl::api::JxlPixelFormat {
         color_type: jxl_color_type,
         color_data_format: Some(jxl_data_format),
-        // Ignore extra channels by default (alpha is interleaved into the
-        // color channels by the channel layout).
-        extra_channel_format: vec![None; num_extra_channels],
+        extra_channel_format: vec![
+            decode_extra_channels.then_some(jxl_data_format);
+            num_extra_channels
+        ],
     }
 }

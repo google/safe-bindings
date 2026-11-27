@@ -1,7 +1,4 @@
-use crate::{
-    image::{GenericImageDecoder, ImageDecoder},
-    vec_u8::VecU8,
-};
+use crate::image::{GenericImageDecoder, ImageDecoder};
 use image::{
     codecs::bmp::BmpDecoder as RustBmpDecoder, codecs::gif::GifDecoder as RustGifDecoder,
     codecs::ico::IcoDecoder as RustIcoDecoder, codecs::jpeg::JpegDecoder as RustJpegDecoder,
@@ -83,10 +80,10 @@ impl ImageReader {
     }
 
     /// Creates a new `ImageReader` reading from the provided file.
-    pub fn new_from_file(path: &[u8]) -> Result<ImageReader, VecU8> {
+    pub fn new_from_file(path: &[u8]) -> Result<ImageReader, Vec<u8>> {
         let filepath = match std::str::from_utf8(path) {
             Ok(path) => path,
-            Err(err) => return Err(err.to_string().into()),
+            Err(err) => return Err(err.to_string().into_bytes()),
         };
 
         match std::fs::File::open(filepath) {
@@ -96,7 +93,7 @@ impl ImageReader {
                 ))),
                 format: None,
             }),
-            Err(err) => Err(err.to_string().into()),
+            Err(err) => Err(err.to_string().into_bytes()),
         }
     }
 
@@ -108,9 +105,9 @@ impl ImageReader {
     /// Read the image.
     ///
     /// Uses the current format to construct the correct reader for the format.
-    pub fn into_decoder(self) -> Result<ImageDecoder, VecU8> {
+    pub fn into_decoder(self) -> Result<ImageDecoder, Vec<u8>> {
         let Some(inner) = self.inner else {
-            return Err("Reader in illegal moved-out state".into());
+            return Err(b"Reader in illegal moved-out state".to_vec());
         };
 
         // If we already know the format, we do not need to guess.
@@ -119,7 +116,7 @@ impl ImageReader {
         } else {
             let inner = match inner.with_guessed_format() {
                 Ok(inner) => inner,
-                Err(err) => return Err(err.to_string().into()),
+                Err(err) => return Err(err.to_string().into_bytes()),
             };
             let format = match inner.format() {
                 Some(ImageFormat::Png) => Some(Format::Png),
@@ -139,7 +136,7 @@ impl ImageReader {
             None => {
                 let mut reader = inner.into_inner();
                 let is_jxl =
-                    has_jxl_signature(&mut *reader).map_err(|e| VecU8::from(e.to_string()))?;
+                    has_jxl_signature(&mut *reader).map_err(|e| e.to_string().into_bytes())?;
                 inner = RustImageReader::new(reader);
                 if is_jxl {
                     Some(Format::Jxl)
@@ -161,7 +158,7 @@ impl ImageReader {
             Some(Format::Jxl) => jxl(inner),
             None => Err("unsupported image format".to_string()),
         }
-        .map_err(|err| err.into())
+        .map_err(String::into_bytes)
     }
 }
 

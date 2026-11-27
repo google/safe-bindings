@@ -12,11 +12,6 @@
 #include <vector>
 
 #include "crubit_helpers/string_conversions.h"
-#include "converters.h"
-#include "file.h"
-#include "reader.h"
-#include "reader_status.h"
-#include "crubit/rust.h"
 #include "absl/functional/overload.h"
 #include "absl/status/status.h"
 #include "absl/status/status_macros.h"
@@ -24,6 +19,11 @@
 #include "absl/strings/str_cat.h"
 #include "absl/strings/string_view.h"
 #include "absl/types/span.h"
+#include "converters.h"
+#include "file.h"
+#include "reader.h"
+#include "reader_status.h"
+#include "crubit/rust.h"
 
 namespace security::zip {
 
@@ -135,7 +135,7 @@ absl::StatusOr<std::optional<ZipFile>> ReadNextFileImpl(
 // returns -1. internal::ThroughReader, which wraps every operation that may
 // call back, clears the slot before and after the operation and only reports
 // the recorded status when the Rust error says a callback failed; see
-// security/zip/reader_status.h for why that distinction matters.
+// reader_status.h for why that distinction matters.
 
 int64_t ReadFromReader(uintptr_t context, uint64_t offset,
                        uintptr_t length) noexcept {

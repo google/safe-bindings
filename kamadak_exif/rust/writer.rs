@@ -1,6 +1,5 @@
 use crate::error::Error;
 use crate::tiff::{Field, In};
-use crate::types::VecU8;
 use exif::experimental::Writer as KamadakWriter;
 use std::io::Cursor;
 
@@ -10,20 +9,18 @@ use std::io::Cursor;
 ///
 /// ```
 /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
-/// use exif_bridge_rs::types::{VecVecU8, VecU8};
 /// use exif_bridge_rs::value::Value;
 /// use exif_bridge_rs::tag::Tag;
 /// use exif_bridge_rs::tiff::{Field, In};
 /// use exif_bridge_rs::writer::Writer;
-/// let image_desc = Field::new({
-///     tag: Tag::ImageDescription(),
-///     ifd_num: In::PRIMARY,
-///     value: Value::Ascii(VecVecU8::from(vec![b"Sample".to_vec()])),
-/// });
+/// let image_desc = Field::new(
+///     Tag::ImageDescription(),
+///     In::PRIMARY,
+///     Value::Ascii(&[b"Sample"]),
+/// );
 /// let mut writer = Writer::new();
-/// let mut buf = VecU8::new();
 /// writer.push_field(&image_desc);
-/// writer.write(&mut buf, false).into()?;
+/// let buf = writer.write(false)?;
 /// const EXPECTED: &[u8] =
 ///     b"\x4d\x4d\x00\x2a\x00\x00\x00\x08\
 ///       \x00\x01\x01\x0e\x00\x02\x00\x00\x00\x07\x00\x00\x00\x1a\
@@ -75,10 +72,10 @@ impl<'a> Writer<'a> {
         self.0.set_jpeg(jpeg, ifd_num.into())
     }
 
-    /// Encodes Exif data and returns it in `VecU8`.
-    pub fn write(&mut self, little_endian: bool) -> Result<VecU8, Error> {
-        let mut out = VecU8::new();
-        let mut w = Cursor::new(out.as_mut_vec());
+    /// Encodes Exif data and returns it in `Vec<u8>`.
+    pub fn write(&mut self, little_endian: bool) -> Result<Vec<u8>, Error> {
+        let mut out = Vec::new();
+        let mut w = Cursor::new(&mut out);
         match self.0.write(&mut w, little_endian) {
             Ok(_) => Ok(out),
             Err(e) => Err(Error::from(e)),

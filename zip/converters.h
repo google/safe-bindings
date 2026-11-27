@@ -1,12 +1,11 @@
-#ifndef SECURITY_ZIP_CONVERTERS_H_
-#define SECURITY_ZIP_CONVERTERS_H_
+#ifndef SAFE_BINDINGS_ZIP_CONVERTERS_H_
+#define SAFE_BINDINGS_ZIP_CONVERTERS_H_
 
 #include <cstddef>
 #include <cstdint>
 #include <utility>
 
 #include "crubit_helpers/string_conversions.h"
-#include "crubit/rust.h"
 #include "absl/base/attributes.h"
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
@@ -14,6 +13,7 @@
 #include "absl/types/span.h"
 #include "support/rs_std/result.h"
 #include "support/rs_std/unit.h"
+#include "crubit/rust.h"
 
 namespace security::zip {
 
@@ -149,4 +149,4 @@ absl::StatusOr<rust::FsZipStreamWriter> FromRustFsZipStreamWriter(
 
 }  // namespace security::zip
 
-#endif  // SECURITY_ZIP_CONVERTERS_H_
+#endif  // SAFE_BINDINGS_ZIP_CONVERTERS_H_

@@ -1,5 +1,5 @@
-#ifndef SECURITY_DEFLATE_GZIP_WRAPPER_H_
-#define SECURITY_DEFLATE_GZIP_WRAPPER_H_
+#ifndef SAFE_BINDINGS_DEFLATE_GZIP_WRAPPER_H_
+#define SAFE_BINDINGS_DEFLATE_GZIP_WRAPPER_H_
 
 #include <cstddef>
 
@@ -26,4 +26,4 @@ absl::StatusOr<VecU8Wrapper> UncompressGzip(absl::string_view compressed,
 
 }  // namespace security::deflate
 
-#endif  // SECURITY_DEFLATE_GZIP_WRAPPER_H_
+#endif  // SAFE_BINDINGS_DEFLATE_GZIP_WRAPPER_H_

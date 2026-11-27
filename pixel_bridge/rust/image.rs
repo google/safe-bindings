@@ -1,7 +1,4 @@
-use crate::{
-    reader::{Format, ReadSeek},
-    vec_u8::VecU8,
-};
+use crate::reader::{Format, ReadSeek};
 use image::{
     codecs::bmp::BmpDecoder as RustBmpDecoder, codecs::gif::GifDecoder as RustGifDecoder,
     codecs::ico::IcoDecoder as RustIcoDecoder, codecs::jpeg::JpegDecoder as RustJpegDecoder,
@@ -143,7 +140,7 @@ impl std::fmt::Debug for ImageDecoder {
     }
 }
 
-pub type Status = Result<(), VecU8>;
+pub type Status = Result<(), Vec<u8>>;
 
 #[inline(always)]
 fn ok() -> Status {
@@ -337,13 +334,13 @@ where
     }
 }
 
-fn run_fallible_result<F>(f: F) -> Result<Frames, VecU8>
+fn run_fallible_result<F>(f: F) -> Result<Frames, Vec<u8>>
 where
-    F: FnOnce() -> Result<Frames, VecU8>,
+    F: FnOnce() -> Result<Frames, Vec<u8>>,
 {
     match run_catching_panics(f) {
         Ok(res) => res,
-        Err(formatted_error) => Err(formatted_error.into()),
+        Err(formatted_error) => Err(formatted_error.into_bytes()),
     }
 }
 
@@ -555,39 +552,40 @@ impl ImageDecoder {
 
     /// Returns all animated frames of the image. This only returns data for decoders, where
     /// `is_animated` returns true.
-    pub fn all_frames(self) -> Result<Frames, VecU8> {
+    pub fn all_frames(self) -> Result<Frames, Vec<u8>> {
         run_fallible_result(move || match self.inner {
             Some(GenericImageDecoder::Gif(gif_decoder)) => {
                 match gif_decoder.into_frames().collect_frames() {
                     Ok(frames) => Ok(Frames::new(frames)),
-                    Err(err) => Err(err.to_string().into()),
+                    Err(err) => Err(err.to_string().into_bytes()),
                 }
             }
             Some(GenericImageDecoder::WebP(webp_decoder)) => {
                 match webp_decoder.into_frames().collect_frames() {
                     Ok(frames) => Ok(Frames::new(frames)),
-                    Err(err) => Err(err.to_string().into()),
+                    Err(err) => Err(err.to_string().into_bytes()),
                 }
             }
             Some(_) => {
-                Err("Trying to get animated data on a codec that does not support animation".into())
+                Err(b"Trying to get animated data on a codec that does not support animation"
+                    .to_vec())
             }
-            None => Err("Decoder is in invalid, moved out state".into()),
+            None => Err(b"Decoder is in invalid, moved out state".to_vec()),
         })
     }
 
-    fn get_metadata<F>(&mut self, metadata_fn: F) -> Result<Option<VecU8>, VecU8>
+    fn get_metadata<F>(&mut self, metadata_fn: F) -> Result<Option<Vec<u8>>, Vec<u8>>
     where
         F: FnOnce(&mut GenericImageDecoder) -> image::ImageResult<Option<Vec<u8>>>,
     {
         let Some(ref mut inner) = self.inner else {
-            return Err("Reader in illegal moved-out state".into());
+            return Err(b"Reader in illegal moved-out state".to_vec());
         };
 
         match metadata_fn(inner) {
-            Ok(Some(metadata)) => Ok(Some(metadata.into())),
+            Ok(Some(metadata)) => Ok(Some(metadata)),
             Ok(None) => Ok(None),
-            Err(err) => Err(err.to_string().into()),
+            Err(err) => Err(err.to_string().into_bytes()),
         }
     }
 
@@ -595,7 +593,7 @@ impl ImageDecoder {
     /// image does not have one.
     /// For formats that don’t support embedded profiles this function should
     /// always return Ok(None).
-    pub fn icc_profile(&mut self) -> Result<Option<VecU8>, VecU8> {
+    pub fn icc_profile(&mut self) -> Result<Option<Vec<u8>>, Vec<u8>> {
         self.get_metadata(|inner| inner.icc_profile())
     }
 
@@ -603,7 +601,7 @@ impl ImageDecoder {
     /// image does not have one.
     /// For formats that don’t support embedded profiles this function should
     /// always return Ok(None).
-    pub fn exif_metadata(&mut self) -> Result<Option<VecU8>, VecU8> {
+    pub fn exif_metadata(&mut self) -> Result<Option<Vec<u8>>, Vec<u8>> {
         self.get_metadata(|inner| inner.exif_metadata())
     }
 
@@ -611,7 +609,7 @@ impl ImageDecoder {
     /// image does not have one.
     /// For formats that don’t support embedded profiles this function should
     /// always return Ok(None).
-    pub fn xmp_metadata(&mut self) -> Result<Option<VecU8>, VecU8> {
+    pub fn xmp_metadata(&mut self) -> Result<Option<Vec<u8>>, Vec<u8>> {
         self.get_metadata(|inner| inner.xmp_metadata())
     }
 
@@ -619,7 +617,7 @@ impl ImageDecoder {
     /// image does not have one.
     /// For formats that don’t support embedded profiles this function should
     /// always return Ok(None).
-    pub fn iptc_metadata(&mut self) -> Result<Option<VecU8>, VecU8> {
+    pub fn iptc_metadata(&mut self) -> Result<Option<Vec<u8>>, Vec<u8>> {
         self.get_metadata(|inner| inner.iptc_metadata())
     }
 

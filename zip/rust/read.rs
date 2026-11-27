@@ -265,7 +265,7 @@ impl BufferedZipArchive {
     /// Returns an error if the archive is not open (`is_none()`), if `index` is
     /// out of bounds, or if the entry's local file header is invalid.
     pub fn get_file_by_index_raw(&mut self, index: usize) -> Result<BufferedZipFile<'_>, ZipError> {
-        get_file_by_index_impl(&mut self.reader, index, true).map(BufferedZipFile::new)
+        get_file_by_index_impl(&mut self.reader, index, true).map(BufferedZipFile::new_raw)
     }
 
     /// Returns what the central directory records about the entry at `index`,
@@ -448,7 +448,7 @@ impl FsZipArchive {
     /// Returns an error if the archive is not open (`is_none()`), if `index` is
     /// out of bounds, or if the entry's local file header is invalid.
     pub fn get_file_by_index_raw(&mut self, index: usize) -> Result<FsZipFile<'_>, ZipError> {
-        get_file_by_index_impl(&mut self.reader, index, true).map(FsZipFile::new)
+        get_file_by_index_impl(&mut self.reader, index, true).map(FsZipFile::new_raw)
     }
 
     /// Returns what the central directory records about the entry at `index`,
@@ -728,7 +728,7 @@ impl CallbackZipArchive {
     /// local file header through the callbacks, so a failing `read_at` is also
     /// reported here.
     pub fn get_file_by_index_raw(&mut self, index: usize) -> Result<CallbackZipFile<'_>, ZipError> {
-        get_file_by_index_impl(&mut self.reader, index, true).map(CallbackZipFile::new)
+        get_file_by_index_impl(&mut self.reader, index, true).map(CallbackZipFile::new_raw)
     }
 
     /// Returns what the central directory records about the entry at `index`,
@@ -1477,6 +1477,21 @@ mod tests {
         // first entry of an archive genuinely starts at 0 too).
         expect_eq!(file.get_data_start(), 0);
         expect_eq!(file.get_header_start(), 0);
+    }
+
+    #[gtest]
+    fn test_zero_length_read_mid_entry_is_not_the_end_of_the_entry() {
+        let mut archive = BufferedZipArchive::new_from_data(create_test_zip()).unwrap();
+        let mut file = archive.get_file_by_index(0).unwrap();
+
+        let mut head = [0u8; 5];
+        file.read_exact(&mut head).unwrap();
+        expect_eq!(&head, b"Hello");
+        // `Read::read` returns 0 for an empty buffer wherever the entry is, so
+        // that 0 must not be taken for the end of the entry: only 5 of the 13
+        // declared bytes have been decoded so far.
+        expect_eq!(file.read(&mut []).unwrap(), 0);
+        expect_eq!(file.get_file_data().unwrap().as_slice(), b", world!");
     }
 
     #[gtest]

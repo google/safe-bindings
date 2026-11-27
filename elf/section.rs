@@ -1,7 +1,4 @@
-use crate::{
-    constants::ResultSectionType, constants::SectionType, make_option_type, make_result_type,
-    try_crubit,
-};
+use crate::constants::SectionType;
 use anyhow::anyhow;
 use elf::endian::EndianParse;
 use elf::section::SectionHeader as ThirdPartySectionHeader;
@@ -38,8 +35,8 @@ pub struct SectionHeader {
 }
 
 impl SectionHeader {
-    pub fn get_type(&self) -> ResultSectionType {
-        try_crubit!({ Ok(self.sh_type) })
+    pub fn get_type(&self) -> SectionType {
+        self.sh_type
     }
     /// Converts this owned `SectionHeader` back to a third-party
     /// `SectionHeader` struct.
@@ -76,10 +73,6 @@ impl From<ThirdPartySectionHeader> for SectionHeader {
     }
 }
 
-make_option_type!(SectionHeader);
-make_result_type!(SectionHeader);
-make_result_type!(OptionSectionHeader);
-
 /// An owned ELF section header table, analogous to
 /// `elf::section::SectionHeaderTable` but holding owned `SectionHeader`
 /// structs in a `Vec` for easier FFI.
@@ -95,13 +88,11 @@ impl SectionHeaderTable {
     }
 
     /// Retrieves the section header at the given index.
-    pub fn get(&self, index: usize) -> ResultSectionHeader {
-        try_crubit!({
-            self.entries
-                .get(index)
-                .cloned()
-                .ok_or_else(|| anyhow!("SectionHeaderTable: index {index} out of bounds"))
-        })
+    pub fn get(&self, index: usize) -> anyhow::Result<SectionHeader> {
+        self.entries
+            .get(index)
+            .cloned()
+            .ok_or_else(|| anyhow!("SectionHeaderTable: index {index} out of bounds"))
     }
 
     /// Returns true if the table contains no section headers.
@@ -126,7 +117,3 @@ impl From<&Vec<ThirdPartySectionHeader>> for SectionHeaderTable {
         SectionHeaderTable { entries: shdrs.iter().copied().map(|shdr| shdr.into()).collect() }
     }
 }
-
-make_option_type!(SectionHeaderTable);
-make_result_type!(SectionHeaderTable);
-make_result_type!(OptionSectionHeaderTable);

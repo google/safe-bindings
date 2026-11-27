@@ -1,5 +1,5 @@
-#ifndef SECURITY_ZIP_READER_STATUS_H_
-#define SECURITY_ZIP_READER_STATUS_H_
+#ifndef SAFE_BINDINGS_ZIP_READER_STATUS_H_
+#define SAFE_BINDINGS_ZIP_READER_STATUS_H_
 
 #include <type_traits>
 #include <utility>
@@ -73,4 +73,4 @@ auto ThroughReader(F&& op) {
 
 }  // namespace security::zip::internal
 
-#endif  // SECURITY_ZIP_READER_STATUS_H_
+#endif  // SAFE_BINDINGS_ZIP_READER_STATUS_H_

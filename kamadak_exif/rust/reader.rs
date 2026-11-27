@@ -1,7 +1,7 @@
 use crate::error::Error;
 use crate::tag::Tag;
 use crate::tiff::{Field, In};
-use crate::types::{OptionField, VecField, VecU8};
+use crate::types::OptionField;
 use exif::{Exif as KamadakExif, Reader as KamadakReader};
 use std::fmt::{Debug, Formatter};
 use std::io::Cursor;
@@ -14,14 +14,12 @@ use std::io::Cursor;
 /// # use exif_bridge_rs::reader::Reader;
 /// # use exif_bridge_rs::tag::Tag;
 /// # use exif_bridge_rs::tiff::In;
-/// # use exif_bridge_rs::types::VecU8;
 /// # let data = std::fs::read("tests/exif.jpg").unwrap();
-/// # let data_vecu8 = VecU8::from(data);
-/// # let exif = Reader::new().read_from_container(data_vecu8).unwrap();
+/// # let exif = Reader::new().read_from_container(&data).unwrap();
 /// // Get a specific field.
 /// let xres = exif.get_field(Tag::XResolution(), In::PRIMARY).unwrap();
 /// // Iterate over all fields.
-/// for f in exif.fields().into_vec() {
+/// for f in exif.fields() {
 ///     println!("{} {} {}", f.get_tag(), f.get_ifd(), f.get_value());
 /// }
 /// ```
@@ -90,10 +88,10 @@ impl Exif {
     }
 
     /// Returns the TIFF data as a vector.
-    pub fn buf(&self) -> VecU8 {
+    pub fn buf(&self) -> Vec<u8> {
         match &self.inner {
-            Some(exif) => exif.buf().into(),
-            None => VecU8::new(),
+            Some(exif) => exif.buf().to_vec(),
+            None => Vec::new(),
         }
     }
 
@@ -102,17 +100,17 @@ impl Exif {
     /// This parses every field value; see `find_by_number` for why that can
     /// cost much more memory than the file. `get_field` parses only the field
     /// it returns.
-    pub fn fields(&self) -> VecField {
+    pub fn fields(&self) -> Vec<Field> {
         // Return type of the original function is actually just an opaque type that implements
-        // ExactSizeIterator<Item = &Field> trait, so we are just using VecField instead.
+        // ExactSizeIterator<Item = &Field> trait, so we return `Vec<Field>` instead.
         match &self.inner {
-            Some(exif) => exif.fields().cloned().map(Field::from).collect::<Vec<Field>>().into(),
-            None => VecField::new(),
+            Some(exif) => exif.fields().cloned().map(Field::from).collect(),
+            None => Vec::new(),
         }
     }
 
     /// Returns a vector of MakerNote fields.
-    pub fn mnote_fields(&self) -> VecField {
+    pub fn mnote_fields(&self) -> Vec<Field> {
         let mut fields = Vec::new();
         for field in &self.mnote_fields {
             let synthetic_field = exif::Field {
@@ -122,7 +120,7 @@ impl Exif {
             };
             fields.push(Field::from(synthetic_field));
         }
-        fields.into()
+        fields
     }
 
     /// Returns true if the Exif data (TIFF structure) is in the
@@ -221,8 +219,8 @@ impl Reader {
 
     /// Parses the Exif attributes from raw Exif data.
     /// If an error occurred, `exif_bridge_rs::Error` is returned.
-    pub fn read_raw(&self, data: VecU8) -> Result<Exif, Error> {
-        match self.0.read_raw(data.into_vec()) {
+    pub fn read_raw(&self, data: &[u8]) -> Result<Exif, Error> {
+        match self.0.read_raw(data.to_vec()) {
             Ok(exif) => Ok(Exif::from(exif)),
             Err(error) => Err(Error::from(error)),
         }
@@ -238,12 +236,9 @@ impl Reader {
     /// - PNG
     /// - WebP
     // The original function requires a generic parameter implementing io::BufRead + io::Seek.
-    // std::fs::File could be used but I couldn't figure out a way to make Crubit accept
-    // std::fs::File, so we are just using VecU8 for now, and leave reading file to the C++ side.
-    // This makes the method largely similar to read_raw(), except for some minor preprocessing
-    // at the start based on file type.
-    pub fn read_from_container(&self, data: VecU8) -> Result<Exif, Error> {
-        let mut reader = Cursor::new(data.into_vec());
+    // Leaving file reading to the C++ side lets us parse directly from a byte slice via Cursor.
+    pub fn read_from_container(&self, data: &[u8]) -> Result<Exif, Error> {
+        let mut reader = Cursor::new(data);
         match self.0.read_from_container(&mut reader) {
             Ok(exif) => Ok(Exif::from(exif)),
             Err(error) => Err(Error::from(error)),

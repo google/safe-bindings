@@ -20,12 +20,12 @@ impl<'a> fmt::Display for Display<'a> {
 }
 
 impl Display<'_> {
-    /// Returns the display as a VecU8.
+    /// Returns the display as a `Vec<u8>`.
     ///
     /// Since Crubit does not auto generate to_string() for io::Display trait,
     /// we implement this function manually.
-    pub fn to_string(&self) -> crate::types::VecU8 {
-        crate::types::VecU8(<Self as ToString>::to_string(self).into_bytes())
+    pub fn to_string(&self) -> Vec<u8> {
+        <Self as ToString>::to_string(self).into_bytes()
     }
 }
 

@@ -1,5 +1,4 @@
 //! Owned wrapper for ELF string table sections.
-use crate::{make_option_type, make_result_type};
 use anyhow::{anyhow, Result};
 
 /// An owned ELF string table, analogous to `elf::string_table::StringTable`
@@ -51,10 +50,3 @@ impl StringTable {
         self.get_slice(offset).map(|s| s.to_vec())
     }
 }
-
-// Makes `Option<StringTable>` available as `OptionStringTable` for FFI.
-make_option_type!(StringTable);
-// Makes `Result<StringTable>` available as `ResultStringTable` for FFI.
-make_result_type!(StringTable);
-// Makes `Result<Option<StringTable>>` available as `ResultOptionStringTable` for FFI.
-make_result_type!(OptionStringTable);

@@ -1,4 +1,3 @@
-use crate::types::{OptionString, VecU8};
 use crate::value::Value;
 use exif::{Context, Tag as KamadakTag};
 use std::fmt;
@@ -63,8 +62,8 @@ impl Tag {
     }
 
     /// Returns the description of the tag.
-    pub fn description(&self) -> OptionString {
-        self.0.description().map(|desc| VecU8(desc.as_bytes().to_vec()))
+    pub fn description(&self) -> Option<Vec<u8>> {
+        self.0.description().map(|desc| desc.as_bytes().to_vec())
     }
 
     /// Returns the default value of the tag.  `None` is returned if

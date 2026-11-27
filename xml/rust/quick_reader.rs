@@ -49,12 +49,12 @@ impl XmlError {
 
 /// Limit the length of tag names to prevent excessive resource consumption or potential DoS
 /// attacks.
-fn check_name_len(input: &str) -> anyhow::Result<()> {
+fn check_name_len(input: &str) -> Result<(), String> {
     // Match libxml2's XML_MAX_NAME_LENGTH limit.
     const XML_MAX_NAME_LENGTH: usize = 50000;
 
     if input.len() > XML_MAX_NAME_LENGTH {
-        return Err(anyhow::anyhow!(
+        return Err(format!(
             "Invalid tag name length: {} exceeds the limit of {}",
             input.len(),
             XML_MAX_NAME_LENGTH
@@ -138,13 +138,13 @@ impl Attribute {
     }
 }
 
-fn expand(entity: &[u8]) -> anyhow::Result<Vec<u8>> {
+fn expand(entity: &[u8]) -> Result<Vec<u8>, &'static str> {
     if entity.is_empty() {
-        return Err(anyhow::anyhow!("Empty entity reference"));
+        return Err("Empty entity reference");
     }
     if entity[0] == b'#' {
         if entity.len() < 2 {
-            return Err(anyhow::anyhow!("Invalid character reference"));
+            return Err("Invalid character reference");
         }
         // See https://www.w3.org/TR/REC-xml/#sec-references for valid characters in numeric
         // entities.
@@ -155,19 +155,19 @@ fn expand(entity: &[u8]) -> anyhow::Result<Vec<u8>> {
                 (10, &entity[1..], |b| b.is_ascii_digit())
             };
         if number_bytes.is_empty() || !number_bytes.iter().all(valid_chars_check) {
-            return Err(anyhow::anyhow!("Invalid character reference"));
+            return Err("Invalid character reference");
         }
         let Ok(number_str) = std::str::from_utf8(number_bytes) else {
-            return Err(anyhow::anyhow!("Invalid character reference"));
+            return Err("Invalid character reference");
         };
         let Ok(codepoint) = u32::from_str_radix(number_str, radix) else {
-            return Err(anyhow::anyhow!("Invalid character reference"));
+            return Err("Invalid character reference");
         };
         let Some(c) = std::char::from_u32(codepoint) else {
-            return Err(anyhow::anyhow!("Invalid character reference"));
+            return Err("Invalid character reference");
         };
         if !c.is_xml_char() {
-            return Err(anyhow::anyhow!("Illegal XML character reference"));
+            return Err("Illegal XML character reference");
         }
         let mut buf = [0u8; 4];
         Ok(c.encode_utf8(&mut buf).as_bytes().to_vec())
@@ -186,12 +186,14 @@ fn expand(entity: &[u8]) -> anyhow::Result<Vec<u8>> {
 // Replaces all entity references in `attribute_value` using `expand` (above). If finding entities
 // fails, returns the original attribute value. If the attribute value contains a '<' (signalling an
 // invalid attribute value), returns an error.
-fn expand_entities_in_attribute_value(attribute_value: &[u8]) -> anyhow::Result<Cow<'_, [u8]>> {
+fn expand_entities_in_attribute_value(
+    attribute_value: &[u8],
+) -> Result<Cow<'_, [u8]>, &'static str> {
     // Attribute values must not contain '<' (see https://www.w3.org/TR/xml/#NT-AttValue), so
     // parsing them as XML yields a sequence of Text and GeneralRef events only. This is exactly
     // what is needed in this function: Text are passed through, entities are expanded.
     if attribute_value.contains(&b'<') {
-        return Err(anyhow::anyhow!("Invalid attribute value: contains '<'"));
+        return Err("Invalid attribute value: contains '<'");
     }
     // Check for early exit to avoid running a nested parser. If there is no `&` in the attribute
     // value, then there are no entities to expand.
@@ -263,7 +265,7 @@ impl<'a> Iterator for Attributes<'a> {
                 Ok(attr) => {
                     let expanded = match expand_entities_in_attribute_value(attr.value.as_bytes()) {
                         Ok(expanded) => expanded,
-                        Err(err) => return Some(Err(err.to_string().into())),
+                        Err(err) => return Some(Err(err.into())),
                     };
                     let (local_name_valid, prefix_valid) = compute_validity(&attr.key);
                     if local_name_valid && self.resolving_namespaces && !self.yield_xmlns_attributes
@@ -528,7 +530,7 @@ impl<'a> Reader<'a> {
 /// NOTE: b/259749095 - Use the `quick_xml` type directly, once generics is supported by Crubit.
 pub struct QuickReader<'a> {
     reader: Reader<'a>,
-    ranges: Option<anyhow::Result<Vec<Range>>>, // empty if the XML substrings feature is disabled
+    ranges: Option<Result<Vec<Range>, String>>, // empty if the XML substrings feature is disabled
     start_event_count: usize,                   /* how many start and empty events have been
                                                  * parsed so far */
     yield_xmlns_attributes: bool,
@@ -558,7 +560,7 @@ impl<'a> Default for QuickReader<'a> {
 
 impl<'a> QuickReader<'a> {
     /// Parses the input and computes the ranges of all the start tags.
-    fn collect_ranges(input: &'a str) -> anyhow::Result<Vec<Range>> {
+    fn collect_ranges(input: &'a str) -> Result<Vec<Range>, String> {
         let mut reader = PlainReader::<&'a [u8]>::from_str(input);
 
         let mut tag_ranges = Vec::<Range>::new();
@@ -568,7 +570,7 @@ impl<'a> QuickReader<'a> {
         let mut start_index = reader.buffer_position();
         let mut start_event_count: usize = 0;
         loop {
-            let event = reader.read_event()?;
+            let event = reader.read_event().map_err(|e| e.to_string())?;
             match event {
                 Event::Start(ref b) => {
                     check_name_len(b.name().as_ref())?;
@@ -584,10 +586,10 @@ impl<'a> QuickReader<'a> {
                 Event::End(ref b) => {
                     check_name_len(b.name().as_ref())?;
                     let Some(start_tag_idx) = start_tag_idxs.pop() else {
-                        return Err(anyhow::anyhow!("Missing start tag."));
+                        return Err(String::from("Missing start tag."));
                     };
                     let Some(range) = tag_ranges.get_mut(start_tag_idx) else {
-                        return Err(anyhow::anyhow!("Error in range tracking algorithm."));
+                        return Err(String::from("Error in range tracking algorithm."));
                     };
                     range.inner_end = start_index as usize;
                     range.outer_end = reader.buffer_position() as usize;
@@ -604,7 +606,7 @@ impl<'a> QuickReader<'a> {
                 }
                 Event::Eof => {
                     if !start_tag_idxs.is_empty() {
-                        return Err(anyhow::anyhow!("Missing end tag."));
+                        return Err(String::from("Missing end tag."));
                     }
                     return Ok(tag_ranges);
                 }
@@ -681,7 +683,7 @@ impl<'a> QuickReader<'a> {
                         let name = bytes_start.name();
                         if let Err(e) = check_name_len(name.as_ref()) {
                             self.last_error_position = begin;
-                            return Err(XmlError::invalid_argument(e.to_string()));
+                            return Err(XmlError::invalid_argument(e));
                         }
                         (result.local_name_valid, result.prefix_valid) = compute_validity(&name);
                     }
@@ -689,7 +691,7 @@ impl<'a> QuickReader<'a> {
                         let name = bytes_end.name();
                         if let Err(e) = check_name_len(name.as_ref()) {
                             self.last_error_position = begin;
-                            return Err(XmlError::invalid_argument(e.to_string()));
+                            return Err(XmlError::invalid_argument(e));
                         }
                         (result.local_name_valid, result.prefix_valid) = compute_validity(&name);
                     }
@@ -697,7 +699,7 @@ impl<'a> QuickReader<'a> {
                         Ok(expanded) => result.expanded_entity = expanded,
                         Err(e) => {
                             self.last_error_position = begin;
-                            return Err(XmlError::invalid_argument(e.to_string()));
+                            return Err(XmlError::invalid_argument(e));
                         }
                     },
                     _ => {}
@@ -736,8 +738,9 @@ impl<'a> QuickReader<'a> {
         let Some(ranges) = &self.ranges else {
             return Ok(None);
         };
-        let Ok(ranges) = ranges else {
-            return Err(XmlError::invalid_argument(ranges.as_ref().unwrap_err().to_string()));
+        let ranges = match ranges {
+            Ok(ranges) => ranges,
+            Err(err) => return Err(XmlError::invalid_argument(err.as_str())),
         };
         if self.start_event_count == 0 {
             return Err(XmlError::failed_precondition("Have not read a start tag (yet)."));

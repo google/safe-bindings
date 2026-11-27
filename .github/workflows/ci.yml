@@ -40,8 +40,6 @@ jobs:
       - name: Resolve Crubit commit and matching Rust nightly
         id: toolchain
         if: steps.changes.outputs.bindings != '[]'
-        env:
-          GH_TOKEN: ${{ github.token }}
         run: bash ci/resolve_toolchain.sh >> "${GITHUB_OUTPUT}"
 
   build:
