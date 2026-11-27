@@ -1,7 +1,6 @@
 //! Owned ELF hash table sections for symbol tables: `.hash`, and `.gnu.hash`
 use crate::string_table::StringTable;
 use crate::symbol::{Symbol, SymbolTable};
-use crate::{make_option_type, make_result_type};
 use anyhow::{anyhow, Result};
 use elf::endian::EndianParse;
 use elf::file::Class;
@@ -88,10 +87,6 @@ impl SysVHashTable {
         Ok(None)
     }
 }
-
-make_option_type!(SysVHashTable);
-make_result_type!(SysVHashTable);
-make_result_type!(OptionSysVHashTable);
 
 /// An owned ELF GNU hash table (`.gnu.hash`), analogous to
 /// `elf::hash::GnuHashTable` but holding owned data (`Vec<u32>`, `Vec<u64>`)
@@ -232,7 +227,3 @@ impl GnuHashTable {
         Ok(None)
     }
 }
-
-make_option_type!(GnuHashTable);
-make_result_type!(GnuHashTable);
-make_result_type!(OptionGnuHashTable);

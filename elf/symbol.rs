@@ -1,13 +1,9 @@
-use crate::constants::{ResultSymbolBind, ResultSymbolType, ResultSymbolVisibility};
-use crate::{make_option_type, make_result_type, try_crubit};
+use crate::constants::{SymbolBind, SymbolType, SymbolVisibility};
 use anyhow::anyhow;
 use elf::abi;
 use elf::endian::EndianParse;
 use elf::symbol::Symbol as ThirdPartySymbol;
 use elf::symbol::SymbolTable as ThirdPartySymbolTable;
-
-// Needs Symbol and SymbolTable
-// needs result, option, and result<option>
 
 /// An owned ELF symbol table entry, analogous to `elf::symbol::Symbol`
 /// but fully owned for easier FFI.
@@ -36,18 +32,18 @@ impl Symbol {
     }
 
     /// Extracts the symbol type from `st_info`.
-    pub fn st_symtype(&self) -> ResultSymbolType {
-        try_crubit!({ (self.st_info & 0xf).try_into() })
+    pub fn st_symtype(&self) -> anyhow::Result<SymbolType> {
+        (self.st_info & 0xf).try_into()
     }
 
     /// Extracts the symbol binding from `st_info`.
-    pub fn st_bind(&self) -> ResultSymbolBind {
-        try_crubit!({ (self.st_info >> 4).try_into() })
+    pub fn st_bind(&self) -> anyhow::Result<SymbolBind> {
+        (self.st_info >> 4).try_into()
     }
 
     /// Extracts the symbol visibility from `st_other`.
-    pub fn st_vis(&self) -> ResultSymbolVisibility {
-        try_crubit!({ (self.st_other & 0x3).try_into() })
+    pub fn st_vis(&self) -> anyhow::Result<SymbolVisibility> {
+        (self.st_other & 0x3).try_into()
     }
 }
 
@@ -64,10 +60,6 @@ impl From<ThirdPartySymbol> for Symbol {
     }
 }
 
-make_option_type!(Symbol);
-make_result_type!(Symbol);
-make_result_type!(OptionSymbol);
-
 /// An owned ELF symbol table, analogous to `elf::symbol::SymbolTable`
 /// but holding owned `Symbol` structs in a `Vec` for easier FFI.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -82,13 +74,11 @@ impl SymbolTable {
     }
 
     /// Retrieves the symbol at the given index.
-    pub fn get(&self, index: usize) -> ResultSymbol {
-        try_crubit!({
-            self.entries
-                .get(index)
-                .cloned()
-                .ok_or_else(|| anyhow!("SybolTable: index {index} out of bounds"))
-        })
+    pub fn get(&self, index: usize) -> anyhow::Result<Symbol> {
+        self.entries
+            .get(index)
+            .cloned()
+            .ok_or_else(|| anyhow!("SymbolTable: index {index} out of bounds"))
     }
 
     /// Returns true if the table contains no symbols.
@@ -107,7 +97,3 @@ impl<E: EndianParse> From<ThirdPartySymbolTable<'_, E>> for SymbolTable {
         }
     }
 }
-
-make_option_type!(SymbolTable);
-make_result_type!(SymbolTable);
-make_result_type!(OptionSymbolTable);

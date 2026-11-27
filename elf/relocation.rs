@@ -1,5 +1,4 @@
 //! Owned ELF relocation sections.
-use crate::{make_option_type, make_result_type, try_crubit};
 use anyhow::anyhow;
 use elf::endian::EndianParse;
 use elf::file::Class;
@@ -26,9 +25,6 @@ impl From<ThirdPartyRel> for Rel {
         Self { r_offset: rel.r_offset, r_sym: rel.r_sym, r_type: rel.r_type }
     }
 }
-make_option_type!(Rel);
-make_result_type!(Rel);
-make_result_type!(OptionRel);
 
 /// An owned table of ELF `Rel` relocation entries, analogous to iterating over
 /// `elf::relocation::RelIterator` but holding owned `Rel` structs in a `Vec`
@@ -56,18 +52,13 @@ impl RelTable {
     }
 
     /// Retrieves the relocation entry at the given index.
-    pub fn get(&self, index: usize) -> ResultRel {
-        try_crubit!({
-            self.entries
-                .get(index)
-                .cloned()
-                .ok_or_else(|| anyhow!("RelTable: index {index} out of bounds"))
-        })
+    pub fn get(&self, index: usize) -> anyhow::Result<Rel> {
+        self.entries
+            .get(index)
+            .cloned()
+            .ok_or_else(|| anyhow!("RelTable: index {index} out of bounds"))
     }
 }
-make_option_type!(RelTable);
-make_result_type!(RelTable);
-make_result_type!(OptionRelTable);
 
 /// An owned ELF `Rela` relocation entry, analogous to `elf::relocation::Rela`
 /// but fully owned for easier FFI. This is a relocation entry with an
@@ -95,9 +86,6 @@ impl From<ThirdPartyRela> for Rela {
         }
     }
 }
-make_option_type!(Rela);
-make_result_type!(Rela);
-make_result_type!(OptionRela);
 
 /// An owned table of ELF `Rela` relocation entries, analogous to iterating over
 /// `elf::relocation::RelaIterator` but holding owned `Rela` structs in a `Vec`
@@ -124,15 +112,10 @@ impl RelaTable {
     }
 
     /// Retrieves the relocation entry at the given index.
-    pub fn get(&self, index: usize) -> ResultRela {
-        try_crubit!({
-            self.entries
-                .get(index)
-                .cloned()
-                .ok_or_else(|| anyhow!("RelaTable: index {index} out of bounds"))
-        })
+    pub fn get(&self, index: usize) -> anyhow::Result<Rela> {
+        self.entries
+            .get(index)
+            .cloned()
+            .ok_or_else(|| anyhow!("RelaTable: index {index} out of bounds"))
     }
 }
-make_option_type!(RelaTable);
-make_result_type!(RelaTable);
-make_result_type!(OptionRelaTable);

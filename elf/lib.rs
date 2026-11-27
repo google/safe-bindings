@@ -3,7 +3,6 @@
 //! Currently provides the `ElfBytes` struct and implements parsing elf class and machine metadata.
 pub mod compression;
 pub mod constants;
-mod crubit_utils;
 pub mod dynamic;
 pub mod elf_bytes;
 pub mod elf_stream;

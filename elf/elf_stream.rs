@@ -17,22 +17,15 @@
 //! and the parser state. Data returned to C++ is owned, similar to `ElfBytes`.
 
 use crate::dynamic::*;
-use crate::file::{FileHeader, ResultFileHeader};
-use crate::gnu_symver::{ResultOptionSymbolVersionTable, SymbolVersionTable};
-use crate::make_result_type;
+use crate::file::FileHeader;
+use crate::gnu_symver::SymbolVersionTable;
 use crate::note::*;
 use crate::relocation::*;
-use crate::section::{
-    ResultOptionSectionHeader, ResultSectionHeaderTable, SectionHeader, SectionHeaderTable,
-};
-use crate::segment::{ProgramHeader, ResultSegmentTable, SegmentTable};
-use crate::string_table::{ResultStringTable, StringTable};
+use crate::section::{SectionHeader, SectionHeaderTable};
+use crate::segment::{ProgramHeader, SegmentTable};
+use crate::string_table::StringTable;
 use crate::symbol::SymbolTable;
-use crate::try_crubit;
-use crate::types::{
-    ResultOptionSymbolTableWithStrings, ResultSectionData, ResultSectionHeaderTableWithStrings,
-    SectionData, SectionHeaderTableWithStrings, SymbolTableWithStrings,
-};
+use crate::types::{SectionData, SectionHeaderTableWithStrings, SymbolTableWithStrings};
 use anyhow::anyhow;
 use elf::abi;
 use elf::endian::AnyEndian;
@@ -51,8 +44,6 @@ pub struct ElfStream {
     // Holds the file handle via RAII.
     inner_stream: Option<ThirdPartyElfStream<AnyEndian, File>>,
 }
-
-make_result_type!(ElfStream);
 
 impl ElfStream {
     /// Returns a reference to the underlying `ThirdPartyElfStream` or an error
@@ -77,24 +68,20 @@ impl ElfStream {
     ///
     /// Returns an error if the file cannot be opened, read, or is not a
     /// valid ELF file.
-    pub fn open_stream(file_path: &[u8]) -> ResultElfStream {
-        try_crubit!({
-            let path = OsStr::from_bytes(file_path);
-            let file = File::open(path)?;
-            let inner_stream = ThirdPartyElfStream::open_stream(file)?;
+    pub fn open_stream(file_path: &[u8]) -> anyhow::Result<ElfStream> {
+        let path = OsStr::from_bytes(file_path);
+        let file = File::open(path)?;
+        let inner_stream = ThirdPartyElfStream::open_stream(file)?;
 
-            Ok(ElfStream { inner_stream: Some(inner_stream) })
-        })
+        Ok(ElfStream { inner_stream: Some(inner_stream) })
     }
 
     /// Returns the main ELF file header.
     ///
     /// Returns an error if the stream is not initialized.
-    pub fn file_header(&self) -> ResultFileHeader {
-        try_crubit!({
-            let ehdr = self.inner_stream_or_err()?.ehdr;
-            Ok(FileHeader::from(ehdr))
-        })
+    pub fn file_header(&self) -> anyhow::Result<FileHeader> {
+        let ehdr = self.inner_stream_or_err()?.ehdr;
+        Ok(FileHeader::from(ehdr))
     }
 
     /// Returns the ELF segment table (program header table) that was parsed
@@ -104,11 +91,9 @@ impl ElfStream {
     /// returned.
     ///
     /// Returns an error if the stream is not initialized.
-    pub fn segments(&self) -> ResultSegmentTable {
-        try_crubit!({
-            let phdrs = self.inner_stream_or_err()?.segments();
-            Ok(SegmentTable::from(phdrs))
-        })
+    pub fn segments(&self) -> anyhow::Result<SegmentTable> {
+        let phdrs = self.inner_stream_or_err()?.segments();
+        Ok(SegmentTable::from(phdrs))
     }
 
     /// Returns the ELF section header table that was parsed when this stream
@@ -118,11 +103,9 @@ impl ElfStream {
     /// is returned.
     ///
     /// Returns an error if the stream is not initialized.
-    pub fn section_headers(&self) -> ResultSectionHeaderTable {
-        try_crubit!({
-            let shdrs = self.inner_stream_or_err()?.section_headers();
-            Ok(SectionHeaderTable::from(shdrs))
-        })
+    pub fn section_headers(&self) -> anyhow::Result<SectionHeaderTable> {
+        let shdrs = self.inner_stream_or_err()?.section_headers();
+        Ok(SectionHeaderTable::from(shdrs))
     }
 
     /// Returns the ELF section header table along with the string table
@@ -142,42 +125,38 @@ impl ElfStream {
     ///
     /// Returns an error if the stream is not initialized, if `e_shstrndx`
     /// is invalid, or if reading the string table section data fails.
-    pub fn section_headers_with_strtab(&mut self) -> ResultSectionHeaderTableWithStrings {
-        try_crubit!({
-            let stream = self.inner_stream_mut_or_err()?;
+    pub fn section_headers_with_strtab(&mut self) -> anyhow::Result<SectionHeaderTableWithStrings> {
+        let stream = self.inner_stream_mut_or_err()?;
 
-            if stream.section_headers().is_empty() {
-                return Ok(SectionHeaderTableWithStrings {
-                    section_header_table: None.into(),
-                    string_table: None.into(),
-                });
+        if stream.section_headers().is_empty() {
+            return Ok(SectionHeaderTableWithStrings {
+                section_header_table: None,
+                string_table: None,
+            });
+        }
+
+        if stream.ehdr.e_shstrndx == abi::SHN_UNDEF {
+            return Ok(SectionHeaderTableWithStrings {
+                section_header_table: Some(SectionHeaderTable::from(stream.section_headers())),
+                string_table: None,
+            });
+        }
+
+        let strtab_shdr = {
+            let shdrs = stream.section_headers();
+            let mut shstrndx = stream.ehdr.e_shstrndx as usize;
+            if stream.ehdr.e_shstrndx == abi::SHN_XINDEX {
+                shstrndx = shdrs[0].sh_link as usize;
             }
+            *shdrs.get(shstrndx).ok_or_else(|| anyhow!("Invalid shstrndx"))?
+        };
 
-            if stream.ehdr.e_shstrndx == abi::SHN_UNDEF {
-                return Ok(SectionHeaderTableWithStrings {
-                    section_header_table: Some(SectionHeaderTable::from(stream.section_headers()))
-                        .into(),
-                    string_table: None.into(),
-                });
-            }
+        let (strtab_slice, _compression) = stream.section_data(&strtab_shdr)?;
+        let strtab_data = strtab_slice.to_vec();
 
-            let strtab_shdr = {
-                let shdrs = stream.section_headers();
-                let mut shstrndx = stream.ehdr.e_shstrndx as usize;
-                if stream.ehdr.e_shstrndx == abi::SHN_XINDEX {
-                    shstrndx = shdrs[0].sh_link as usize;
-                }
-                *shdrs.get(shstrndx).ok_or_else(|| anyhow!("Invalid shstrndx"))?
-            };
-
-            let (strtab_slice, _compression) = stream.section_data(&strtab_shdr)?;
-            let strtab_data = strtab_slice.to_vec();
-
-            Ok(SectionHeaderTableWithStrings {
-                section_header_table: Some(SectionHeaderTable::from(stream.section_headers()))
-                    .into(),
-                string_table: Some(StringTable::new(&strtab_data)).into(),
-            })
+        Ok(SectionHeaderTableWithStrings {
+            section_header_table: Some(SectionHeaderTable::from(stream.section_headers())),
+            string_table: Some(StringTable::new(&strtab_data)),
         })
     }
 
@@ -192,17 +171,14 @@ impl ElfStream {
     ///
     /// Returns an error if the stream is not initialized, or if reading or
     /// parsing section data fails.
-    pub fn section_header_by_name(&mut self, name: &[u8]) -> ResultOptionSectionHeader {
-        try_crubit!({
-            let name_str = std::str::from_utf8(name).map_err(|_| {
-                anyhow!("Section name {:?} is not valid UTF-8", String::from_utf8_lossy(name))
-            })?;
-            Ok(self
-                .inner_stream_mut_or_err()?
-                .section_header_by_name(name_str)?
-                .map(|shdr| (*shdr).into())
-                .into())
-        })
+    pub fn section_header_by_name(&mut self, name: &[u8]) -> anyhow::Result<Option<SectionHeader>> {
+        let name_str = std::str::from_utf8(name).map_err(|_| {
+            anyhow!("Section name {:?} is not valid UTF-8", String::from_utf8_lossy(name))
+        })?;
+        Ok(self
+            .inner_stream_mut_or_err()?
+            .section_header_by_name(name_str)?
+            .map(|shdr| (*shdr).into()))
     }
 
     /// Returns data for the section represented by `section_header`.
@@ -212,15 +188,10 @@ impl ElfStream {
     ///
     /// Returns an error if the stream is not initialized, or if reading or
     /// parsing section data fails.
-    pub fn section_data(&mut self, section_header: &SectionHeader) -> ResultSectionData {
-        try_crubit!({
-            let shdr = section_header.as_third_party();
-            let (data, compression) = self.inner_stream_mut_or_err()?.section_data(&shdr)?;
-            Ok(SectionData {
-                data: data.to_vec(),
-                compression: compression.map(|ch| ch.into()).into(),
-            })
-        })
+    pub fn section_data(&mut self, section_header: &SectionHeader) -> anyhow::Result<SectionData> {
+        let shdr = section_header.as_third_party();
+        let (data, compression) = self.inner_stream_mut_or_err()?.section_data(&shdr)?;
+        Ok(SectionData { data: data.to_vec(), compression: compression.map(|ch| ch.into()) })
     }
 
     /// Returns the data for the given section header, interpreted as a `StringTable`.
@@ -231,19 +202,20 @@ impl ElfStream {
     ///
     /// Returns an error if the stream is not initialized, or if reading or
     /// parsing string table data fails.
-    pub fn section_data_as_strtab(&mut self, section_header: &SectionHeader) -> ResultStringTable {
-        try_crubit!({
-            let inner_stream = self.inner_stream_mut_or_err()?;
-            if section_header.sh_type != abi::SHT_STRTAB {
-                return Err(anyhow!(
-                    "Unexpected section type: expected SHT_STRTAB, got {}",
-                    section_header.sh_type
-                ));
-            }
-            let shdr = section_header.as_third_party();
-            let (data, _compression) = inner_stream.section_data(&shdr)?;
-            Ok(StringTable::new(data))
-        })
+    pub fn section_data_as_strtab(
+        &mut self,
+        section_header: &SectionHeader,
+    ) -> anyhow::Result<StringTable> {
+        let inner_stream = self.inner_stream_mut_or_err()?;
+        if section_header.sh_type != abi::SHT_STRTAB {
+            return Err(anyhow!(
+                "Unexpected section type: expected SHT_STRTAB, got {}",
+                section_header.sh_type
+            ));
+        }
+        let shdr = section_header.as_third_party();
+        let (data, _compression) = inner_stream.section_data(&shdr)?;
+        Ok(StringTable::new(data))
     }
 
     /// Returns the symbol table (`.symtab`) and its associated string table, if present.
@@ -255,40 +227,34 @@ impl ElfStream {
     ///
     /// Returns an error if the stream is not initialized, or if reading or
     /// parsing section data fails.
-    pub fn symbol_table(&mut self) -> ResultOptionSymbolTableWithStrings {
-        try_crubit!({
-            let stream = self.inner_stream_mut_or_err()?;
-            let shdrs = stream.section_headers();
-            if shdrs.is_empty() {
-                return Ok(None.into());
-            }
+    pub fn symbol_table(&mut self) -> anyhow::Result<Option<SymbolTableWithStrings>> {
+        let stream = self.inner_stream_mut_or_err()?;
+        let shdrs = stream.section_headers();
+        if shdrs.is_empty() {
+            return Ok(None);
+        }
 
-            let symtab_shdr = match shdrs.iter().find(|shdr| shdr.sh_type == abi::SHT_SYMTAB) {
-                Some(shdr) => *shdr,
-                None => return Ok(None.into()),
-            };
+        let symtab_shdr = match shdrs.iter().find(|shdr| shdr.sh_type == abi::SHT_SYMTAB) {
+            Some(shdr) => *shdr,
+            None => return Ok(None),
+        };
 
-            let strtab_shdr = *shdrs
-                .get(symtab_shdr.sh_link as usize)
-                .ok_or_else(|| anyhow!("Invalid sh_link in SHT_SYMTAB section header"))?;
+        let strtab_shdr = *shdrs
+            .get(symtab_shdr.sh_link as usize)
+            .ok_or_else(|| anyhow!("Invalid sh_link in SHT_SYMTAB section header"))?;
 
-            let (symtab_data_slice, _) = stream.section_data(&symtab_shdr)?;
-            let symtab_data = symtab_data_slice.to_vec();
-            let (strtab_data_slice, _) = stream.section_data(&strtab_shdr)?;
-            let strtab_data = strtab_data_slice.to_vec();
+        let (symtab_data_slice, _) = stream.section_data(&symtab_shdr)?;
+        let symtab_data = symtab_data_slice.to_vec();
+        let (strtab_data_slice, _) = stream.section_data(&strtab_shdr)?;
+        let strtab_data = strtab_data_slice.to_vec();
 
-            let tp_symtab = elf::symbol::SymbolTable::new(
-                stream.ehdr.endianness,
-                stream.ehdr.class,
-                &symtab_data,
-            );
+        let tp_symtab =
+            elf::symbol::SymbolTable::new(stream.ehdr.endianness, stream.ehdr.class, &symtab_data);
 
-            Ok(Some(SymbolTableWithStrings {
-                symbol_table: SymbolTable::from(tp_symtab),
-                string_table: StringTable::new(&strtab_data),
-            })
-            .into())
-        })
+        Ok(Some(SymbolTableWithStrings {
+            symbol_table: SymbolTable::from(tp_symtab),
+            string_table: StringTable::new(&strtab_data),
+        }))
     }
 
     /// Returns the dynamic symbol table (`.dynsym`) and its associated string table,
@@ -301,40 +267,34 @@ impl ElfStream {
     ///
     /// Returns an error if the stream is not initialized, or if reading or
     /// parsing section data fails.
-    pub fn dynamic_symbol_table(&mut self) -> ResultOptionSymbolTableWithStrings {
-        try_crubit!({
-            let stream = self.inner_stream_mut_or_err()?;
-            let shdrs = stream.section_headers();
-            if shdrs.is_empty() {
-                return Ok(None.into());
-            }
+    pub fn dynamic_symbol_table(&mut self) -> anyhow::Result<Option<SymbolTableWithStrings>> {
+        let stream = self.inner_stream_mut_or_err()?;
+        let shdrs = stream.section_headers();
+        if shdrs.is_empty() {
+            return Ok(None);
+        }
 
-            let symtab_shdr = match shdrs.iter().find(|shdr| shdr.sh_type == abi::SHT_DYNSYM) {
-                Some(shdr) => *shdr,
-                None => return Ok(None.into()),
-            };
+        let symtab_shdr = match shdrs.iter().find(|shdr| shdr.sh_type == abi::SHT_DYNSYM) {
+            Some(shdr) => *shdr,
+            None => return Ok(None),
+        };
 
-            let strtab_shdr = *shdrs
-                .get(symtab_shdr.sh_link as usize)
-                .ok_or_else(|| anyhow!("Invalid sh_link in SHT_DYNSYM section header"))?;
+        let strtab_shdr = *shdrs
+            .get(symtab_shdr.sh_link as usize)
+            .ok_or_else(|| anyhow!("Invalid sh_link in SHT_DYNSYM section header"))?;
 
-            let (symtab_data_slice, _) = stream.section_data(&symtab_shdr)?;
-            let symtab_data = symtab_data_slice.to_vec();
-            let (strtab_data_slice, _) = stream.section_data(&strtab_shdr)?;
-            let strtab_data = strtab_data_slice.to_vec();
+        let (symtab_data_slice, _) = stream.section_data(&symtab_shdr)?;
+        let symtab_data = symtab_data_slice.to_vec();
+        let (strtab_data_slice, _) = stream.section_data(&strtab_shdr)?;
+        let strtab_data = strtab_data_slice.to_vec();
 
-            let tp_symtab = elf::symbol::SymbolTable::new(
-                stream.ehdr.endianness,
-                stream.ehdr.class,
-                &symtab_data,
-            );
+        let tp_symtab =
+            elf::symbol::SymbolTable::new(stream.ehdr.endianness, stream.ehdr.class, &symtab_data);
 
-            Ok(Some(SymbolTableWithStrings {
-                symbol_table: SymbolTable::from(tp_symtab),
-                string_table: StringTable::new(&strtab_data),
-            })
-            .into())
-        })
+        Ok(Some(SymbolTableWithStrings {
+            symbol_table: SymbolTable::from(tp_symtab),
+            string_table: StringTable::new(&strtab_data),
+        }))
     }
 
     /// Returns the data for the given section header, interpreted as a `RelTable`.
@@ -345,21 +305,22 @@ impl ElfStream {
     ///
     /// Returns an error if the stream is not initialized, or if reading or
     /// parsing relocation data fails.
-    pub fn section_data_as_rels(&mut self, section_header: &SectionHeader) -> ResultRelTable {
-        try_crubit!({
-            let stream = self.inner_stream_mut_or_err()?;
-            if section_header.sh_type != abi::SHT_REL {
-                return Err(anyhow!(
-                    "Unexpected section type: expected SHT_REL, got {}",
-                    section_header.sh_type
-                ));
-            }
-            let shdr = section_header.as_third_party();
-            let endianness = stream.ehdr.endianness;
-            let class = stream.ehdr.class;
-            let (data, _compression) = stream.section_data(&shdr)?;
-            Ok(RelTable::new(endianness, class, data))
-        })
+    pub fn section_data_as_rels(
+        &mut self,
+        section_header: &SectionHeader,
+    ) -> anyhow::Result<RelTable> {
+        let stream = self.inner_stream_mut_or_err()?;
+        if section_header.sh_type != abi::SHT_REL {
+            return Err(anyhow!(
+                "Unexpected section type: expected SHT_REL, got {}",
+                section_header.sh_type
+            ));
+        }
+        let shdr = section_header.as_third_party();
+        let endianness = stream.ehdr.endianness;
+        let class = stream.ehdr.class;
+        let (data, _compression) = stream.section_data(&shdr)?;
+        Ok(RelTable::new(endianness, class, data))
     }
 
     /// Returns the data for the given section header, interpreted as a `RelaTable`.
@@ -370,21 +331,22 @@ impl ElfStream {
     ///
     /// Returns an error if the stream is not initialized, or if reading or
     /// parsing relocation data fails.
-    pub fn section_data_as_relas(&mut self, section_header: &SectionHeader) -> ResultRelaTable {
-        try_crubit!({
-            let stream = self.inner_stream_mut_or_err()?;
-            if section_header.sh_type != abi::SHT_RELA {
-                return Err(anyhow!(
-                    "Unexpected section type: expected SHT_RELA, got {}",
-                    section_header.sh_type
-                ));
-            }
-            let shdr = section_header.as_third_party();
-            let endianness = stream.ehdr.endianness;
-            let class = stream.ehdr.class;
-            let (data, _compression) = stream.section_data(&shdr)?;
-            Ok(RelaTable::new(endianness, class, data))
-        })
+    pub fn section_data_as_relas(
+        &mut self,
+        section_header: &SectionHeader,
+    ) -> anyhow::Result<RelaTable> {
+        let stream = self.inner_stream_mut_or_err()?;
+        if section_header.sh_type != abi::SHT_RELA {
+            return Err(anyhow!(
+                "Unexpected section type: expected SHT_RELA, got {}",
+                section_header.sh_type
+            ));
+        }
+        let shdr = section_header.as_third_party();
+        let endianness = stream.ehdr.endianness;
+        let class = stream.ehdr.class;
+        let (data, _compression) = stream.section_data(&shdr)?;
+        Ok(RelaTable::new(endianness, class, data))
     }
 
     /// Returns the data for the given section header, interpreted as a `NoteTable`.
@@ -395,19 +357,20 @@ impl ElfStream {
     ///
     /// Returns an error if the stream is not initialized, or if reading or
     /// parsing note data fails.
-    pub fn section_data_as_notes(&mut self, section_header: &SectionHeader) -> ResultNoteTable {
-        try_crubit!({
-            let elf_stream = self.inner_stream_mut_or_err()?;
-            if section_header.sh_type != abi::SHT_NOTE {
-                return Err(anyhow!(
-                    "Unexpected section type: expected SHT_NOTE, got {}",
-                    section_header.sh_type
-                ));
-            }
-            let shdr = section_header.as_third_party();
-            let notes = elf_stream.section_data_as_notes(&shdr)?;
-            Ok(NoteTable { entries: notes.map(|n| n.into()).collect() })
-        })
+    pub fn section_data_as_notes(
+        &mut self,
+        section_header: &SectionHeader,
+    ) -> anyhow::Result<NoteTable> {
+        let elf_stream = self.inner_stream_mut_or_err()?;
+        if section_header.sh_type != abi::SHT_NOTE {
+            return Err(anyhow!(
+                "Unexpected section type: expected SHT_NOTE, got {}",
+                section_header.sh_type
+            ));
+        }
+        let shdr = section_header.as_third_party();
+        let notes = elf_stream.section_data_as_notes(&shdr)?;
+        Ok(NoteTable { entries: notes.map(|n| n.into()).collect() })
     }
 
     /// Returns the data for the given program header, interpreted as a `NoteTable`.
@@ -418,19 +381,17 @@ impl ElfStream {
     ///
     /// Returns an error if the stream is not initialized, or if reading or
     /// parsing note data fails.
-    pub fn segment_data_as_notes(&mut self, program_header: &ProgramHeader) -> ResultNoteTable {
-        try_crubit!({
-            let elf_stream = self.inner_stream_mut_or_err()?;
-            let phdr = program_header.as_third_party();
-            if phdr.p_type != abi::PT_NOTE {
-                return Err(anyhow!(
-                    "Unexpected segment type: expected PT_NOTE, got {}",
-                    phdr.p_type
-                ));
-            }
-            let notes = elf_stream.segment_data_as_notes(&phdr)?;
-            Ok(NoteTable { entries: notes.map(|n| n.into()).collect() })
-        })
+    pub fn segment_data_as_notes(
+        &mut self,
+        program_header: &ProgramHeader,
+    ) -> anyhow::Result<NoteTable> {
+        let elf_stream = self.inner_stream_mut_or_err()?;
+        let phdr = program_header.as_third_party();
+        if phdr.p_type != abi::PT_NOTE {
+            return Err(anyhow!("Unexpected segment type: expected PT_NOTE, got {}", phdr.p_type));
+        }
+        let notes = elf_stream.segment_data_as_notes(&phdr)?;
+        Ok(NoteTable { entries: notes.map(|n| n.into()).collect() })
     }
 
     /// Returns the dynamic section table (`.dynamic`), if present.
@@ -442,8 +403,8 @@ impl ElfStream {
     ///
     /// Returns an error if the stream is not initialized, or if reading or
     /// parsing section data fails.
-    pub fn dynamic(&mut self) -> ResultOptionDynTable {
-        try_crubit!({ Ok(self.inner_stream_mut_or_err()?.dynamic()?.map(DynTable::from).into()) })
+    pub fn dynamic(&mut self) -> anyhow::Result<Option<DynTable>> {
+        Ok(self.inner_stream_mut_or_err()?.dynamic()?.map(DynTable::from))
     }
 
     /// Returns the GNU symbol versioning tables (.gnu.version, .gnu.version_r,
@@ -456,17 +417,15 @@ impl ElfStream {
     ///
     /// Returns an error if the stream is not initialized, or if reading or
     /// parsing section data fails.
-    pub fn symbol_version_table(&mut self) -> ResultOptionSymbolVersionTable {
-        try_crubit!({
-            let st_opt = self.dynamic_symbol_table().inner?.inner;
-            let tp_table_opt = self.inner_stream_mut_or_err()?.symbol_version_table()?;
+    pub fn symbol_version_table(&mut self) -> anyhow::Result<Option<SymbolVersionTable>> {
+        let st_opt = self.dynamic_symbol_table()?;
+        let tp_table_opt = self.inner_stream_mut_or_err()?.symbol_version_table()?;
 
-            let result: Option<anyhow::Result<SymbolVersionTable>> =
-                tp_table_opt.zip(st_opt).map(|(tp_table, st)| {
-                    SymbolVersionTable::new_from_third_party(&tp_table, st.symbol_table.len())
-                });
+        let result: Option<anyhow::Result<SymbolVersionTable>> =
+            tp_table_opt.zip(st_opt).map(|(tp_table, st)| {
+                SymbolVersionTable::new_from_third_party(&tp_table, st.symbol_table.len())
+            });
 
-            Ok(result.transpose()?.into())
-        })
+        result.transpose()
     }
 }

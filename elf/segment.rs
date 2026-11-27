@@ -3,8 +3,7 @@
 //! These structs are analogous to `elf::segment::ProgramHeader` and
 //! `elf::segment::SegmentTable` but hold owned data rather than references,
 //! making them suitable for returning to C++.
-use crate::constants::{ProgramHeaderType, ResultProgramHeaderType};
-use crate::{make_option_type, make_result_type, try_crubit};
+use crate::constants::ProgramHeaderType;
 use anyhow::anyhow;
 use elf::endian::EndianParse;
 use elf::segment::ProgramHeader as ThirdPartyProgramHeader;
@@ -35,8 +34,8 @@ pub struct ProgramHeader {
 
 impl ProgramHeader {
     /// Returns the type of this segment as a `ProgramHeaderType`.
-    pub fn get_type(&self) -> ResultProgramHeaderType {
-        try_crubit!({ Ok(self.p_type) })
+    pub fn get_type(&self) -> ProgramHeaderType {
+        self.p_type
     }
 
     /// Converts this owned ProgramHeader back to a third-party ProgramHeader
@@ -71,10 +70,6 @@ impl From<ThirdPartyProgramHeader> for ProgramHeader {
     }
 }
 
-make_option_type!(ProgramHeader);
-make_result_type!(ProgramHeader);
-make_result_type!(OptionProgramHeader);
-
 /// An owned ELF segment table (program header table), analogous to
 /// `elf::segment::SegmentTable` but holding owned `ProgramHeader` structs in
 /// a `Vec` for easier FFI.
@@ -94,13 +89,11 @@ impl SegmentTable {
     ///
     /// Returns `Ok(ProgramHeader)` if the index is valid, or an error if
     /// `index` is out of bounds.
-    pub fn get(&self, index: usize) -> ResultProgramHeader {
-        try_crubit!({
-            self.entries
-                .get(index)
-                .cloned()
-                .ok_or_else(|| anyhow!("SegmentTable: index {index} out of bounds"))
-        })
+    pub fn get(&self, index: usize) -> anyhow::Result<ProgramHeader> {
+        self.entries
+            .get(index)
+            .cloned()
+            .ok_or_else(|| anyhow!("SegmentTable: index {index} out of bounds"))
     }
 
     /// Returns true if the table contains no segments.
@@ -120,7 +113,3 @@ impl From<&Vec<ThirdPartyProgramHeader>> for SegmentTable {
         Self { entries: phdrs.iter().copied().map(|phdr| phdr.into()).collect() }
     }
 }
-
-make_option_type!(SegmentTable);
-make_result_type!(SegmentTable);
-make_result_type!(OptionSegmentTable);

@@ -1,5 +1,4 @@
 //! Owned ELF GNU Symbol Versioning structures.
-use crate::{make_option_type, make_result_type, try_crubit};
 use anyhow::anyhow;
 use elf::endian::EndianParse;
 use std::collections::HashMap;
@@ -21,10 +20,6 @@ pub struct SymbolRequirement {
     /// Whether the symbol is hidden.
     pub hidden: bool,
 }
-
-make_option_type!(SymbolRequirement);
-make_result_type!(SymbolRequirement);
-make_result_type!(OptionSymbolRequirement);
 
 /// An owned ELF symbol version definition, analogous to
 /// `elf::gnu_symver::SymbolDefinition` but holding owned data (`Vec<u8>`,
@@ -56,10 +51,6 @@ impl SymbolDefinition {
             .ok_or(anyhow!("SymbolDefinition: name index {index} out of bounds"))
     }
 }
-
-make_option_type!(SymbolDefinition);
-make_result_type!(SymbolDefinition);
-make_result_type!(OptionSymbolDefinition);
 
 /// An owned ELF symbol version table, containing requirement and definition
 /// entries. This struct holds owned data rather than slices for easier FFI.
@@ -125,15 +116,12 @@ impl SymbolVersionTable {
 
     /// Retrieves the symbol requirement for a given symbol index, if one
     /// exists.
-    pub fn get_requirement(&self, sym_idx: usize) -> ResultOptionSymbolRequirement {
-        try_crubit!({ Ok(self.requirements.get(&sym_idx).cloned().into()) })
+    pub fn get_requirement(&self, sym_idx: usize) -> Option<SymbolRequirement> {
+        self.requirements.get(&sym_idx).cloned()
     }
 
     /// Retrieves the symbol definition for a given symbol index, if one exists.
-    pub fn get_definition(&self, sym_idx: usize) -> ResultOptionSymbolDefinition {
-        try_crubit!({ Ok(self.definitions.get(&sym_idx).cloned().into()) })
+    pub fn get_definition(&self, sym_idx: usize) -> Option<SymbolDefinition> {
+        self.definitions.get(&sym_idx).cloned()
     }
 }
-
-make_option_type!(SymbolVersionTable);
-make_result_type!(OptionSymbolVersionTable);

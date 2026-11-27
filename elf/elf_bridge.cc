@@ -13,127 +13,117 @@
 #include "absl/strings/str_cat.h"
 #include "absl/strings/string_view.h"
 #include "support/rs_std/result.h"
-#include "support/rs_std/str_ref.h"
 #include "crubit/elf_cpp_bindings.h"
 
 namespace elf_bridge {
 namespace {
 
-// When ABSL_OPTION_USE_STD_STRING_VIEW == 0, absl::string_view is not an alias
-// for std::string_view and cannot be constructed from std::string_view.
-constexpr absl::string_view StringViewFromStrRef(rs_std::StrRef str) noexcept {
-  return absl::string_view(str.data(), str.size());
+// Unwraps `rs::Movable<T>` wrappers produced under Crubit's
+// `movable_return_values` feature while passing bare `rs_std::Result` /
+// `rs_std::Option` values through unchanged.
+template <typename T>
+decltype(auto) UnwrapMovable(T&& x) {
+  if constexpr (requires { x.has_value(); }) {
+    return std::forward<T>(x);
+  } else {
+    return *std::forward<T>(x);
+  }
+}
+
+template <typename From>
+absl::StatusOr<std::string> MapBytesResult(From&& r) {
+  return MapResult<std::string>(std::forward<From>(r), [](const auto& bytes) {
+    return std::string(security::crubit_helpers::StringViewFromVecU8(bytes));
+  });
 }
 
 }  // namespace
 
 template <typename To, typename From>
 std::optional<To> MapOption(const From& o) {
-  if (o.is_none()) {
+  const auto& opt = UnwrapMovable(o);
+  if (!opt.has_value()) {
     return std::nullopt;
   }
-  return To(o.unwrap_as_ref());
+  return To(*opt);
 }
 
 template <typename To, typename From>
 std::optional<To> MapOption(From&& o) {
-  if (o.is_none()) {
+  auto&& opt = UnwrapMovable(std::forward<From>(o));
+  if (!opt.has_value()) {
     return std::nullopt;
   }
-  if constexpr (std::is_same_v<decltype(o),
-                               typename std::remove_reference_t<From>&&>) {
-    // Only call the && unwrap if o is truly an rvalue reference
-    return To(std::forward<From>(o).unwrap());
+  if constexpr (std::is_rvalue_reference_v<From&&>) {
+    return To(*std::move(opt));
   } else {
-    // Otherwise, call the const& unwrap_as_ref
-    return To(o.unwrap_as_ref());
+    return To(*opt);
   }
 }
 
 template <typename To, typename From>
 absl::StatusOr<To> MapResult(const From& r) {
-  if (r.is_err()) {
-    return absl::InternalError(
-        StringViewFromStrRef(r.unwrap_err_ref().as_str()));
+  const auto& res = UnwrapMovable(r);
+  if (!res.has_value()) {
+    return absl::InternalError(absl::StrCat(res.error()));
   }
-  return To(r.unwrap_as_ref());
+  return To(res.value());
 }
 
 template <typename To, typename From>
 absl::StatusOr<To> MapResult(From&& r) {
-  if (r.is_err()) {
-    return absl::InternalError(
-        StringViewFromStrRef(r.unwrap_err_ref().as_str()));
+  auto&& res = UnwrapMovable(std::forward<From>(r));
+  if (!res.has_value()) {
+    return absl::InternalError(absl::StrCat(res.error()));
   }
-  if constexpr (std::is_same_v<decltype(r),
-                               typename std::remove_reference_t<From>&&>) {
-    // Only call the && unwrap if r is truly an rvalue reference
-    return To(std::forward<From>(r).unwrap());
+  if constexpr (std::is_rvalue_reference_v<From&&>) {
+    return To(std::move(res).value());
   } else {
-    // Otherwise, call the const& unwrap_as_ref
-    return To(r.unwrap_as_ref());
+    return To(res.value());
   }
-}
-
-template <typename T, typename E>
-absl::StatusOr<std::string> MapResult(rs_std::Result<T, E>&& r) {
-  if (!r.has_value()) {
-    return absl::InternalError(absl::StrCat(r.error()));
-  }
-  return std::string(security::crubit_helpers::StringViewFromVecU8(r.value()));
-}
-
-template <template <typename> class Wrapper, typename T, typename E>
-absl::StatusOr<std::string> MapResult(Wrapper<rs_std::Result<T, E>>&& r) {
-  rs_std::Result<T, E> unwrapped = std::move(r);
-  return MapResult(std::move(unwrapped));
 }
 
 template <typename To, typename From, typename F>
 absl::StatusOr<To> MapResult(const From& r, F func) {
-  if (r.is_err()) {
-    return absl::InternalError(
-        StringViewFromStrRef(r.unwrap_err_ref().as_str()));
+  const auto& res = UnwrapMovable(r);
+  if (!res.has_value()) {
+    return absl::InternalError(absl::StrCat(res.error()));
   }
-  return func(r.unwrap_as_ref());
+  return func(res.value());
 }
 
 template <typename To, typename From, typename F>
 absl::StatusOr<To> MapResult(From&& r, F func) {
-  if (r.is_err()) {
-    return absl::InternalError(
-        StringViewFromStrRef(r.unwrap_err_ref().as_str()));
+  auto&& res = UnwrapMovable(std::forward<From>(r));
+  if (!res.has_value()) {
+    return absl::InternalError(absl::StrCat(res.error()));
   }
-  if constexpr (std::is_same_v<decltype(r),
-                               typename std::remove_reference_t<From>&&>) {
-    // Only call the && unwrap if r is truly an rvalue reference
-    return func(std::forward<From>(r).unwrap());
+  if constexpr (std::is_rvalue_reference_v<From&&>) {
+    return func(std::move(res).value());
   } else {
-    // Otherwise, call the const& unwrap_as_ref
-    return func(r.unwrap_as_ref());
+    return func(res.value());
   }
 }
 
 template <typename To, typename From, typename F, typename E>
 absl::StatusOr<To> MapResult(const From& r, F func, E err_func) {
-  if (r.is_err()) {
-    return err_func(StringViewFromStrRef(r.unwrap_err_ref().as_str()));
+  const auto& res = UnwrapMovable(r);
+  if (!res.has_value()) {
+    return err_func(absl::StrCat(res.error()));
   }
-  return func(r.unwrap_as_ref());
+  return func(res.value());
 }
 
 template <typename To, typename From, typename F, typename E>
 absl::StatusOr<To> MapResult(From&& r, F func, E err_func) {
-  if (r.is_err()) {
-    return err_func(StringViewFromStrRef(r.unwrap_err_ref().as_str()));
+  auto&& res = UnwrapMovable(std::forward<From>(r));
+  if (!res.has_value()) {
+    return err_func(absl::StrCat(res.error()));
   }
-  if constexpr (std::is_same_v<decltype(r),
-                               typename std::remove_reference_t<From>&&>) {
-    // Only call the && unwrap if r is truly an rvalue reference
-    return func(std::forward<From>(r).unwrap());
+  if constexpr (std::is_rvalue_reference_v<From&&>) {
+    return func(std::move(res).value());
   } else {
-    // Otherwise, call the const& unwrap_as_ref
-    return func(r.unwrap_as_ref());
+    return func(res.value());
   }
 }
 
@@ -143,8 +133,7 @@ ElfBytes::ElfBytes(elf_cpp_bindings::elf_bytes::ElfBytes inner)
     : inner_(std::move(inner)) {}
 
 absl::StatusOr<ElfBytes> ElfBytes::Parse(absl::string_view elf_data) {
-  elf_cpp_bindings::elf_bytes::ResultElfBytes result_elf_bytes =
-      elf_cpp_bindings::elf_bytes::ElfBytes::parse(elf_data);
+  auto result_elf_bytes = elf_cpp_bindings::elf_bytes::ElfBytes::parse(elf_data);
   return MapResult<ElfBytes>(std::move(result_elf_bytes));
 }
 
@@ -164,7 +153,7 @@ absl::StatusOr<std::optional<SegmentTable>> ElfBytes::GetSegments() const {
 absl::StatusOr<std::string> ElfBytes::GetSegmentData(
     const ProgramHeader& program_header) const {
   auto result = inner_.segment_data(program_header.header_);
-  return MapResult(std::move(result));
+  return MapBytesResult(std::move(result));
 }
 
 absl::StatusOr<std::optional<SectionHeaderTable>> ElfBytes::GetSectionHeaders()
@@ -270,19 +259,16 @@ ElfBytes::GetSymbolVersionTable() const {
 
 absl::StatusOr<CommonElfData> ElfBytes::GetCommonData() const {
   auto result = inner_.find_common_data();
-  if (result.is_err()) {
-    return absl::InternalError(
-        StringViewFromStrRef(result.unwrap_err_ref().as_str()));
-  }
-  auto common_data = std::move(result).unwrap();
-  return CommonElfData(
-      MapOption<SymbolTable>(std::move(common_data.symtab)),
-      MapOption<StringTable>(std::move(common_data.symtab_strs)),
-      MapOption<SymbolTable>(std::move(common_data.dynsyms)),
-      MapOption<StringTable>(std::move(common_data.dynsyms_strs)),
-      MapOption<DynTable>(std::move(common_data.dynamic)),
-      MapOption<SysVHashTable>(std::move(common_data.sysv_hash)),
-      MapOption<GnuHashTable>(std::move(common_data.gnu_hash)));
+  return MapResult<CommonElfData>(std::move(result), [](auto&& common_data) {
+    return CommonElfData(
+        MapOption<SymbolTable>(std::move(common_data.symtab)),
+        MapOption<StringTable>(std::move(common_data.symtab_strs)),
+        MapOption<SymbolTable>(std::move(common_data.dynsyms)),
+        MapOption<StringTable>(std::move(common_data.dynsyms_strs)),
+        MapOption<DynTable>(std::move(common_data.dynamic)),
+        MapOption<SysVHashTable>(std::move(common_data.sysv_hash)),
+        MapOption<GnuHashTable>(std::move(common_data.gnu_hash)));
+  });
 }
 
 // ElfStream
@@ -290,8 +276,7 @@ ElfStream::ElfStream(elf_cpp_bindings::elf_stream::ElfStream stream)
     : stream_(std::move(stream)) {}
 
 absl::StatusOr<ElfStream> ElfStream::Open(std::string_view file_path) {
-  elf_cpp_bindings::elf_stream::ResultElfStream result =
-      elf_cpp_bindings::elf_stream::ElfStream::open_stream(file_path);
+  auto result = elf_cpp_bindings::elf_stream::ElfStream::open_stream(file_path);
   return MapResult<ElfStream>(
       std::move(result),
       [](auto&& stream) {
@@ -450,8 +435,7 @@ SectionHeader::SectionHeader(const elf_cpp_bindings::section::SectionHeader& hea
 Elf_Word SectionHeader::GetName() const { return header_.sh_name; }
 
 absl::StatusOr<SectionType> SectionHeader::GetType() const {
-  auto result = header_.get_type();
-  return MapResult<SectionType>(result);
+  return header_.get_type();
 }
 
 Elf_Xword SectionHeader::GetFlags() const { return header_.sh_flags; }
@@ -538,7 +522,7 @@ StringTable::StringTable(const elf_cpp_bindings::string_table::StringTable& tabl
 
 absl::StatusOr<std::string> StringTable::Get(size_t index) const {
   auto result = table_.get(index);
-  return MapResult(std::move(result));
+  return MapBytesResult(std::move(result));
 }
 
 // SegmentTable
@@ -562,8 +546,7 @@ ProgramHeader::ProgramHeader(const elf_cpp_bindings::segment::ProgramHeader& hea
     : header_(header) {}
 
 absl::StatusOr<ProgramHeaderType> ProgramHeader::GetType() const {
-  auto result = header_.get_type();
-  return MapResult<ProgramHeaderType>(result);
+  return header_.get_type();
 }
 
 Elf_Word ProgramHeader::GetFlags() const { return header_.p_flags; }
@@ -646,22 +629,12 @@ SymbolVersionTable::SymbolVersionTable(
 
 absl::StatusOr<std::optional<SymbolRequirement>>
 SymbolVersionTable::GetRequirement(size_t sym_idx) const {
-  auto result = table_.get_requirement(sym_idx);
-  return MapResult<std::optional<SymbolRequirement>>(
-      std::move(result), [](auto&& optional_req) {
-        return MapOption<SymbolRequirement>(
-            std::forward<decltype(optional_req)>(optional_req));
-      });
+  return MapOption<SymbolRequirement>(table_.get_requirement(sym_idx));
 }
 
 absl::StatusOr<std::optional<SymbolDefinition>>
 SymbolVersionTable::GetDefinition(size_t sym_idx) const {
-  auto result = table_.get_definition(sym_idx);
-  return MapResult<std::optional<SymbolDefinition>>(
-      std::move(result), [](auto&& optional_def) {
-        return MapOption<SymbolDefinition>(
-            std::forward<decltype(optional_def)>(optional_def));
-      });
+  return MapOption<SymbolDefinition>(table_.get_definition(sym_idx));
 }
 
 // SymbolDefinition
@@ -680,7 +653,7 @@ size_t SymbolDefinition::GetNameCount() const { return def_.get_name_count(); }
 
 absl::StatusOr<std::string> SymbolDefinition::GetName(size_t index) const {
   auto result = def_.get_name(index);
-  return MapResult(std::move(result));
+  return MapBytesResult(std::move(result));
 }
 
 // SymbolRequirement

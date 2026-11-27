@@ -2,8 +2,6 @@
 use crate::constants::AnyEndian;
 use crate::constants::ElfClass;
 use crate::constants::ElfMachine;
-use crate::constants::ResultElfMachine;
-use crate::{make_option_type, make_result_type};
 use elf::endian::AnyEndian as ThirdPartyAnyEndian;
 
 /// An owned ELF file header, analogous to `elf::file::FileHeader` but fully
@@ -48,9 +46,8 @@ pub struct FileHeader {
 }
 
 impl FileHeader {
-    pub fn machine(&self) -> ResultElfMachine {
-        let machine = ElfMachine::try_from(self.e_machine_raw);
-        machine.into()
+    pub fn machine(&self) -> anyhow::Result<ElfMachine> {
+        ElfMachine::try_from(self.e_machine_raw)
     }
 }
 
@@ -77,10 +74,6 @@ impl Default for FileHeader {
         }
     }
 }
-
-make_option_type!(FileHeader, OptionFileHeader);
-make_result_type!(FileHeader, ResultFileHeader);
-make_result_type!(OptionFileHeader);
 
 impl From<elf::file::FileHeader<ThirdPartyAnyEndian>> for FileHeader {
     fn from(header: elf::file::FileHeader<ThirdPartyAnyEndian>) -> Self {

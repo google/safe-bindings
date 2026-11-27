@@ -1,5 +1,3 @@
-use crate::make_result_type;
-
 use anyhow::{anyhow, Result};
 use crubit_annotate::cpp_enum;
 use elf::abi;
@@ -23,8 +21,6 @@ impl From<elf::file::Class> for ElfClass {
         }
     }
 }
-
-make_result_type!(ElfClass);
 
 #[cpp_enum(kind = "enum class")]
 #[repr(transparent)]
@@ -432,8 +428,6 @@ impl TryFrom<u16> for ElfMachine {
     }
 }
 
-make_result_type!(ElfMachine);
-
 #[cpp_enum(kind = "enum class")]
 #[repr(transparent)]
 #[derive(Debug, Default, Copy, Clone, PartialEq, Eq)]
@@ -510,7 +504,6 @@ impl TryFrom<u32> for SectionType {
         })
     }
 }
-make_result_type!(SectionType);
 
 #[cpp_enum(kind = "enum class")]
 #[repr(transparent)]
@@ -565,7 +558,6 @@ impl TryFrom<u32> for ProgramHeaderType {
         })
     }
 }
-make_result_type!(ProgramHeaderType);
 
 #[cpp_enum(kind = "enum class")]
 #[repr(transparent)]
@@ -600,7 +592,6 @@ impl TryFrom<u8> for SymbolType {
         })
     }
 }
-make_result_type!(SymbolType);
 
 #[cpp_enum(kind = "enum class")]
 #[repr(transparent)]
@@ -627,7 +618,6 @@ impl TryFrom<u8> for SymbolBind {
         })
     }
 }
-make_result_type!(SymbolBind);
 
 #[cpp_enum(kind = "enum class")]
 #[repr(transparent)]
@@ -654,7 +644,6 @@ impl TryFrom<u8> for SymbolVisibility {
         })
     }
 }
-make_result_type!(SymbolVisibility);
 
 #[cpp_enum(kind = "enum class")]
 #[repr(transparent)]
