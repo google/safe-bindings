@@ -1,5 +1,5 @@
-#ifndef SECURITY_STEMMING_LIBSTEMMER_H_
-#define SECURITY_STEMMING_LIBSTEMMER_H_
+#ifndef SAFE_BINDINGS_STEMMING_LIBSTEMMER_H_
+#define SAFE_BINDINGS_STEMMING_LIBSTEMMER_H_
 
 namespace snowball_stemmer_c {
 
@@ -24,4 +24,4 @@ const sb_symbol *sb_stemmer_stem(sb_stemmer *stemmer, const sb_symbol *word,
 
 }  // namespace snowball_stemmer_c
 
-#endif  // SECURITY_STEMMING_LIBSTEMMER_H_
+#endif  // SAFE_BINDINGS_STEMMING_LIBSTEMMER_H_

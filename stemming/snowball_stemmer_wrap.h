@@ -7,8 +7,8 @@
 // Porter stemmers are re-entrant but not thread safe, thus it is not safe
 // to share PorterStemmer instances between threads.
 
-#ifndef SECURITY_STEMMING_SNOWBALL_STEMMER_WRAP_H_
-#define SECURITY_STEMMING_SNOWBALL_STEMMER_WRAP_H_
+#ifndef SAFE_BINDINGS_STEMMING_SNOWBALL_STEMMER_WRAP_H_
+#define SAFE_BINDINGS_STEMMING_SNOWBALL_STEMMER_WRAP_H_
 
 #include <cstddef>
 #include <string>
@@ -26,9 +26,11 @@ const size_t kMaxStemTermLength = 512;
 
 class SnowballStemmer {
  public:
-  // Instantiates a Snowball stemmer for the given language code.
-  // For a list of supported languages, please refer to:
-  //   https://source.corp.google.com/piper///depot/google3/security/stemming/libstemmer.rs;l=18-44
+  // Instantiates a Snowball stemmer for the given language name or ISO
+  // 639-1/639-3 code (see sb_stemmer_new() in libstemmer.rs). Supported
+  // algorithm names (ALGORITHM_NAMES) are generated at build time into
+  // generated_language_list.rs from Snowball's algorithms/*.sbl files and can
+  // also be queried at runtime via snowball_stemmer_c::sb_stemmer_list().
   // A Snowball stemmer object is re-entrant but is not thread safe.
   explicit SnowballStemmer(const char *lang_code);
 
@@ -59,4 +61,4 @@ class SnowballStemmer {
 
 }  // namespace security::stemmer
 
-#endif  // SECURITY_STEMMING_SNOWBALL_STEMMER_WRAP_H_
+#endif  // SAFE_BINDINGS_STEMMING_SNOWBALL_STEMMER_WRAP_H_
