@@ -1,7 +1,5 @@
 use crate::error::Error;
-use crate::make_vec_struct;
 use crate::reexport::{Display, UIntValue};
-use crate::types::{VecF32, VecF64, VecI16, VecI32, VecI8, VecU16, VecU32, VecU8, VecVecU8};
 use exif::{
     Rational as KamadakRational, SRational as KamadakSRational, Tag, Value as KamadakValue,
 };
@@ -113,61 +111,89 @@ impl PartialEq for SRational {
     }
 }
 
-make_vec_struct!(Rational, VecRational);
-make_vec_struct!(SRational, VecSRational);
-
-impl From<VecRational> for Vec<KamadakRational> {
-    fn from(v: VecRational) -> Self {
-        v.into_vec().into_iter().map(|x: Rational| x.0).collect()
-    }
-}
-
-impl From<VecSRational> for Vec<KamadakSRational> {
-    fn from(v: VecSRational) -> Self {
-        v.into_vec().into_iter().map(|x: SRational| x.0).collect()
-    }
-}
-
-/// This macro generates the constructor for each variant of Value.
-/// It takes a list of arguments, where each argument is a struct with the following fields:
-///
-/// * `name`: The name of the variant.
-/// * `arg_name`: The name of the argument.
-/// * `type`: The type of the argument.
-macro_rules! export_value_constructors {
-    // Match a list of: VariantName(arg_name: ArgType, ...)
-    ( $( $variant:ident ( $( $arg:ident : $type:ty ),* ) ),* $(,)? ) => {
-        $(
-            /// Create Value variant with the corresponding name.
-            #[allow(non_snake_case)]
-            pub fn $variant( $( $arg : $type ),* ) -> Self {
-                Self(KamadakValue::$variant( $( $arg.into() ),* ))
-            }
-        )*
-    };
-}
-
 /// A type and values of a TIFF/Exif field.
 #[derive(Debug, Clone)]
 #[repr(transparent)]
 pub struct Value(pub(crate) KamadakValue);
 
 impl Value {
-    export_value_constructors!(
-        Byte(data: VecU8),
-        Ascii(data: VecVecU8),
-        Short(data: VecU16),
-        Long(data: VecU32),
-        Rational(data: VecRational),
-        SByte(data: VecI8),
-        Undefined(data: VecU8, offset: u32),
-        SShort(data: VecI16),
-        SLong(data: VecI32),
-        SRational(data: VecSRational),
-        Float(data: VecF32),
-        Double(data: VecF64),
-        Unknown(type_id: u16, count: u32, offset: u32),
-    );
+    /// Create `Value::Byte`.
+    #[allow(non_snake_case)]
+    pub fn Byte(data: &[u8]) -> Self {
+        Self(KamadakValue::Byte(data.to_vec()))
+    }
+
+    /// Create `Value::Ascii`.
+    #[allow(non_snake_case)]
+    pub fn Ascii(data: &[&[u8]]) -> Self {
+        Self(KamadakValue::Ascii(data.iter().map(|s| s.to_vec()).collect()))
+    }
+
+    /// Create `Value::Short`.
+    #[allow(non_snake_case)]
+    pub fn Short(data: &[u16]) -> Self {
+        Self(KamadakValue::Short(data.to_vec()))
+    }
+
+    /// Create `Value::Long`.
+    #[allow(non_snake_case)]
+    pub fn Long(data: &[u32]) -> Self {
+        Self(KamadakValue::Long(data.to_vec()))
+    }
+
+    /// Create `Value::Rational`.
+    #[allow(non_snake_case)]
+    pub fn Rational(data: &[Rational]) -> Self {
+        Self(KamadakValue::Rational(data.iter().map(|x| x.0).collect()))
+    }
+
+    /// Create `Value::SByte`.
+    #[allow(non_snake_case)]
+    pub fn SByte(data: &[i8]) -> Self {
+        Self(KamadakValue::SByte(data.to_vec()))
+    }
+
+    /// Create `Value::Undefined`.
+    #[allow(non_snake_case)]
+    pub fn Undefined(data: &[u8], offset: u32) -> Self {
+        Self(KamadakValue::Undefined(data.to_vec(), offset))
+    }
+
+    /// Create `Value::SShort`.
+    #[allow(non_snake_case)]
+    pub fn SShort(data: &[i16]) -> Self {
+        Self(KamadakValue::SShort(data.to_vec()))
+    }
+
+    /// Create `Value::SLong`.
+    #[allow(non_snake_case)]
+    pub fn SLong(data: &[i32]) -> Self {
+        Self(KamadakValue::SLong(data.to_vec()))
+    }
+
+    /// Create `Value::SRational`.
+    #[allow(non_snake_case)]
+    pub fn SRational(data: &[SRational]) -> Self {
+        Self(KamadakValue::SRational(data.iter().map(|x| x.0).collect()))
+    }
+
+    /// Create `Value::Float`.
+    #[allow(non_snake_case)]
+    pub fn Float(data: &[f32]) -> Self {
+        Self(KamadakValue::Float(data.to_vec()))
+    }
+
+    /// Create `Value::Double`.
+    #[allow(non_snake_case)]
+    pub fn Double(data: &[f64]) -> Self {
+        Self(KamadakValue::Double(data.to_vec()))
+    }
+
+    /// Create `Value::Unknown`.
+    #[allow(non_snake_case)]
+    pub fn Unknown(type_id: u16, count: u32, offset: u32) -> Self {
+        Self(KamadakValue::Unknown(type_id, count, offset))
+    }
 
     /// Returns an object that implements `std::fmt::Display` for
     /// printing a value in a tag-specific format.
@@ -181,19 +207,18 @@ impl Value {
         Display { fmt: result.fmt, value: result.value }
     }
 
-    /// Returns a VecU32  over the unsigned integers (BYTE, SHORT, or LONG).
+    /// Returns a `Vec<u32>` over the unsigned integers (BYTE, SHORT, or LONG).
     /// `None` is returned if the value is not an unsigned integer type.
-    pub fn iter_uint(&self) -> Option<VecU32> {
+    pub fn iter_uint(&self) -> Option<Vec<u32>> {
         // Original function returns Option<UIntIter>
         // which fails with error
         //
         // Error formatting function return type `std::option::Option<value::UIntIter<'__anon1>>`:
         // Failed to get canonical name for DefId(0:499 ~ exif[6643]::value::UIntIter)
         //
-        // possibly because UIntIter is also not public. We copied it over to reexport.rs.
-        // http://cs///depot/google3/third_party/rust/kamadak_exif/v0_6/src/value.rs;l=222
-        // For simplicity, we make it return a VecU32 which is guaranteed to be Crubit compatible.
-        self.0.iter_uint().map(|iterator| iterator.collect::<Vec<u32>>().into())
+        // possibly because UIntIter is also not public.
+        // For simplicity, we make it return a `Vec<u32>` which is Crubit-compatible.
+        self.0.iter_uint().map(|iterator| iterator.collect())
     }
 
     /// Returns `UIntValue` if the value type is unsigned integer (BYTE,
@@ -246,7 +271,8 @@ impl Value {
         }
     }
 
-    /// Returns the double at the given position, supporting all numeric types (including rationals).
+    /// Returns the double at the given position, supporting all numeric types (including
+    /// rationals).
     pub fn get_double(&self, index: usize) -> Option<f64> {
         match self.0 {
             KamadakValue::Byte(ref v) => v.get(index).map(|&x| x.into()),
@@ -264,9 +290,9 @@ impl Value {
     }
 
     /// Returns the bytes for byte, ASCII, or undefined tags.
-    pub fn get_bytes(&self) -> Option<VecU8> {
+    pub fn get_bytes(&self) -> Option<Vec<u8>> {
         match &self.0 {
-            KamadakValue::Byte(v) => Some(VecU8::from(v.clone())),
+            KamadakValue::Byte(v) => Some(v.clone()),
             KamadakValue::Ascii(v) => {
                 let mut bytes = Vec::new();
                 for (i, s) in v.iter().enumerate() {
@@ -275,9 +301,9 @@ impl Value {
                     }
                     bytes.extend_from_slice(s);
                 }
-                Some(VecU8::from(bytes))
+                Some(bytes)
             }
-            KamadakValue::Undefined(v, _) => Some(VecU8::from(v.clone())),
+            KamadakValue::Undefined(v, _) => Some(v.clone()),
             _ => None,
         }
     }

@@ -32,11 +32,10 @@ impl ErrorStatus {
     pub const UNKNOWN: ErrorStatus = ErrorStatus(8);
 }
 
-#[repr(C)]
 #[derive(Default, Debug, Clone, PartialEq)]
 pub struct Error {
     status: ErrorStatus,
-    message: crate::types::VecU8,
+    message: Vec<u8>,
 }
 
 /// An error returned when parsing of Exif data fails.
@@ -47,7 +46,7 @@ impl Error {
     }
 
     /// Returns the message of the error.
-    pub fn message(&self) -> crate::types::VecU8 {
+    pub fn message(&self) -> Vec<u8> {
         self.message.clone()
     }
 }
@@ -65,7 +64,7 @@ impl From<KamadakError> for Error {
             KamadakError::PartialResult(_) => ErrorStatus::PARTIAL_RESULT,
             _ => ErrorStatus::UNKNOWN,
         };
-        Self { status, message: crate::types::VecU8(error.to_string().into_bytes()) }
+        Self { status, message: error.to_string().into_bytes() }
     }
 }
 
@@ -77,7 +76,9 @@ impl From<io::Error> for Error {
 
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let s = std::str::from_utf8(self.message.as_slice()).unwrap_or("Unknown error");
+        let s = std::str::from_utf8(&self.message).unwrap_or("Unknown error");
         write!(f, "{}", s)
     }
 }
+
+impl std::error::Error for Error {}

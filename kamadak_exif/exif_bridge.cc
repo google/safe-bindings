@@ -1,9 +1,7 @@
 #include "exif_bridge.h"
 
-#include <algorithm>
 #include <cstddef>
 #include <cstdint>
-#include <iterator>
 #include <optional>
 #include <string>
 #include <utility>
@@ -12,12 +10,13 @@
 #include "crubit/rust.h"
 
 #include "crubit_helpers/string_conversions.h"
-#include "absl/algorithm/container.h"
 #include "absl/status/status.h"
 #include "absl/status/status_macros.h"
 #include "absl/status/statusor.h"
 #include "absl/types/span.h"
+#include "support/rs_std/result.h"
 #include "support/rs_std/slice_ref.h"
+#include "support/rs_std/vec.h"
 
 namespace security::exif_bridge {
 namespace {
@@ -57,72 +56,58 @@ bool Value::operator==(const Value& other) const {
 }
 
 Value Value::Byte(absl::Span<const uint8_t> value) {
-  return Value(rust::value::Value::Byte(
-      rust::types::VecU8::copy_from_slice(value)));
+  return Value(rust::value::Value::Byte(value));
 }
 
 Value Value::Ascii(absl::Span<const std::string> value) {
-  std::vector<rust::types::VecU8> rust_vec;
-  rust_vec.reserve(value.size());
-  absl::c_transform(
-      value, std::back_inserter(rust_vec), [](const std::string& s) {
-        return rust::types::VecU8::copy_from_slice(
-            absl::MakeConstSpan(reinterpret_cast<const uint8_t*>(s.data()),
-                                s.size()));
-      });
-  return Value(rust::value::Value::Ascii(
-      rust::types::VecVecU8::copy_from_slice(rust_vec)));
+  std::vector<rs_std::SliceRef<const uint8_t>> slices;
+  slices.reserve(value.size());
+  for (const std::string& s : value) {
+    slices.emplace_back(absl::MakeConstSpan(
+        reinterpret_cast<const uint8_t*>(s.data()), s.size()));
+  }
+  return Value(rust::value::Value::Ascii(slices));
 }
 
 Value Value::Short(absl::Span<const uint16_t> value) {
-  return Value(rust::value::Value::Short(
-      rust::types::VecU16::copy_from_slice(value)));
+  return Value(rust::value::Value::Short(value));
 }
 
 Value Value::Long(absl::Span<const uint32_t> value) {
-  return Value(rust::value::Value::Long(
-      rust::types::VecU32::copy_from_slice(value)));
+  return Value(rust::value::Value::Long(value));
 }
 
 Value Value::Rational(absl::Span<const rust::value::Rational> value) {
-  return Value(rust::value::Value::Rational(
-      rust::value::VecRational::copy_from_slice(value)));
+  return Value(rust::value::Value::Rational(value));
 }
 
 Value Value::SByte(absl::Span<const int8_t> value) {
-  return Value(rust::value::Value::SByte(
-      rust::types::VecI8::copy_from_slice(value)));
+  return Value(rust::value::Value::SByte(value));
 }
 
 Value Value::Undefined(absl::Span<const uint8_t> value, uint32_t offset) {
-  return Value(rust::value::Value::Undefined(
-      rust::types::VecU8::copy_from_slice(value), offset));
+  return Value(rust::value::Value::Undefined(value, offset));
 }
 
 Value Value::SShort(absl::Span<const int16_t> value) {
-  return Value(rust::value::Value::SShort(
-      rust::types::VecI16::copy_from_slice(value)));
+  return Value(rust::value::Value::SShort(value));
 }
 
 Value Value::SLong(absl::Span<const int32_t> value) {
-  return Value(rust::value::Value::SLong(
-      rust::types::VecI32::copy_from_slice(value)));
+  return Value(rust::value::Value::SLong(value));
 }
 
 Value Value::SRational(
     absl::Span<const rust::value::SRational> value) {
-  return Value(rust::value::Value::SRational(
-      rust::value::VecSRational::copy_from_slice(value)));
+  return Value(rust::value::Value::SRational(value));
 }
 
 Value Value::Float(absl::Span<const float> value) {
-  return Value(rust::value::Value::Float(
-      rust::types::VecF32::copy_from_slice(value)));
+  return Value(rust::value::Value::Float(value));
 }
 
 Value Value::Double(absl::Span<const double> value) {
-  return Value(rust::value::Value::Double(
-      rust::types::VecF64::copy_from_slice(value)));
+  return Value(rust::value::Value::Double(value));
 }
 
 Value Value::Unknown(uint16_t type, uint32_t count, uint32_t offset) {
@@ -160,27 +145,19 @@ std::optional<double> Value::get_double(size_t index) const {
 }
 
 std::optional<std::vector<uint8_t>> Value::get_bytes() const {
-  std::optional<rust::types::VecU8> result = value_.get_bytes();
+  std::optional<rs::Vec<uint8_t>> result = value_.get_bytes();
   if (result.has_value()) {
-    const size_t len = result.value().len();
-    std::vector<uint8_t> bytes;
-    bytes.reserve(len);
-    bytes.insert(bytes.end(), result.value().as_ptr(),
-                 result.value().as_ptr() + len);
-    return bytes;
+    return std::vector<uint8_t>(result->data(),
+                                result->data() + result->size());
   }
   return std::nullopt;
 }
 
 std::optional<std::vector<uint32_t>> Value::iter_uint() const {
-  std::optional<rust::types::VecU32> result = value_.iter_uint();
+  std::optional<rs::Vec<uint32_t>> result = value_.iter_uint();
   if (result.has_value()) {
-    const size_t len = result.value().len();
-    std::vector<uint32_t> vec;
-    vec.reserve(len);
-    vec.insert(vec.end(), result.value().as_ptr(),
-               result.value().as_ptr() + len);
-    return vec;
+    return std::vector<uint32_t>(result->data(),
+                                 result->data() + result->size());
   }
   return std::nullopt;
 }
@@ -432,10 +409,9 @@ Context Tag::context() const { return tag_.context(); }
 std::uint16_t Tag::number() const { return tag_.number(); }
 
 std::optional<std::string> Tag::description() const {
-  std::optional<rust::types::VecU8> desc = tag_.description();
+  std::optional<rs::Vec<uint8_t>> desc = tag_.description();
   if (desc.has_value()) {
-    return std::string(reinterpret_cast<const char*>(desc->as_ptr()),
-                       desc->len());
+    return std::string(StringViewFromVecU8(*desc));
   }
   return std::nullopt;
 }
@@ -474,42 +450,34 @@ absl::StatusOr<TiffExifData> parse_exif(absl::Span<const uint8_t> data) {
     return FromRustError(std::move(result).err());
   }
   rust::types::TiffExifDataRs val = std::move(result).value();
-  auto fields_vec = std::move(val.fields);
+  rs::Vec<rust::tiff::Field> fields_vec = std::move(val.fields);
   bool is_little_endian = val.is_little_endian;
   std::vector<Field> fields;
-  fields.reserve(fields_vec.len());
-  std::transform(
-      fields_vec.as_mut_ptr(), fields_vec.as_mut_ptr() + fields_vec.len(),
-      std::back_inserter(fields),
-      [](rust::tiff::Field& f) { return Field(std::move(f)); });
+  fields.reserve(fields_vec.size());
+  for (rust::tiff::Field& f : fields_vec) {
+    fields.push_back(Field(std::move(f)));
+  }
   return TiffExifData(std::move(fields), is_little_endian);
 }
 
 // Exif
 Exif::Exif(rust::reader::Exif exif) : exif_(std::move(exif)) {
   // Initialize cached buffer.
-  rust::types::VecU8 buf_view = exif_.buf();
-  buf_ = std::vector<uint8_t>(buf_view.as_mut_ptr(),
-                              buf_view.as_mut_ptr() + buf_view.len());
+  rs::Vec<uint8_t> buf_view = exif_.buf();
+  buf_.assign(buf_view.data(), buf_view.data() + buf_view.size());
   // Initialize cached fields.
-  rust::types::VecField fields_vec = exif_.fields();
-  std::vector<Field> fields;
-  fields.reserve(fields_vec.len());
-  std::transform(
-      fields_vec.as_mut_ptr(), fields_vec.as_mut_ptr() + fields_vec.len(),
-      std::back_inserter(fields),
-      [](rust::tiff::Field& f) { return Field(std::move(f)); });
-  fields_ = std::move(fields);
+  rs::Vec<rust::tiff::Field> fields_vec = exif_.fields();
+  fields_.reserve(fields_vec.size());
+  for (rust::tiff::Field& f : fields_vec) {
+    fields_.push_back(Field(std::move(f)));
+  }
 
   // Initialize cached mnote fields.
-  rust::types::VecField mnote_vec = exif_.mnote_fields();
-  std::vector<Field> mnote_fields;
-  mnote_fields.reserve(mnote_vec.len());
-  std::transform(
-      mnote_vec.as_mut_ptr(), mnote_vec.as_mut_ptr() + mnote_vec.len(),
-      std::back_inserter(mnote_fields),
-      [](rust::tiff::Field& f) { return Field(std::move(f)); });
-  mnote_fields_ = std::move(mnote_fields);
+  rs::Vec<rust::tiff::Field> mnote_vec = exif_.mnote_fields();
+  mnote_fields_.reserve(mnote_vec.size());
+  for (rust::tiff::Field& f : mnote_vec) {
+    mnote_fields_.push_back(Field(std::move(f)));
+  }
 }
 
 absl::Span<const uint8_t> Exif::buf() const& {
@@ -551,8 +519,7 @@ Reader::Reader() : reader_(rust::reader::Reader::new_()) {}
 
 absl::StatusOr<Exif> Reader::read_raw(absl::Span<const uint8_t> data) {
   rs_std::Result<rust::reader::Exif, rust::error::Error>
-      result =
-          reader_.read_raw(rust::types::VecU8::copy_from_slice(data));
+      result = reader_.read_raw(data);
   if (result.has_value()) {
     return Exif(std::move(result).value());
   }
@@ -562,8 +529,7 @@ absl::StatusOr<Exif> Reader::read_raw(absl::Span<const uint8_t> data) {
 absl::StatusOr<Exif> Reader::read_from_container(
     absl::Span<const uint8_t> data) {
   rs_std::Result<rust::reader::Exif, rust::error::Error>
-      result = reader_.read_from_container(
-          rust::types::VecU8::copy_from_slice(data));
+      result = reader_.read_from_container(data);
   if (result.has_value()) {
     return Exif(std::move(result).value());
   }
@@ -615,8 +581,8 @@ void Writer::set_jpeg(absl::Span<const uint8_t> jpeg, In ifd_num) {
 }
 
 absl::StatusOr<ExifBytes> Writer::write(bool little_endian) {
-  rs_std::Result<rust::types::VecU8, rust::error::Error>
-      result = writer_.write(little_endian);
+  rs_std::Result<rs::Vec<uint8_t>, rust::error::Error> result =
+      writer_.write(little_endian);
   if (!result.has_value()) {
     return FromRustError(std::move(result).err());
   }

@@ -6,4 +6,3 @@
 
 pub mod image;
 pub mod reader;
-pub mod vec_u8;

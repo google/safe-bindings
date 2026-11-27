@@ -14,7 +14,9 @@
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
 #include "absl/strings/string_view.h"
+#include "support/rs_std/result.h"
 #include "support/rs_std/str_ref.h"
+#include "support/rs_std/vec.h"
 
 namespace security::yaml {
 
@@ -110,7 +112,7 @@ std::optional<double> NodeView::as_optional<double>() const {
 }
 
 absl::StatusOr<std::string> NodeView::Dump() const {
-  rs_std::Result<rust::vec_u8::VecU8, rust::vec_u8::VecU8> result =
+  rs_std::Result<rs::Vec<uint8_t>, rs::Vec<uint8_t>> result =
       rust::dump(view_);
   if (!result.has_value()) {
     return absl::InternalError(StringViewFromVecU8(std::move(result).err()));
@@ -182,7 +184,7 @@ std::ostream& operator<<(std::ostream& out, const Node& node) {
 
 // Load functions
 absl::StatusOr<Node> Load(rs_std::StrRef input) {
-  rs_std::Result<rust::NodeOwned, rust::vec_u8::VecU8> result =
+  rs_std::Result<rust::NodeOwned, rs::Vec<uint8_t>> result =
       rust::load(input);
   if (!result.has_value()) {
     return absl::InvalidArgumentError(

@@ -10,7 +10,9 @@
 #include "absl/status/statusor.h"
 #include "absl/strings/string_view.h"
 #include "absl/types/span.h"
+#include "support/rs_std/result.h"
 #include "support/rs_std/slice_ref.h"
+#include "support/rs_std/vec.h"
 
 namespace security::yaml {
 
@@ -20,14 +22,14 @@ absl::StatusOr<std::string> ConvertYamlToJson(absl::string_view yaml_text,
                                               const ParseOptions& options) {
   auto bytes_slice = rs_std::SliceRef<const uint8_t>(absl::Span<const uint8_t>(
       reinterpret_cast<const uint8_t*>(yaml_text.data()), yaml_text.size()));
-  rs_std::Result<rust::vec_u8::VecU8, rust::vec_u8::VecU8> result =
+  rs_std::Result<rs::Vec<uint8_t>, rs::Vec<uint8_t>> result =
       rust::convert_yaml_to_json(bytes_slice, options.recursion_depth_limit);
 
   if (!result.has_value()) {
-    rust::vec_u8::VecU8 err = std::move(result).err();
+    rs::Vec<uint8_t> err = std::move(result).err();
     return absl::InvalidArgumentError(StringViewFromVecU8(err));
   }
-  rust::vec_u8::VecU8 val = std::move(result).value();
+  rs::Vec<uint8_t> val = std::move(result).value();
   return std::string(StringViewFromVecU8(val));
 }
 

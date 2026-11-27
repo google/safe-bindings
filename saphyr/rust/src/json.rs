@@ -1,33 +1,32 @@
-use crate::vec_u8::VecU8;
 use saphyr::{LoadableYamlNode, ScalarOwned, YamlOwned};
 
-/// Converts a YAML byte slice into a JSON string encoded as `VecU8`.
+/// Converts a YAML byte slice into a JSON string encoded as `Vec<u8>`.
 ///
 /// # Arguments
 /// * `input` - Raw UTF-8 encoded YAML input bytes.
 /// * `recursion_depth_limit` - Maximum allowable YAML node hierarchy depth.
 ///
 /// # Errors
-/// Returns an error `VecU8` if the input is invalid UTF-8, malformed YAML,
+/// Returns an error `Vec<u8>` if the input is invalid UTF-8, malformed YAML,
 /// contains multiple YAML documents, or exceeds `recursion_depth_limit`.
-pub fn convert_yaml_to_json(input: &[u8], recursion_depth_limit: i32) -> Result<VecU8, VecU8> {
+pub fn convert_yaml_to_json(input: &[u8], recursion_depth_limit: i32) -> Result<Vec<u8>, Vec<u8>> {
     let input_str = match std::str::from_utf8(input) {
         Ok(s) => s,
-        Err(_) => return Err(VecU8::from("Input is not valid UTF-8")),
+        Err(_) => return Err(b"Input is not valid UTF-8".to_vec()),
     };
     let docs = match YamlOwned::load_from_str(input_str) {
         Ok(docs) => docs,
-        Err(err) => return Err(VecU8::from(err.to_string())),
+        Err(err) => return Err(err.to_string().into_bytes()),
     };
     if docs.is_empty() {
-        return Err(VecU8::from("Undefined YAML Node Type"));
+        return Err(b"Undefined YAML Node Type".to_vec());
     }
     if docs.len() > 1 {
-        return Err(VecU8::from("Multiple YAML documents are not supported"));
+        return Err(b"Multiple YAML documents are not supported".to_vec());
     }
     let mut out = String::with_capacity(input.len() * 2);
     append_json_from_yaml_node(&docs[0], &mut out, 1, recursion_depth_limit)?;
-    Ok(VecU8::from(out))
+    Ok(out.into_bytes())
 }
 
 fn append_json_escaped_string(s: &str, out: &mut String) {
@@ -59,12 +58,10 @@ fn append_json_from_yaml_node(
     out: &mut String,
     depth: i32,
     limit: i32,
-) -> Result<(), VecU8> {
+) -> Result<(), Vec<u8>> {
     if depth > limit {
-        return Err(VecU8::from(format!(
-            "YAML node hierarchy is too deep to parse, depth limit: {}",
-            limit
-        )));
+        return Err(format!("YAML node hierarchy is too deep to parse, depth limit: {}", limit)
+            .into_bytes());
     }
     match node {
         YamlOwned::Value(scalar) => match scalar {
@@ -114,7 +111,7 @@ fn append_json_from_yaml_node(
             for (i, (key, val)) in map.iter().enumerate() {
                 let key_str = match key.as_str() {
                     Some(s) => s,
-                    None => return Err(VecU8::from("YAML map key must be a string")),
+                    None => return Err(b"YAML map key must be a string".to_vec()),
                 };
                 if i > 0 {
                     out.push(',');
@@ -129,7 +126,7 @@ fn append_json_from_yaml_node(
             append_json_from_yaml_node(inner, out, depth, limit)?;
         }
         YamlOwned::Alias(_) | YamlOwned::Representation(..) | YamlOwned::BadValue => {
-            return Err(VecU8::from("Undefined YAML Node Type"));
+            return Err(b"Undefined YAML Node Type".to_vec());
         }
     }
     Ok(())

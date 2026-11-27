@@ -14,6 +14,9 @@
 #include "absl/strings/match.h"
 #include "absl/strings/string_view.h"
 #include "absl/types/span.h"
+#include "support/rs_std/option.h"
+#include "support/rs_std/result.h"
+#include "support/rs_std/vec.h"
 #include "crubit/rust.h"
 
 namespace security::pixel_bridge {
@@ -90,16 +93,14 @@ absl::string_view StringViewFromSpanU8(absl::Span<const uint8_t> data) {
 }
 
 absl::StatusOr<std::optional<std::string>> GetMetadata(
-    rs_std::Result<rs_std::Option<rust::vec_u8::VecU8>,
-                   rust::vec_u8::VecU8>
+    rs_std::Result<rs_std::Option<rs::Vec<uint8_t>>, rs::Vec<uint8_t>>
         result_stat) {
   if (!result_stat.has_value()) {
     // NOTE: b/351976355 - Find a better error code for this Rust error.
     return absl::InternalError(
         StringViewFromVecU8(std::move(result_stat).err()));
   }
-  std::optional<rust::vec_u8::VecU8> result_opt =
-      std::move(result_stat).value();
+  std::optional<rs::Vec<uint8_t>> result_opt = std::move(result_stat).value();
   if (!result_opt.has_value()) {
     return std::nullopt;
   }
@@ -248,10 +249,10 @@ bool ImageDecoder::IsAnimated() const { return decoder_.is_animated(); }
 
 absl::StatusOr<Frames> ImageDecoder::GetAllFrames() && {
   Format format = GetFormat();
-  rs_std::Result<rust::image::Frames, rust::vec_u8::VecU8>
-      result = std::move(decoder_).all_frames();
+  rs_std::Result<rust::image::Frames, rs::Vec<uint8_t>> result =
+      std::move(decoder_).all_frames();
   if (!result.has_value()) {
-    rust::vec_u8::VecU8 err_msg_vec = std::move(result).err();
+    rs::Vec<uint8_t> err_msg_vec = std::move(result).err();
     absl::string_view err_msg = StringViewFromVecU8(err_msg_vec);
     return absl::InternalError(err_msg);
   }
@@ -322,8 +323,7 @@ absl::StatusOr<std::optional<std::string>> ImageDecoder::GetIptcMetadata() {
 
 absl::StatusOr<ImageReader> ImageReader::NewFromFile(
     absl::string_view filepath) {
-  rs_std::Result<rust::reader::ImageReader,
-                 rust::vec_u8::VecU8>
+  rs_std::Result<rust::reader::ImageReader, rs::Vec<uint8_t>>
       reader = rust::reader::ImageReader::new_from_file(
           absl::Span<const uint8_t>(
               reinterpret_cast<const uint8_t*>(filepath.data()),
@@ -355,8 +355,7 @@ void ImageReader::SetFormat(Format format) {
 }
 
 absl::StatusOr<ImageDecoder> ImageReader::IntoDecoder() && {
-  rs_std::Result<rust::image::ImageDecoder,
-                 rust::vec_u8::VecU8>
+  rs_std::Result<rust::image::ImageDecoder, rs::Vec<uint8_t>>
       decoder = std::move(reader_).into_decoder();
   if (!decoder.has_value()) {
     return absl::InvalidArgumentError(

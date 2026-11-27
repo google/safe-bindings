@@ -15,6 +15,7 @@
 #include "absl/status/statusor.h"
 #include "absl/types/span.h"
 #include "support/rs_std/slice_ref.h"
+#include "support/rs_std/vec.h"
 
 namespace security::exif_bridge {
 
@@ -657,14 +658,14 @@ class ExifBytes final {
    * and escape from an inner scope are NOT diagnosed. See Field::value().
    */
   absl::Span<const uint8_t> view() const& ABSL_ATTRIBUTE_LIFETIME_BOUND {
-    return absl::Span<const uint8_t>(vec_.as_ptr(), vec_.len());
+    return absl::Span<const uint8_t>(vec_.data(), vec_.size());
   }
   absl::Span<const uint8_t> view() const&& = delete;
 
  private:
   friend class Writer;
-  explicit ExifBytes(rust::types::VecU8 vec) : vec_(std::move(vec)) {}
-  rust::types::VecU8 vec_;
+  explicit ExifBytes(rs::Vec<uint8_t> vec) : vec_(std::move(vec)) {}
+  rs::Vec<uint8_t> vec_;
 };
 
 /**
